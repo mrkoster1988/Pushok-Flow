@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'design/pushok_theme.dart';
 import 'dart:io' show Platform;
 import 'dart:async' show Timer;
@@ -103,7 +103,9 @@ class _FlowHomeState extends State<FlowHome> {
     try {
       await PushokAiMemory.clear();
       if (mounted) setState(() { feedback = {}; feedbackMessage = 'Локальная память очищена.'; });
-    } catch (_) { if (mounted) setState(() => feedbackMessage = 'Не удалось очистить память.'; }
+    } catch (_) {
+      if (mounted) setState(() => feedbackMessage = 'Не удалось очистить память.');
+    }
   }
 
   Future<void> _refreshProfileStatus() async {

@@ -3,7 +3,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ ! -f android/app/build.gradle.kts ]]; then
-  flutter create --platforms=android --org shop.pushok --project-name pushok_flow .
+  # Generate away from the app: flutter create also writes Dart templates,
+  # counter tests and analysis options which do not belong in this project.
+  scaffold_dir="$(mktemp -d "${TMPDIR:-/tmp}/pushok-flow-android.XXXXXX")"
+  trap 'rm -rf -- "$scaffold_dir"' EXIT
+  flutter create --no-pub --platforms=android --org shop.pushok \
+    --project-name pushok_flow "$scaffold_dir/project"
+  mkdir -p android
+  cp -a "$scaffold_dir/project/android/." android/
 fi
 mkdir -p android/app/src/main/kotlin/shop/pushok/flow
 cp native/android/app/src/main/kotlin/shop/pushok/flow/{MainActivity.kt,WireGuardRouting.kt,SecureWireGuardStore.kt,LocalDecisionMemory.kt,TunnelHealth.kt} android/app/src/main/kotlin/shop/pushok/flow/

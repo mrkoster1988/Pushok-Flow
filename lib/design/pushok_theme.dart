@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Единые визуальные правила Pushok (Flow, Proxy, Pushok ИИ).
 /// Цвета сверены с пользовательским эталонным скриншотом Proxy.
