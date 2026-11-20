@@ -1,0 +1,5 @@
+{
+  "wireguard_android_tunnel": "1.0.20260102",
+  "flutter": "3.50.0",
+  "notes": "Pinned audit baseline; updates require build and device verification."
+}
