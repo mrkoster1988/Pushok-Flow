@@ -113,6 +113,7 @@ class _FlowHomeState extends State<FlowHome> {
       final info = await WireGuardTunnel.diagnostics();
       if (mounted) setState(() {
         savedProfile = exists;
+        connected = info['connected'] == true;
         lastErrorCode = info['lastErrorCode'] as String?;
         uptimeSeconds = (info['uptimeSeconds'] as num?)?.toInt() ?? 0;
       });
