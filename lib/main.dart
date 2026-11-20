@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'design/pushok_theme.dart';
 import 'dart:io' show Platform;
+import 'dart:async' show Timer;
 import 'platform/android_app_routes.dart';
 import 'ai/pushok_ai.dart';
 import 'ai/pushok_ai_memory.dart';
@@ -36,6 +37,8 @@ class _FlowHomeState extends State<FlowHome> {
   String? routeError;
   bool savedProfile = false;
   String? lastErrorCode;
+  int uptimeSeconds = 0;
+  Timer? _healthPoll;
   bool connected = false;
   bool connecting = false;
   bool showWireGuardSecrets = false;
@@ -44,7 +47,7 @@ class _FlowHomeState extends State<FlowHome> {
   final wireGuardConfig = TextEditingController();
 
   Future<void> _toggleTunnel() async {
-    if (!Platform.isAndroid) return;
+    if (!Platform.isAndroid || connecting) return;
     setState(() { connecting = true; routeError = null; });
     try {
       if (connected) {
@@ -58,11 +61,13 @@ class _FlowHomeState extends State<FlowHome> {
       if (mounted) setState(() => routeError = 'Не удалось подключиться. Проверьте WireGuard-профиль и разрешение VPN.');
     } finally {
       if (mounted) setState(() => connecting = false);
+      await _refreshProfileStatus();
     }
   }
 
   @override
   void dispose() {
+    _healthPoll?.cancel();
     wireGuardConfig.dispose();
     super.dispose();
   }
@@ -73,6 +78,9 @@ class _FlowHomeState extends State<FlowHome> {
     _loadRoutes();
     _refreshProfileStatus();
     _loadAiFeedback();
+    _healthPoll = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (connected && !connecting && mounted) _refreshProfileStatus();
+    });
     if (Platform.isAndroid) WireGuardTunnel.connected.then((value) { if (mounted) setState(() => connected = value); }).catchError((_) {});
   }
 
@@ -106,6 +114,7 @@ class _FlowHomeState extends State<FlowHome> {
       if (mounted) setState(() {
         savedProfile = exists;
         lastErrorCode = info['lastErrorCode'] as String?;
+        uptimeSeconds = (info['uptimeSeconds'] as num?)?.toInt() ?? 0;
       });
     } catch (_) { // No secrets in UI diagnostics.
     }
@@ -171,7 +180,7 @@ class _FlowHomeState extends State<FlowHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.20.0'))]),
+      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.21.0'))]),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],
@@ -236,6 +245,10 @@ class _FlowHomeState extends State<FlowHome> {
       label: connecting ? 'Соединение устанавливается' : connected ? 'Трафик подключён' : 'Статус: отключено',
       icon: connecting ? Icons.sync : connected ? Icons.verified_user_outlined : Icons.circle,
       color: connecting ? PushokPalette.glowCyan : connected ? PushokPalette.mint : PushokPalette.orange)),
+    if (connected && uptimeSeconds > 0) Center(child: Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text('Время соединения: ${Duration(seconds: uptimeSeconds).inMinutes} мин ${uptimeSeconds % 60} сек',
+        style: const TextStyle(color: PushokPalette.muted, fontSize: 12)))),
     const SizedBox(height: 18),
     Row(children: [
       Expanded(child: _homeShortcut(Icons.dns_outlined, 'Серверы', 2)),
@@ -360,6 +373,6 @@ class _FlowHomeState extends State<FlowHome> {
       subtitle: Text('Единая авторизация — в разработке'))),
     const SizedBox(height: 12),
     card(const ListTile(leading: Icon(Icons.system_update_alt), title: Text('Версия и обновления'),
-      subtitle: Text('0.19.0 · тестовая версия; аудит библиотек через GitHub Actions'))),
+      subtitle: Text('0.21.0 · тестовая версия; аудит библиотек через GitHub Actions'))),
   ]);
 }
