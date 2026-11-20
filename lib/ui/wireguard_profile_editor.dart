@@ -52,6 +52,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
     if (config.length > _maxConfigLength) {
       return 'Профиль слишком большой: максимум 65 536 символов.';
     }
+    if (RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+        r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(config.trim())) {
+      return 'Вставлен UUID. Для WireGuard нужен полный текст файла .conf '
+          'с разделами [Interface] и [Peer].';
+    }
     return null;
   }
 
@@ -145,98 +150,103 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             border: Border.all(color: PushokPalette.glowCyan.withValues(alpha: .45)),
           ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(children: [
-                  const Expanded(child: Text('Профиль WireGuard',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
-                  IconButton(
-                    key: const Key('close_wireguard_profile'),
-                    tooltip: 'Закрыть',
-                    onPressed: _busy ? null : () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ]),
-                const SizedBox(height: 8),
-                const Text('Вставьте конфигурацию от вашего VPN-провайдера. '
-                  'Профиль сохраняется только на этом устройстве.',
-                  style: TextStyle(color: PushokPalette.muted)),
-                const SizedBox(height: 16),
-                TextField(
-                  key: const Key('wireguard_profile_field'),
-                  controller: _controller,
-                  enabled: !_busy,
-                  // A masked field must be single-line. Keyboard edits there
-                  // would remove every newline from a WireGuard configuration.
-                  // Explicit paste assigns the controller without that formatter.
-                  readOnly: !_showConfig,
-                  obscureText: !_showConfig,
-                  maxLines: _showConfig ? 6 : 1,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: _showConfig
-                      ? TextInputAction.newline : TextInputAction.done,
-                  enableInteractiveSelection: _showConfig,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  enableIMEPersonalizedLearning: false,
-                  smartDashesType: SmartDashesType.disabled,
-                  smartQuotesType: SmartQuotesType.disabled,
-                  onChanged: (_) {
-                    if (_error != null) setState(() => _error = null);
-                  },
-                  decoration: InputDecoration(
-                    labelText: 'Конфигурация WireGuard',
-                    helperText: _showConfig ? null
-                        : 'Вставьте профиль кнопкой ниже или откройте его значком глаза.',
-                    helperMaxLines: 2,
-                    suffixIcon: IconButton(
-                      key: const Key('toggle_wireguard_profile_visibility'),
-                      tooltip: _showConfig ? 'Скрыть конфигурацию' : 'Показать конфигурацию',
-                      onPressed: _busy ? null : _toggleVisibility,
-                      icon: Icon(_showConfig
-                          ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+          // ModalBottomSheetRoute's safe area does not include the bottom edge.
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [
+                    const Expanded(child: Text('Профиль WireGuard',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
+                    IconButton(
+                      key: const Key('close_wireguard_profile'),
+                      tooltip: 'Закрыть',
+                      onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                const Text('Вставьте полный текст файла .conf от вашего VPN-провайдера '
+                  'с разделами [Interface] и [Peer]. '
+                    'Профиль сохраняется только на этом устройстве.',
+                    style: TextStyle(color: PushokPalette.muted)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    key: const Key('wireguard_profile_field'),
+                    controller: _controller,
+                    enabled: !_busy,
+                    // A masked field must be single-line. Keyboard edits there
+                    // would remove every newline from a WireGuard configuration.
+                    // Explicit paste assigns the controller without that formatter.
+                    readOnly: !_showConfig,
+                    obscureText: !_showConfig,
+                    maxLines: _showConfig ? 6 : 1,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: _showConfig
+                        ? TextInputAction.newline : TextInputAction.done,
+                    enableInteractiveSelection: _showConfig,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    enableIMEPersonalizedLearning: false,
+                    smartDashesType: SmartDashesType.disabled,
+                    smartQuotesType: SmartQuotesType.disabled,
+                    onChanged: (_) {
+                      if (_error != null) setState(() => _error = null);
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'Конфигурация WireGuard',
+                      helperText: _showConfig ? null
+                          : 'Вставьте профиль кнопкой ниже или откройте его значком глаза.',
+                      helperMaxLines: 2,
+                      suffixIcon: IconButton(
+                        key: const Key('toggle_wireguard_profile_visibility'),
+                        tooltip: _showConfig ? 'Скрыть конфигурацию' : 'Показать конфигурацию',
+                        onPressed: _busy ? null : _toggleVisibility,
+                        icon: Icon(_showConfig
+                            ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    key: const Key('paste_wireguard_profile'),
-                    onPressed: _busy ? null : _paste,
-                    icon: _pasting
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      key: const Key('paste_wireguard_profile'),
+                      onPressed: _busy ? null : _paste,
+                      icon: _pasting
+                          ? const SizedBox(width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.content_paste_outlined),
+                      label: const Text('Вставить'),
+                    ),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(_error!,
+                        key: const Key('wireguard_profile_error'),
+                        style: const TextStyle(color: PushokPalette.orange)),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    key: const Key('save_wireguard_profile'),
+                    onPressed: _busy ? null : _save,
+                    icon: _saving
                         ? const SizedBox(width: 18, height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.content_paste_outlined),
-                    label: const Text('Вставить'),
-                  ),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Semantics(
-                    liveRegion: true,
-                    child: Text(_error!,
-                      key: const Key('wireguard_profile_error'),
-                      style: const TextStyle(color: PushokPalette.orange)),
+                        : Icon(widget.connectAfterSave
+                            ? Icons.power_settings_new : Icons.save_outlined),
+                    label: Text(widget.connectAfterSave
+                        ? 'Сохранить и подключить' : 'Сохранить профиль'),
                   ),
                 ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  key: const Key('save_wireguard_profile'),
-                  onPressed: _busy ? null : _save,
-                  icon: _saving
-                      ? const SizedBox(width: 18, height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : Icon(widget.connectAfterSave
-                          ? Icons.power_settings_new : Icons.save_outlined),
-                  label: Text(widget.connectAfterSave
-                      ? 'Сохранить и подключить' : 'Сохранить профиль'),
-                ),
-              ],
+              ),
             ),
           ),
         ),

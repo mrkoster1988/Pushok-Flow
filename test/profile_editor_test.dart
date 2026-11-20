@@ -113,6 +113,9 @@ void main() {
   for (final invalid in [
     ('blank', ' \n ', 'Вставьте конфигурацию WireGuard перед сохранением.'),
     ('oversized', 'x' * 65537, 'Профиль слишком большой: максимум 65 536 символов.'),
+    ('UUID', ' 00000000-0000-4000-8000-000000000000\n',
+      'Вставлен UUID. Для WireGuard нужен полный текст файла .conf '
+      'с разделами [Interface] и [Peer].'),
   ]) {
     testWidgets('${invalid.$1} input never reaches the save callback', (tester) async {
       var saves = 0;
@@ -240,6 +243,36 @@ void main() {
     expect(saves, 0);
     expect(closed, isTrue);
     expect(result, isNull);
+  });
+
+  testWidgets('Save stays above the system navigation area and remains tappable',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 48);
+    tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 48);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    String? saved;
+    String? result;
+    await _openEditor(tester,
+      initialConfig: _config,
+      onSave: (config) async { saved = config; },
+      onResult: (value) => result = value,
+    );
+    await tester.ensureVisible(find.byKey(_save));
+    await tester.pumpAndSettle();
+    final safeBottom = (tester.view.physicalSize.height - tester.view.padding.bottom)
+        / tester.view.devicePixelRatio;
+    expect(tester.getRect(find.byKey(_save)).bottom, lessThanOrEqualTo(safeBottom));
+    await tester.tap(find.byKey(_save));
+    await tester.pumpAndSettle();
+    expect(saved, _config);
+    expect(result, _config);
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Expanded config remains usable with a keyboard on a compact phone',

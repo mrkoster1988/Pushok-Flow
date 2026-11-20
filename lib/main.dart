@@ -323,7 +323,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.22.0'))]),
+      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.23.0'))]),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],
@@ -540,6 +540,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       subtitle: Text('Единая авторизация — в разработке'))),
     const SizedBox(height: 12),
     card(const ListTile(leading: Icon(Icons.system_update_alt), title: Text('Версия и обновления'),
-      subtitle: Text('0.22.0 · тестовая версия; аудит библиотек через GitHub Actions'))),
+      subtitle: Text('0.23.0 · тестовая версия; аудит библиотек через GitHub Actions'))),
   ]);
 }
