@@ -5,10 +5,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class PrivacyRegressionTests(unittest.TestCase):
     def test_profile_hidden_by_default(self):
-        src = (ROOT / 'lib/main.dart').read_text()
-        self.assertIn('bool showWireGuardSecrets = false;', src)
-        self.assertIn('obscureText: !showWireGuardSecrets', src)
-        self.assertIn('enableInteractiveSelection: showWireGuardSecrets', src)
+        src = (ROOT / 'lib/ui/wireguard_profile_editor.dart').read_text()
+        self.assertIn('bool _showConfig = false;', src)
+        self.assertIn('obscureText: !_showConfig', src)
+        self.assertIn('enableInteractiveSelection: _showConfig', src)
         self.assertIn('Icons.visibility_off_outlined', src)
 
     def test_exception_messages_do_not_expose_runtime_exception(self):

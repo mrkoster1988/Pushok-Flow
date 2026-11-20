@@ -144,6 +144,12 @@ class MainActivity : FlutterActivity() {
                             try {
                                 // Parse before storing; failure must not overwrite the existing profile.
                                 Config.parse(ByteArrayInputStream(config.toByteArray(StandardCharsets.UTF_8)))
+                            } catch (_: Exception) {
+                                // Parser exceptions can contain private profile data.
+                                runOnUiThread { result.error("INVALID_CONFIG", "Проверьте конфигурацию WireGuard", null) }
+                                return@execute
+                            }
+                            try {
                                 secureStore.save(config)
                                 runOnUiThread { result.success(true) }
                             } catch (_: Exception) {
@@ -168,8 +174,12 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "connectWireGuard" -> {
+                        val config = call.argument<String>("config")
                         if (pending != null || Session.operationInProgress.get()) {
                             result.error("VPN_BUSY", "Подключение уже выполняется", null)
+                        } else if (config.isNullOrBlank() || config.length > 65536) {
+                            // Do not show Android's VPN approval for an unusable profile.
+                            result.error("INVALID_CONFIG", "Нужна конфигурация WireGuard", null)
                         } else {
                             val approval = VpnService.prepare(this)
                             if (approval != null) {
