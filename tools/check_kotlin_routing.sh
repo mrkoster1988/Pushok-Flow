@@ -10,3 +10,6 @@ trap 'rm -rf "$out"' EXIT
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardRouting.kt \
   native/android/tests/WireGuardRoutingCheck.kt -include-runtime -d "$out/routing-tests.jar"
 java -jar "$out/routing-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/TunnelHealth.kt \
+  native/android/tests/TunnelHealthCheck.kt -include-runtime -d "$out/health-tests.jar"
+java -jar "$out/health-tests.jar"
