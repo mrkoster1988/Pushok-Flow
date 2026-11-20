@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pushok Flow routing rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rules_version", "recommended_bypass_packages"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "rules_version": {"type": "integer", "minimum": 0},
+    "recommended_bypass_packages": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+$"}
+    }
+  }
+}
