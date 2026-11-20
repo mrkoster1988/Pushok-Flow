@@ -1,0 +1,54 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Europe/Helsinki",
+  "schedule": [
+    "after 9pm and before 10pm every day"
+  ],
+  "labels": [
+    "dependencies",
+    "needs-review"
+  ],
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 4,
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "com.wireguard.android:tunnel"
+      ],
+      "groupName": "WireGuard VPN engine",
+      "automerge": false,
+      "labels": [
+        "dependencies",
+        "vpn-engine",
+        "device-test-required"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gradle",
+        "gradle-wrapper",
+        "github-actions",
+        "pub"
+      ],
+      "automerge": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/config/dependency-lock\\.json$/"
+      ],
+      "matchStrings": [
+        "\"wireguard_android_tunnel\"\\s*:\\s*\"(?<currentValue>[^\"\\s]+)\""
+      ],
+      "depNameTemplate": "com.wireguard.android:tunnel",
+      "datasourceTemplate": "maven",
+      "registryUrlTemplate": "https://repo.maven.apache.org/maven2"
+    }
+  ]
+}
