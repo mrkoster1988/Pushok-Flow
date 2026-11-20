@@ -1,0 +1,48 @@
+name: Dependency audit — Pushok Flow
+on:
+  workflow_dispatch:
+  schedule:
+    # 21:00 Europe/Helsinki: 18:00 UTC in summer and 19:00 UTC in winter.
+    - cron: '0 18 * * *'
+    - cron: '0 19 * * *'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check scheduled local time (DST-aware)
+        id: local_time
+        run: |
+          if [[ "${{ github.event_name }}" != "schedule" ]]; then
+            echo "run_audit=true" >> "$GITHUB_OUTPUT"
+          elif python tools/should_run_scheduled_audit.py; then
+            echo "run_audit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_audit=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate source and updates
+        if: steps.local_time.outputs.run_audit == 'true'
+        run: python -m unittest discover -s tests -v
+      - name: Check upstream versions (read-only)
+        if: steps.local_time.outputs.run_audit == 'true'
+        id: audit
+        continue-on-error: true
+        run: python tools/dependency_audit.py --output dependency-report.md
+      - name: Add job summary
+        if: steps.local_time.outputs.run_audit == 'true' && always()
+        run: cat dependency-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload report
+        if: steps.local_time.outputs.run_audit == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-dependency-report
+          path: dependency-report.md
+          if-no-files-found: warn
+      - name: Mark inability to check as failure
+        if: steps.local_time.outputs.run_audit == 'true' && steps.audit.outcome == 'failure'
+        run: exit 1
