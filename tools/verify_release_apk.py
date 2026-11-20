@@ -41,14 +41,45 @@ def parse_badging(text: str, version: str, code: int) -> dict[str, str | int]:
             "versionCode": code, "minSdk": 24}
 
 
+def parse_single_signer_certificate(text: str) -> str:
+    """Read verified apksigner output, including SDK 37's scheme-prefixed labels.
+
+    A certificate may be reported for several schemes, but every report must
+    identify the same signer. Rotation ranges, lineage, hybrid signers and
+    unknown certificate labels are deliberately unsupported by this channel.
+    """
+    lines = text.splitlines()
+    counts = [line for line in lines if line.startswith("Number of signers:")]
+    if len(counts) != 1 or not re.fullmatch(r"Number of signers:[ \t]*1[ \t]*", counts[0]):
+        raise ValueError("APK must have exactly one signing certificate")
+    v2 = [line for line in lines if line.startswith("Verified using v2 scheme ")]
+    if v2 != ["Verified using v2 scheme (APK Signature Scheme v2): true"]:
+        raise ValueError("APK v2 signature verification is required for supported Android versions")
+
+    # Older tools print 'Signer #1'; SDK 37 prints 'V2 Signer:' or
+    # 'V3.0 Signer:' for the same single-signer APK. Do not count public-key
+    # digests as certificate digests or silently ignore an unfamiliar signer.
+    certificate_lines = [line for line in lines if "certificate SHA-256 digest:" in line]
+    certificates = set()
+    labels = set()
+    for line in certificate_lines:
+        match = re.fullmatch(
+            r"(Signer #1|V(?:1|2|3\.0|3\.1) Signer:) certificate SHA-256 digest:"
+            r"[ \t]*([0-9a-fA-F]{64})[ \t]*", line)
+        if not match or match[1] in labels:
+            raise ValueError("Unsupported or repeated APK signing certificate report")
+        labels.add(match[1])
+        certificates.add(match[2].lower())
+    if len(certificates) != 1:
+        raise ValueError("APK must report the same single certificate for every signature scheme")
+    return certificates.pop()
+
+
 def parse_certificate(text: str, expected: str) -> str:
     if not re.fullmatch(r"[0-9a-f]{64}", expected):
         raise ValueError("Expected public signing-certificate SHA-256 is missing")
-    certificates = re.findall(r"(?m)^Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$", text)
-    if len(certificates) != 1 or certificates[0].lower() != expected:
+    if parse_single_signer_certificate(text) != expected:
         raise ValueError("APK signer differs from the configured persistent release key")
-    if not re.search(r"(?m)^Verified using v2 scheme \(APK Signature Scheme v2\): true\s*$", text):
-        raise ValueError("APK v2 signature verification is required for supported Android versions")
     return expected
 
 

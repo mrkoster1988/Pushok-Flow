@@ -120,11 +120,71 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_certificate_must_match_and_have_verified_v2_signature(self):
         valid = 'Verified using v2 scheme (APK Signature Scheme v2): true\n' \
+            'Number of signers: 1\n' \
             f'Signer #1 certificate SHA-256 digest: {self.certificate}\n'
         self.assertEqual(release.parse_certificate(valid, self.certificate), self.certificate)
         for bad in (valid.replace('true', 'false'), valid.replace(self.certificate, 'cd' * 32),
                     valid + f'Signer #2 certificate SHA-256 digest: {self.certificate}\n'):
             with self.subTest(signature=bad):
+                with self.assertRaises(ValueError):
+                    release.parse_certificate(bad, self.certificate)
+
+    def test_actual_sdk37_v2_and_v3_certificate_reports_are_supported(self):
+        # Observed with official Build Tools 37.0.0 on an existing debug APK,
+        # then on a disposable copy signed with a temporary v2+v3 test key.
+        reports = (
+            ('V2 Signer:', False,
+             'a8f87d13782ffcd8d98c3c6006219d8d754caf5e8b2914b26985caaa41f78198'),
+            ('V3.0 Signer:', True,
+             '38b80d4a9dd4b86d2abba200703dfb6ca343589c2441108c8161b644803fd3f9'),
+        )
+        for label, v3, certificate in reports:
+            with self.subTest(label=label):
+                report = (
+                    'Verifies\n'
+                    'Verified using v1 scheme (JAR signing): false\n'
+                    'Verified using v2 scheme (APK Signature Scheme v2): true\n'
+                    f'Verified using v3 scheme (APK Signature Scheme v3): {str(v3).lower()}\n'
+                    'Verified using v3.1 scheme (APK Signature Scheme v3.1): false\n'
+                    'Verified using v3.2 scheme (APK Signature Scheme v3.2): false\n'
+                    'Verified using v4 scheme (APK Signature Scheme v4): false\n'
+                    'Verified for SourceStamp: false\n'
+                    'Number of signers: 1\n'
+                    f'{label} certificate SHA-256 digest: {certificate}\n'
+                    f'{label} public key SHA-256 digest: {"cd" * 32}\n'
+                )
+                self.assertEqual(release.parse_single_signer_certificate(report), certificate)
+                self.assertEqual(release.parse_certificate(report, certificate), certificate)
+                with self.assertRaises(ValueError):
+                    release.parse_certificate(report, self.certificate)
+
+    def test_scheme_reports_must_share_one_certificate(self):
+        header = 'Verified using v2 scheme (APK Signature Scheme v2): true\nNumber of signers: 1\n'
+        v2 = f'V2 Signer: certificate SHA-256 digest: {self.certificate}\n'
+        v3 = f'V3.0 Signer: certificate SHA-256 digest: {self.certificate}\n'
+        v31 = f'V3.1 Signer: certificate SHA-256 digest: {self.certificate}\n'
+        self.assertEqual(release.parse_certificate(header + v2 + v3 + v31, self.certificate),
+                         self.certificate)
+        for bad in (header + v2 + v3.replace(self.certificate, 'cd' * 32),
+                    header + v2 + v2, header + v2 + v3 + v31.replace(self.certificate, 'cd' * 32)):
+            with self.subTest(report=bad):
+                with self.assertRaises(ValueError):
+                    release.parse_certificate(bad, self.certificate)
+
+    def test_signer_count_unknown_labels_and_rotation_fail_closed(self):
+        valid = 'Verified using v2 scheme (APK Signature Scheme v2): true\n' \
+            'Number of signers: 1\n' \
+            f'V2 Signer: certificate SHA-256 digest: {self.certificate}\n'
+        bad_reports = [valid.replace('Number of signers: 1\n', count) for count in (
+            '', 'Number of signers: 0\n', 'Number of signers: 2\n',
+            'Number of signers: 1\nNumber of signers: 1\n')]
+        bad_reports += [valid.replace('V2 Signer:', label) for label in (
+            'Signer #2', 'Unknown Signer:', 'Source Stamp Signer:', 'Signer #1 in lineage',
+            'V3.0 Signer: (minSdkVersion=28, maxSdkVersion=32)',
+            'V3.2 Hybrid Classical Signer:')]
+        bad_reports += [valid + f'Unknown Signer: certificate SHA-256 digest: {self.certificate}\n']
+        for bad in bad_reports:
+            with self.subTest(report=bad):
                 with self.assertRaises(ValueError):
                     release.parse_certificate(bad, self.certificate)
 
