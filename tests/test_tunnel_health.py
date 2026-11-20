@@ -20,6 +20,7 @@ class TunnelHealthTests(unittest.TestCase):
         ui = (ROOT / 'lib/main.dart').read_text()
         self.assertIn('_healthPoll?.cancel()', ui)
         self.assertIn('Timer.periodic', ui)
+        self.assertIn("connected = info['connected'] == true", ui)
 
 if __name__ == '__main__':
     unittest.main()
