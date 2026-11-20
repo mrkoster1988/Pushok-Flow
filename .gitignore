@@ -1,0 +1,11 @@
+.dart_tool/
+.flutter-plugins*
+.packages
+build/
+.idea/
+*.iml
+android/.gradle/
+**/local.properties
+.env
+*.key
+*.p12
