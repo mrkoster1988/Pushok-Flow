@@ -58,9 +58,11 @@ Future<void> _tapSave(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('Paste is explicit and preserves multiline config while masked',
+  testWidgets('Masked paste and save preserve multiline config without a keyboard',
       (tester) async {
     var clipboardReads = 0;
+    String? saved;
+    String? result;
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -72,9 +74,16 @@ void main() {
     });
     addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
 
-    await _openEditor(tester, onSave: (_) async {});
+    await _openEditor(tester,
+      onSave: (config) async { saved = config; },
+      onResult: (value) => result = value,
+    );
     expect(clipboardReads, 0);
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(tester.widget<TextField>(find.byKey(_field)).readOnly, isTrue);
+    await tester.tap(find.byKey(_field));
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isFalse);
     await tester.tap(find.byKey(_paste));
     await tester.pumpAndSettle();
 
@@ -82,13 +91,22 @@ void main() {
     expect(clipboardReads, 1);
     expect(field.controller!.text, _config);
     expect(field.obscureText, isTrue);
+    expect(field.readOnly, isTrue);
     expect(field.maxLines, 1);
     await tester.tap(find.byKey(_visibility));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
+    expect(tester.widget<TextField>(find.byKey(_field)).readOnly, isFalse);
     await tester.tap(find.byKey(_visibility));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(tester.widget<TextField>(find.byKey(_field)).readOnly, isTrue);
+    expect(tester.testTextInput.isVisible, isFalse);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saved, _config);
+    expect(result, _config);
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

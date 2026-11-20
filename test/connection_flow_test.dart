@@ -148,10 +148,17 @@ void main() {
   });
 
   testWidgets('Save and connect persists the new profile before starting VPN', (tester) async {
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return {'text': _profile};
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await _withApp(tester, () async {
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('wireguard_profile_field')), _profile);
+      await tester.tap(find.byKey(const Key('paste_wireguard_profile')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(bridge.named('saveWireGuardProfile'), hasLength(1));
@@ -168,6 +175,8 @@ void main() {
     bridge.saveError = PlatformException(code: 'INVALID_CONFIG', message: 'SECRET_MUST_NOT_APPEAR');
     await _withApp(tester, () async {
       await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('toggle_wireguard_profile_visibility')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('wireguard_profile_field')), '[broken]');
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));

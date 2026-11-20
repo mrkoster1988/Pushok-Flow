@@ -127,6 +127,12 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
     }
   }
 
+  void _toggleVisibility() {
+    if (_busy) return;
+    if (_showConfig) FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _showConfig = !_showConfig);
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope<String>(
@@ -164,6 +170,10 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
                   key: const Key('wireguard_profile_field'),
                   controller: _controller,
                   enabled: !_busy,
+                  // A masked field must be single-line. Keyboard edits there
+                  // would remove every newline from a WireGuard configuration.
+                  // Explicit paste assigns the controller without that formatter.
+                  readOnly: !_showConfig,
                   obscureText: !_showConfig,
                   maxLines: _showConfig ? 6 : 1,
                   keyboardType: TextInputType.multiline,
@@ -180,11 +190,13 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
                   },
                   decoration: InputDecoration(
                     labelText: 'Конфигурация WireGuard',
+                    helperText: _showConfig ? null
+                        : 'Вставьте профиль кнопкой ниже или откройте его значком глаза.',
+                    helperMaxLines: 2,
                     suffixIcon: IconButton(
                       key: const Key('toggle_wireguard_profile_visibility'),
                       tooltip: _showConfig ? 'Скрыть конфигурацию' : 'Показать конфигурацию',
-                      onPressed: _busy ? null
-                          : () => setState(() => _showConfig = !_showConfig),
+                      onPressed: _busy ? null : _toggleVisibility,
                       icon: Icon(_showConfig
                           ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                     ),
