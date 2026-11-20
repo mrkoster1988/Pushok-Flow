@@ -342,7 +342,11 @@ void main() {
         final message = tester.widget<Text>(
             find.byKey(const Key('app_update_error'))).data!;
         expect(message, isNot(contains('SECRET')));
-        expect(message.toLowerCase(), isNot(contains('удал')));
+        expect(message.toLowerCase(), allOf(
+          isNot(contains('удалить')),
+          isNot(contains('удаление')),
+          isNot(contains('переустанов')),
+        ));
         expect(find.byKey(const Key('install_app_update')), findsNothing);
         expect(find.byKey(const Key('check_app_updates')), findsOneWidget);
       });
