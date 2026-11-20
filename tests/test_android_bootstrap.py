@@ -109,7 +109,22 @@ dependencies {
         manifest = self.patch()
         self.assertEqual(len(manifest.findall("queries/intent")), 1)
         self.assertEqual(len(self.launcher_queries(manifest)), 1)
-        self.assertEqual(len(manifest.findall("uses-permission")), 1)
+        self.assertEqual(sorted(p.get(ANDROID + "name") for p in manifest.findall("uses-permission")),
+                         ["android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"])
+
+    def test_update_provider_is_private_and_preserves_other_providers(self):
+        self.write_manifest(services='''<provider android:name="shop.pushok.flow.UpdateFileProvider"
+            android:exported="true" android:authorities="old.updates" />
+            <provider android:name="example.OtherProvider" android:authorities="other" />''')
+        app = self.patch().find("application")
+        providers = app.findall("provider")
+        self.assertEqual(len(providers), 2)
+        provider = next(p for p in providers if p.get(ANDROID + "name") == PATCH.UPDATE_PROVIDER)
+        self.assertEqual(provider.get(ANDROID + "exported"), "false")
+        self.assertEqual(provider.get(ANDROID + "grantUriPermissions"), "true")
+        self.assertEqual(provider.get(ANDROID + "authorities"), "${applicationId}.updates")
+        self.assertEqual(provider.find("meta-data").get(ANDROID + "resource"), "@xml/update_paths")
+        self.assertEqual(app.get(ANDROID + "label"), "Pushok Flow")
 
     def test_removes_only_legacy_vpn_service_and_disables_existing_backup(self):
         for legacy in (
@@ -159,12 +174,16 @@ class BootstrapScriptTests(unittest.TestCase):
 
         self.native_names = (
             "MainActivity.kt", "WireGuardRouting.kt", "SecureWireGuardStore.kt",
-            "LocalDecisionMemory.kt", "TunnelHealth.kt",
+            "LocalDecisionMemory.kt", "TunnelHealth.kt", "AppUpdates.kt", "UpdatePolicy.kt",
         )
         native = self.project / "native/android/app/src/main/kotlin/shop/pushok/flow"
         native.mkdir(parents=True)
         for name in self.native_names:
             (native / name).write_text(f"// Pushok native {name}\n", encoding="utf-8")
+        native_resources = self.project / "native/android/app/src/main/res/xml"
+        native_resources.mkdir(parents=True)
+        (native_resources / "update_paths.xml").write_text(
+            '<paths><cache-path name="updates" path="updates/" /></paths>\n', encoding="utf-8")
 
         # The fake executable emits Android files plus the real create command's
         # unrelated app/test templates. The bootstrap must copy only Android.
@@ -251,6 +270,8 @@ sys.exit(int(os.environ.get("FLOW_STUB_EXIT", "0")))
         self.assertTrue((android / "gradlew").stat().st_mode & 0o100)
         self.assertTrue((android / "gradle/wrapper/gradle-wrapper.properties").exists())
         self.assertFalse((android / "app/src/main/kotlin/shop/pushok/pushok_flow/MainActivity.kt").exists())
+        self.assertEqual((android / "app/src/main/res/xml/update_paths.xml").read_text(),
+                         '<paths><cache-path name="updates" path="updates/" /></paths>\n')
         for name in self.native_names:
             self.assertEqual((android / "app/src/main/kotlin/shop/pushok/flow" / name).read_text(),
                              f"// Pushok native {name}\n")

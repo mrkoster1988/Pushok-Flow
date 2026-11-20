@@ -42,10 +42,21 @@ class MainActivity : FlutterActivity() {
         set(value) { Session.connected = value }
     private val secureStore by lazy { SecureWireGuardStore(applicationContext) }
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
+    private val appUpdates by lazy { AppUpdates(this) }
     private var lastErrorCode: String?
         get() = Session.lastErrorCode
         set(value) { Session.lastErrorCode = value }
     private val vpnRequestCode = 7341
+
+    override fun onResume() {
+        super.onResume()
+        appUpdates.setForeground(true)
+    }
+
+    override fun onPause() {
+        appUpdates.setForeground(false)
+        super.onPause()
+    }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -92,6 +103,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        appUpdates.dispose()
         // Android may recreate the Activity while the VPN permission dialog is open.
         // A MethodChannel.Result owned by the destroyed Activity must not be left pending.
         // Fail closed and let the user retry from the new screen; never start a tunnel
@@ -109,6 +121,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

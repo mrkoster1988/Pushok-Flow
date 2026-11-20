@@ -170,8 +170,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
                     ),
                   ]),
                   const SizedBox(height: 8),
-                const Text('Вставьте полный текст файла .conf от вашего VPN-провайдера '
-                  'с разделами [Interface] и [Peer]. '
+                  const Text('Вставьте полный текст файла .conf от вашего VPN-провайдера '
+                    'с разделами [Interface] и [Peer]. '
                     'Профиль сохраняется только на этом устройстве.',
                     style: TextStyle(color: PushokPalette.muted)),
                   const SizedBox(height: 16),

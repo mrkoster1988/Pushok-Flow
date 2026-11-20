@@ -13,7 +13,9 @@ if [[ ! -f android/app/build.gradle.kts ]]; then
   cp -a "$scaffold_dir/project/android/." android/
 fi
 mkdir -p android/app/src/main/kotlin/shop/pushok/flow
-cp native/android/app/src/main/kotlin/shop/pushok/flow/{MainActivity.kt,WireGuardRouting.kt,SecureWireGuardStore.kt,LocalDecisionMemory.kt,TunnelHealth.kt} android/app/src/main/kotlin/shop/pushok/flow/
+cp native/android/app/src/main/kotlin/shop/pushok/flow/{MainActivity.kt,WireGuardRouting.kt,SecureWireGuardStore.kt,LocalDecisionMemory.kt,TunnelHealth.kt,AppUpdates.kt,UpdatePolicy.kt} android/app/src/main/kotlin/shop/pushok/flow/
+mkdir -p android/app/src/main/res
+cp -a native/android/app/src/main/res/. android/app/src/main/res/
 # flutter create --org shop.pushok --project-name pushok_flow generates a stub
 # in shop/pushok/pushok_flow. Remove it: one launcher Activity only.
 rm -f android/app/src/main/kotlin/shop/pushok/pushok_flow/MainActivity.kt

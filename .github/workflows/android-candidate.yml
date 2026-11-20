@@ -1,0 +1,208 @@
+name: Android release candidate for persistent signing
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pushok-flow-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Capture build environment
+        run: |
+          set -o pipefail
+          mkdir -p candidate-diagnostics candidate-dist sdk-tools-dist
+          flutter --version | tee candidate-diagnostics/flutter-version.txt
+          java -version 2>&1 | tee candidate-diagnostics/java-version.txt
+      - name: Preserve official SDK tools for local signing and verification
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, platform, re, shutil, subprocess, tarfile, tempfile
+          from pathlib import Path
+          sdk = Path(os.environ.get('ANDROID_HOME') or os.environ['ANDROID_SDK_ROOT'])
+          candidates = [path for path in (sdk / 'build-tools').iterdir()
+                        if path.is_dir() and re.fullmatch(r'\d+\.\d+\.\d+', path.name)]
+          candidates.sort(key=lambda path: tuple(map(int, path.name.split('.'))), reverse=True)
+          required = ('apksigner', 'lib/apksigner.jar', 'aapt', 'zipalign', 'source.properties')
+          source = next((path for path in candidates if all((path / name).is_file() for name in required)), None)
+          if source is None:
+              raise SystemExit('A complete stable Android SDK build-tools installation is required.')
+          if platform.system() != 'Linux' or platform.machine() not in ('x86_64', 'amd64'):
+              raise SystemExit('The SDK transfer artifact requires Linux x86_64.')
+          output = Path('sdk-tools-dist')
+          with tempfile.TemporaryDirectory(prefix='pushok-sdk-', dir=os.environ['RUNNER_TEMP']) as work:
+              tree = Path(work) / 'android-build-tools' / source.name
+              tree.mkdir(parents=True)
+              for name in required:
+                  destination = tree / name
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source / name, destination)
+              for name in ('lib64',):
+                  if (source / name).is_dir():
+                      shutil.copytree(source / name, tree / name)
+              for name in ('NOTICE.txt', 'NOTICE'):
+                  if (source / name).is_file():
+                      shutil.copy2(source / name, tree / name)
+              files = {}
+              for path in sorted(tree.rglob('*')):
+                  if path.is_file():
+                      with path.open('rb') as item:
+                          files[str(path.relative_to(Path(work)))] = hashlib.file_digest(item, 'sha256').hexdigest()
+              archive = output / 'android-build-tools-linux-x86_64.tar.gz'
+              with tarfile.open(archive, 'w:gz') as bundle:
+                  bundle.add(Path(work) / 'android-build-tools', arcname='android-build-tools')
+          def version(command):
+              result = subprocess.run(command, capture_output=True, text=True, check=True)
+              return (result.stdout + result.stderr).strip()
+          metadata = {
+              'buildToolsVersion': source.name,
+              'relativeToolsPath': f'android-build-tools/{source.name}',
+              'platform': 'linux-x86_64',
+              'sourceCommit': os.environ['GITHUB_SHA'],
+              'sourceProperties': (source / 'source.properties').read_text(),
+              'apksignerVersion': version([str(source / 'apksigner'), 'version']),
+              'aaptVersion': version([str(source / 'aapt'), 'version']),
+              'javaVersion': version(['java', '-version']),
+              'filesSha256': files,
+          }
+          (output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          checksums = []
+          for path in (archive, output / 'metadata.json'):
+              with path.open('rb') as item:
+                  checksums.append(hashlib.file_digest(item, 'sha256').hexdigest() + '  ' + path.name)
+          (output / 'SHA256SUMS').write_text('\n'.join(checksums) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as environment:
+              environment.write(f'PUSHOK_SDK_BUILD_TOOLS={source}\n')
+          print(f'Official Android SDK build-tools {source.name} preserved for Linux x86_64.')
+          PY
+      - name: Upload official SDK signing tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-android-signing-tools
+          path: sdk-tools-dist/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Source checks
+        run: python3 -m unittest discover -s tests -v
+      - name: Generate Android project
+        run: |
+          set -o pipefail
+          bash tools/bootstrap_android.sh 2>&1 | tee candidate-diagnostics/bootstrap.log
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Install pinned Kotlin CLI
+        run: |
+          set -euo pipefail
+          KOTLIN_VERSION=2.2.21
+          curl --fail --location --retry 3 \
+            "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip" \
+            --output /tmp/pushok-kotlin.zip
+          mkdir -p "$RUNNER_TEMP/pushok-kotlin"
+          unzip -q /tmp/pushok-kotlin.zip -d "$RUNNER_TEMP/pushok-kotlin"
+          echo "$RUNNER_TEMP/pushok-kotlin/kotlinc/bin" >> "$GITHUB_PATH"
+      - name: Validate Kotlin routing and update rules
+        run: bash tools/check_kotlin_routing.sh
+      - name: Flutter static analysis
+        run: |
+          set -o pipefail
+          flutter analyze lib test 2>&1 | tee candidate-diagnostics/flutter-analyze.log
+      - name: Flutter tests
+        run: |
+          set -o pipefail
+          flutter test --reporter expanded 2>&1 | tee candidate-diagnostics/flutter-test.log
+      - name: Validate app manifest
+        run: python3 tools/check_android_manifest.py
+      - name: Build release candidate with a temporary build key
+        run: |
+          set -o pipefail
+          # This candidate is never published or installed as the trusted release.
+          # The generated Flutter template uses its temporary debug signing key.
+          flutter build apk --release 2>&1 | tee candidate-diagnostics/flutter-build.log
+      - name: Verify candidate package and preserve exact bytes
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, shutil, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools')
+          from verify_android_apk import check_apk
+          from verify_release_apk import MAX_APK_BYTES, parse_badging, parse_certificate, read_version
+          apk = Path('build/app/outputs/flutter-apk/app-release.apk')
+          if not apk.is_file() or not 0 < apk.stat().st_size <= MAX_APK_BYTES:
+              raise SystemExit('Missing, empty or oversized candidate APK.')
+          toolchain = Path(os.environ['PUSHOK_SDK_BUILD_TOOLS'])
+          aapt = str(toolchain / 'aapt')
+          check_apk(apk, aapt)
+          version, code = read_version(Path('pubspec.yaml'))
+          badging = subprocess.run([aapt, 'dump', 'badging', str(apk)], capture_output=True, text=True, check=True)
+          metadata = parse_badging(badging.stdout, version, code)
+          signature = subprocess.run([str(toolchain / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)],
+                                     capture_output=True, text=True, check=True)
+          certificates = re.findall(r'(?m)^Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$', signature.stdout)
+          if len(certificates) != 1:
+              raise SystemExit('Candidate must have one temporary signer.')
+          temporary_certificate = parse_certificate(signature.stdout, certificates[0].lower())
+          subprocess.run([str(toolchain / 'zipalign'), '-c', '-P', '16', '4', str(apk)], check=True)
+          Path('candidate-diagnostics/apk-signature.txt').write_text(signature.stdout)
+          Path('candidate-diagnostics/apk-badging.txt').write_text(badging.stdout)
+          with apk.open('rb') as item:
+              digest = hashlib.file_digest(item, 'sha256').hexdigest()
+          output = Path('candidate-dist')
+          name = f'Pushok-Flow-v{version}-candidate.apk'
+          shutil.copyfile(apk, output / name)
+          (output / (name + '.sha256')).write_text(f'{digest}  {name}\n')
+          metadata.update({
+              'kind': 'release-candidate', 'trustedRelease': False,
+              'requiresPersistentSigning': True, 'sourceCommit': os.environ['GITHUB_SHA'],
+              'temporaryCertificateSha256': temporary_certificate,
+              'sha256': digest, 'sizeBytes': apk.stat().st_size,
+          })
+          (output / 'candidate.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          (output / 'README.txt').write_text(
+              'Build candidate only. Do not publish or install this APK as a Pushok Flow release.\n'
+              'Re-sign with the retained permanent key, run tools/verify_release_apk.py with the expected certificate,\n'
+              'then run tools/create_update_manifest.py before publishing APK, SHA-256 and update.json.\n')
+          print(f'Release-mode candidate {version} ({code}) verified; persistent local signing is still required.')
+          print(f'Candidate SHA-256: {digest}')
+          PY
+      - name: Upload release candidate for persistent local signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-release-candidate
+          path: candidate-dist/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload candidate diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-candidate-diagnostics
+          path: candidate-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14

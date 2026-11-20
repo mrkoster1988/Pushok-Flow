@@ -9,3 +9,11 @@ android/.gradle/
 .env
 *.key
 *.p12
+*.jks
+*.keystore
+**/key.properties
+**/signing-recovery.json
+Pushok-Flow-signing-recovery.zip
+__pycache__/
+*.pyc
+dist/
