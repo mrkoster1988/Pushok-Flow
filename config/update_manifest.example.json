@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "channel": "stable",
+  "app": {
+    "android": {
+      "version": "0.1.1",
+      "build": 2,
+      "store_url": "https://play.google.com/store/apps/details?id=EXAMPLE_NOT_PUBLISHED"
+    },
+    "ios": {
+      "version": "0.1.1",
+      "build": 2,
+      "store_url": "https://apps.apple.com/app/EXAMPLE_NOT_PUBLISHED"
+    }
+  },
+  "rules": {
+    "version": 2,
+    "sha256": "PLACEHOLDER_REPLACE_WITH_REAL_DIGEST",
+    "url": "https://updates.example.invalid/routing/v2.json"
+  },
+  "published_at": "2026-11-19T00:00:00Z",
+  "signature": "PLACEHOLDER_SIGNED_MANIFEST_REQUIRED"
+}
