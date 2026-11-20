@@ -1,5 +1,6 @@
 package shop.pushok.flow
 
+import android.os.SystemClock
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
@@ -28,6 +29,7 @@ class MainActivity : FlutterActivity() {
         }
         @Volatile var backend: GoBackend? = null
         @Volatile var connected = false
+        @Volatile var connectedSinceElapsedMs: Long? = null
         @Volatile var lastErrorCode: String? = null
         val operationInProgress = AtomicBoolean(false)
     }
@@ -74,10 +76,12 @@ class MainActivity : FlutterActivity() {
                 if (backend == null) backend = GoBackend(applicationContext)
                 val state = backend!!.setState(tunnel, Tunnel.State.UP, config)
                 connected = state == Tunnel.State.UP
+                Session.connectedSinceElapsedMs = if (connected) SystemClock.elapsedRealtime() else null
                 lastErrorCode = null
                 runOnUiThread { result.success(mapOf("connected" to connected)) }
             } catch (error: Exception) {
                 connected = false
+                Session.connectedSinceElapsedMs = null
                 lastErrorCode = "WG_CONNECT_FAILED"
                 // Never send raw exceptions: they might include the private key or full configuration.
                 runOnUiThread { result.error("WG_CONNECT_FAILED", "Не удалось установить туннель. Проверьте параметры сервера.", null) }
@@ -111,7 +115,10 @@ class MainActivity : FlutterActivity() {
                     "vpnStatus" -> io.execute {
                         val active = try { backend?.getState(tunnel) == Tunnel.State.UP } catch (_: Exception) { connected }
                         connected = active
-                        runOnUiThread { result.success(mapOf("connected" to active, "lastErrorCode" to lastErrorCode)) }
+                        if (!active) Session.connectedSinceElapsedMs = null
+                        val status = TunnelHealth.snapshot(active, Session.operationInProgress.get(),
+                            Session.connectedSinceElapsedMs, SystemClock.elapsedRealtime(), lastErrorCode)
+                        runOnUiThread { result.success(status) }
                     }
                     "savedProfileExists" -> result.success(secureStore.exists())
                     "aiFeedbackSummary" -> result.success(decisionMemory.summary())
@@ -178,6 +185,7 @@ class MainActivity : FlutterActivity() {
                             try {
                                 backend?.setState(tunnel, Tunnel.State.DOWN, null)
                                 connected = false
+                                Session.connectedSinceElapsedMs = null
                                 runOnUiThread { result.success(mapOf("connected" to false)) }
                             } catch (_: Exception) {
                                 runOnUiThread { result.error("WG_DISCONNECT_FAILED", "Не удалось отключить туннель", null) }
