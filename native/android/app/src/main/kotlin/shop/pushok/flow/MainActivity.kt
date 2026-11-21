@@ -44,6 +44,7 @@ class MainActivity : FlutterActivity() {
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
     private val appUpdates by lazy { AppUpdates(this) }
     private val profileScreenProtection by lazy { ProfileScreenProtection(this) }
+    private val profileImport by lazy { WireGuardProfileImport(this) { profileScreenProtection.isActive } }
     private var lastErrorCode: String?
         get() = Session.lastErrorCode
         set(value) { Session.lastErrorCode = value }
@@ -61,6 +62,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (profileImport.onActivityResult(requestCode, resultCode, data)) return
         if (requestCode != vpnRequestCode) return
         val item = pending ?: return
         pending = null
@@ -104,6 +106,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        profileImport.dispose()
         appUpdates.dispose()
         profileScreenProtection.dispose()
         // Android may recreate the Activity while the VPN permission dialog is open.
@@ -122,6 +125,7 @@ class MainActivity : FlutterActivity() {
     private val prefs by lazy { getSharedPreferences("pushok_flow_routes", MODE_PRIVATE) }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        profileImport.dispose()
         profileScreenProtection.dispose()
         super.cleanUpFlutterEngine(flutterEngine)
     }
@@ -133,6 +137,11 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "importWireGuardProfile" -> profileImport.open(result)
+                    "cancelWireGuardProfileImport" -> {
+                        profileImport.cancel()
+                        result.success(true)
+                    }
                     "vpnStatus" -> io.execute {
                         val currentBackend = backend
                         var stateKnown = true

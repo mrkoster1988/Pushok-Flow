@@ -26,6 +26,12 @@ class ProfileScreenProtection(private val activity: Activity) {
     private var ownsWindowProtection = false
     private var windowWasSecure = false
 
+    /** Platform-thread check before importing secrets into the protected editor. */
+    val isActive: Boolean get() = policy?.let {
+        it.owns(ownerId) && it.required && !activity.isDestroyed && !activity.isFinishing &&
+            (activity.window.attributes.flags and SECURE) != 0
+    } == true
+
     fun register(engine: FlutterEngine) {
         check(channel == null) { "Profile protection is already registered" }
         val state = policies.getOrPut(engine) { ProfileProtectionPolicy() }

@@ -12,6 +12,7 @@ const _config = '[Interface]\nPrivateKey = ui-test-key\n'
 const _field = Key('wireguard_profile_field');
 const _save = Key('save_wireguard_profile');
 const _paste = Key('paste_wireguard_profile');
+const _import = Key('import_wireguard_profile');
 const _close = Key('close_wireguard_profile');
 const _visibility = Key('toggle_wireguard_profile_visibility');
 
@@ -22,10 +23,17 @@ Future<void> _openEditor(
   String? initialError,
   bool connectAfterSave = false,
   ValueChanged<String?>? onResult,
+  Future<String?> Function()? onImport,
+  Future<void> Function()? onCancelImport,
+  double textScale = 1,
 }) async {
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   await tester.pumpWidget(MaterialApp(
     theme: buildPushokTheme(),
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+      child: child!,
+    ),
     home: Scaffold(body: Builder(builder: (context) => Center(
       child: TextButton(
         onPressed: () async {
@@ -39,6 +47,8 @@ Future<void> _openEditor(
               initialConfig: initialConfig,
               initialError: initialError,
               onSave: onSave,
+              onImport: onImport,
+              onCancelImport: onCancelImport,
               connectAfterSave: connectAfterSave,
             ),
           );
@@ -475,6 +485,308 @@ void main() {
     await _tapSave(tester);
     await tester.pumpAndSettle();
     expect(result, _config);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Import replaces only a hidden draft until explicit save',
+      (tester) async {
+    const imported = '$_config\n# Imported draft\r\n';
+    var reads = 0;
+    var saves = 0;
+    var cancels = 0;
+    String? saved;
+    String? result;
+    await _openEditor(tester,
+      initialConfig: _config,
+      connectAfterSave: true,
+      onImport: () async { reads++; return imported; },
+      onCancelImport: () async { cancels++; },
+      onSave: (config) async { saves++; saved = config; },
+      onResult: (value) => result = value,
+    );
+    expect(reads, 0);
+    await tester.tap(find.byKey(_visibility));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(_import));
+    await tester.tap(find.byKey(_import));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byKey(_field));
+    expect(reads, 1);
+    expect(saves, 0);
+    expect(result, isNull);
+    expect(field.controller!.text, imported);
+    expect(field.obscureText, isTrue);
+    expect(field.readOnly, isTrue);
+    expect(field.focusNode!.hasFocus, isFalse);
+    expect(field.controller!.selection, const TextSelection.collapsed(offset: -1));
+    expect(find.text('Файл прочитан. Сохраните профиль.'), findsOneWidget);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saves, 1);
+    expect(saved, imported);
+    expect(result, imported);
+    expect(cancels, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Picker cancellation preserves the current draft without saving',
+      (tester) async {
+    var saves = 0;
+    var cancels = 0;
+    await _openEditor(tester,
+      initialConfig: _config,
+      onImport: () async => null,
+      onCancelImport: () async { cancels++; },
+      onSave: (_) async { saves++; },
+    );
+    await tester.tap(find.byKey(_import));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    expect(find.byKey(const Key('wireguard_profile_error')), findsNothing);
+    expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
+    expect(saves, 0);
+    await tester.tap(find.byKey(_close));
+    await tester.pumpAndSettle();
+    expect(cancels, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Import errors preserve the draft and expose only safe messages',
+      (tester) async {
+    const secret = 'PRIVATE_FILE_PATH_AND_KEY';
+    for (final failure in [
+      ('PROFILE_IMPORT_TOO_LARGE', 'Файл слишком большой: максимум 65 536 байт.'),
+      ('PROFILE_IMPORT_INVALID',
+        'Нужен полный текстовый профиль WireGuard .conf с разделами [Interface] и [Peer].'),
+      ('PROFILE_IMPORT_BUSY', 'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.'),
+      ('PROFILE_IMPORT_INTERRUPTED', 'Импорт прерван. Выберите файл ещё раз.'),
+      ('PROFILE_IMPORT_UNAVAILABLE',
+        'Не удалось открыть выбор файла. Вставьте конфигурацию вручную.'),
+      ('PROFILE_IMPORT_FAILED',
+        'Не удалось прочитать файл. Выберите его заново или вставьте конфигурацию.'),
+      ('UNEXPECTED_IMPORT_ERROR',
+        'Не удалось прочитать файл. Выберите его заново или вставьте конфигурацию.'),
+    ]) {
+      var saves = 0;
+      await _openEditor(tester,
+        initialConfig: _config,
+        onImport: () async => throw PlatformException(code: failure.$1,
+          message: secret, details: {'uri': secret, 'privateKey': secret}),
+        onSave: (_) async { saves++; },
+      );
+      await tester.tap(find.byKey(_import));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      expect(find.text(failure.$2), findsOneWidget);
+      expect(find.textContaining(secret), findsNothing);
+      expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
+      expect(saves, 0);
+      expect(tester.widget<OutlinedButton>(find.byKey(_import)).onPressed, isNotNull);
+      await tester.ensureVisible(find.byKey(_close));
+      await tester.tap(find.byKey(_close));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('Malformed import results cannot overwrite an existing draft',
+      (tester) async {
+    // Native parsing validates full .conf syntax; the editor also rejects values
+    // it already knows cannot be saved if an older/faulty bridge returns them.
+    for (final invalid in [' \n ', 'x' * 65537,
+        '00000000-0000-4000-8000-000000000000']) {
+      var saves = 0;
+      await _openEditor(tester,
+        initialConfig: _config,
+        onImport: () async => invalid,
+        onSave: (_) async { saves++; },
+      );
+      await tester.tap(find.byKey(_import));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
+      expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
+      expect(saves, 0);
+      await tester.ensureVisible(find.byKey(_close));
+      await tester.tap(find.byKey(_close));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('Pending import blocks concurrent edits and stale action callbacks',
+      (tester) async {
+    final pending = Completer<String?>();
+    var reads = 0;
+    var saves = 0;
+    var clipboardReads = 0;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') {
+        clipboardReads++;
+        return {'text': _config};
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await _openEditor(tester,
+      initialConfig: _config,
+      onImport: () { reads++; return pending.future; },
+      onSave: (_) async { saves++; },
+    );
+    final queuedImport = tester.widget<OutlinedButton>(find.byKey(_import)).onPressed!;
+    final queuedPaste = tester.widget<OutlinedButton>(find.byKey(_paste)).onPressed!;
+    final queuedSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+    final queuedReveal = tester.widget<IconButton>(find.byKey(_visibility)).onPressed!;
+    queuedImport();
+    queuedImport();
+    queuedPaste();
+    queuedSave();
+    queuedReveal();
+    await tester.pump();
+    expect(reads, 1);
+    expect(saves, 0);
+    expect(clipboardReads, 0);
+    expect(tester.widget<TextField>(find.byKey(_field)).enabled, isFalse);
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(tester.widget<OutlinedButton>(find.byKey(_import)).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(find.byKey(_paste)).onPressed, isNull);
+    expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNull);
+    expect(tester.widget<IconButton>(find.byKey(_close)).onPressed, isNotNull);
+    pending.complete(_config);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(_close));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Closing a pending import cancels once and rejects its closing-frame reply',
+      (tester) async {
+    final pending = Completer<String?>();
+    var cancels = 0;
+    var saves = 0;
+    await _openEditor(tester,
+      initialConfig: _config,
+      onImport: () => pending.future,
+      onCancelImport: () async { cancels++; },
+      onSave: (_) async { saves++; },
+    );
+    await tester.tap(find.byKey(_import));
+    await tester.pump();
+    await tester.tap(find.byKey(_close));
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(cancels, 1);
+    pending.complete('$_config\n# Late file\n');
+    await tester.pumpAndSettle();
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
+    expect(find.text('Файл прочитан. Сохраните профиль.'), findsNothing);
+    expect(saves, 0);
+    expect(cancels, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Disposal tolerates cancellation failure and a late import error',
+      (tester) async {
+    final pending = Completer<String?>();
+    var cancels = 0;
+    await _openEditor(tester,
+      initialConfig: _config,
+      onImport: () => pending.future,
+      onCancelImport: () async {
+        cancels++;
+        throw PlatformException(code: 'CANCEL_FAILED', message: 'PRIVATE_CANCEL_DETAIL');
+      },
+      onSave: (_) async {},
+    );
+    await tester.tap(find.byKey(_import));
+    await tester.pump();
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: Text('Следующий экран')),
+    ));
+    pending.completeError(PlatformException(code: 'PROFILE_IMPORT_FAILED',
+      message: 'PRIVATE_FILE_DETAIL'));
+    await tester.pumpAndSettle();
+    expect(cancels, 1);
+    expect(find.text('Следующий экран'), findsOneWidget);
+    expect(find.textContaining('PRIVATE_'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('File result before resume stays masked and cannot trigger queued save',
+      (tester) async {
+    final pending = Completer<String?>();
+    const imported = '$_config\n# Before resume\n';
+    var saves = 0;
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    await _openEditor(tester,
+      initialConfig: _config,
+      onImport: () => pending.future,
+      onSave: (_) async { saves++; },
+    );
+    final queuedSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+    final queuedImport = tester.widget<OutlinedButton>(find.byKey(_import)).onPressed!;
+    await tester.tap(find.byKey(_visibility));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(_import));
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    pending.complete(imported);
+    await tester.pumpAndSettle();
+    queuedSave();
+    queuedImport();
+    await tester.pump();
+    var field = tester.widget<TextField>(find.byKey(_field));
+    expect(field.controller!.text, imported);
+    expect(field.obscureText, isTrue);
+    expect(field.focusNode!.hasFocus, isFalse);
+    expect(saves, 0);
+    expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(find.byKey(_import)).onPressed, isNull);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    field = tester.widget<TextField>(find.byKey(_field));
+    expect(field.obscureText, isTrue);
+    expect(field.controller!.text, imported);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saves, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Import and save remain reachable on a compact phone with large text',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 48);
+    tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 48);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    String? saved;
+    await _openEditor(tester,
+      textScale: 2.2,
+      onImport: () async => _config,
+      onSave: (config) async { saved = config; },
+    );
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.byKey(_import));
+    await tester.pumpAndSettle();
+    final importRect = tester.getRect(find.byKey(_import));
+    expect(importRect.left, greaterThanOrEqualTo(0));
+    expect(importRect.right, lessThanOrEqualTo(360));
+    await tester.tap(find.byKey(_import));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(_save));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byKey(_save)).bottom, lessThanOrEqualTo(592));
+    await tester.tap(find.byKey(_save));
+    await tester.pumpAndSettle();
+    expect(saved, _config);
     expect(tester.takeException(), isNull);
   });
 }

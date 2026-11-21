@@ -23,6 +23,14 @@ class WireGuardTunnel {
   static Future<String?> loadProfile() =>
       _channel.invokeMethod<String>('loadWireGuardProfile');
 
+  /// Reads one explicitly selected file into a draft; does not save or connect.
+  static Future<String?> importProfile() =>
+      _channel.invokeMethod<String>('importWireGuardProfile');
+
+  static Future<void> cancelProfileImport() async {
+    await _channel.invokeMethod('cancelWireGuardProfileImport');
+  }
+
   static Future<void> deleteProfile() async {
     await _channel.invokeMethod('deleteWireGuardProfile');
   }

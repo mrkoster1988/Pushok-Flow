@@ -49,6 +49,8 @@ class _AndroidBridge {
   Completer<String?>? loadGate;
   Completer<String>? privacyGate;
   Completer<Object?>? statusGate;
+  Completer<String?>? importGate;
+  String? importedProfile = _profile;
   final privacyTokens = <String>{};
   final calls = <MethodCall>[];
 
@@ -72,6 +74,14 @@ class _AndroidBridge {
       case 'loadWireGuardProfile':
         if (loadGate != null) return await loadGate!.future;
         return savedProfile;
+      case 'importWireGuardProfile':
+        if (privacyTokens.isEmpty) {
+          throw PlatformException(code: 'PROFILE_IMPORT_UNAVAILABLE');
+        }
+        if (importGate != null) return await importGate!.future;
+        return importedProfile;
+      case 'cancelWireGuardProfileImport':
+        return null;
       case 'saveWireGuardProfile':
         if (saveGate != null) await saveGate!.future;
         if (saveError != null) throw saveError!;
@@ -589,6 +599,61 @@ void main() {
       expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged, isNull);
       expect(bridge.named('connectWireGuard'), isEmpty);
       expect(bridge.named('disconnectWireGuard'), isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('File import uses the protected editor and requires explicit save', (tester) async {
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.privacyTokens, hasLength(1));
+      await tester.ensureVisible(find.byKey(const Key('import_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('import_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.named('importWireGuardProfile'), hasLength(1));
+      final field = tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')));
+      expect(field.controller!.text, _profile);
+      expect(field.obscureText, isTrue);
+      expect(bridge.savedProfile, isNull);
+      expect(bridge.named('saveWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('save_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.savedProfile, _profile);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.privacyTokens, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Explicit save and connect works after returning from the file picker', (tester) async {
+    final pendingImport = Completer<String?>();
+    bridge.importGate = pendingImport;
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('import_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('import_wireguard_profile')));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      pendingImport.complete(_profile);
+      await tester.pump();
+      expect(bridge.named('saveWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      final field = tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')));
+      expect(field.controller!.text, _profile);
+      expect(field.obscureText, isTrue);
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('save_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.savedProfile, _profile);
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      expect(bridge.privacyTokens, isEmpty);
+      expect(find.text('Туннель включён'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

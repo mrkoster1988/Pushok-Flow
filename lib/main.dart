@@ -276,6 +276,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     final requestEpoch = _profileRequestEpoch;
     ProfilePrivacy? protection;
     String? saved;
+    int? saveIntentEpoch;
     try {
       try {
         protection = await ProfilePrivacy.acquire();
@@ -321,7 +322,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           initialConfig: draft,
           initialError: initialError,
           connectAfterSave: connectAfterSave,
+          onImport: WireGuardTunnel.importProfile,
+          onCancelImport: WireGuardTunnel.cancelProfileImport,
           onSave: (config) async {
+            if (!mounted || !_foreground) {
+              throw PlatformException(code: 'PROFILE_SAVE_INTERRUPTED');
+            }
+            // Choosing a file leaves the app temporarily. A new explicit Save
+            // after returning authorizes connect-after-save for that foreground
+            // session, while later app switching still invalidates the intent.
+            saveIntentEpoch = _profileRequestEpoch;
             await WireGuardTunnel.saveProfile(config);
             if (mounted) {
               _statusEpoch++;
@@ -354,7 +364,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (!mounted || saved == null) return;
     if (connectAfterSave) {
       // A slow save must not start VPN permission UI after app switching.
-      if (!_foreground || requestEpoch != _profileRequestEpoch) {
+      if (!_foreground || saveIntentEpoch != _profileRequestEpoch) {
         if (_foreground) _showNotice('Профиль сохранён. Нажмите «Подключить», когда будете готовы.');
         return;
       }
@@ -417,7 +427,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.26.0'))]),
+      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.27.0'))]),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],
@@ -504,14 +514,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       icon: Icon(savedProfile ? Icons.check_circle_outline : Icons.add_circle_outline, size: 18),
       label: Text(savedProfile ? 'Профиль сохранён · изменить' : 'Добавить профиль WireGuard'),
     )),
-    const SizedBox(height: 18),
-    Row(children: [
-      Expanded(child: _homeShortcut(Icons.dns_outlined, 'Серверы', 2)),
-      const SizedBox(width: 9),
-      Expanded(child: _homeShortcut(Icons.alt_route_outlined, 'Маршруты', 1)),
-      const SizedBox(width: 9),
-      Expanded(child: _homeShortcut(Icons.auto_awesome_outlined, 'Pushok ИИ', 3)),
-    ]),
     if (_isAndroid) ...[
       const SizedBox(height: 14),
       TunnelDiagnosticsCard(
@@ -573,21 +575,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       ]),
     ],
   ));
-
-  Widget _homeShortcut(IconData icon, String title, int destination) =>
-    InkWell(onTap: () => setState(() => tab = destination),
-      borderRadius: BorderRadius.circular(18),
-      child: Container(height: 85,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [Color(0xFF103858), Color(0xFF04162D)]),
-          border: Border.all(color: PushokPalette.glowCyan.withValues(alpha: .55)),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [BoxShadow(color: PushokPalette.electricBlue.withValues(alpha: .16), blurRadius: 12)]),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, color: PushokPalette.glowCyan, size: 27),
-          const SizedBox(height: 5),
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-        ])));
 
   Widget routes() => ListView(children: [
     card(const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

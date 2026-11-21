@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -9,12 +11,16 @@ class WireGuardProfileEditor extends StatefulWidget {
     super.key,
     required this.initialConfig,
     required this.onSave,
+    this.onImport,
+    this.onCancelImport,
     this.connectAfterSave = false,
     this.initialError,
   });
 
   final String initialConfig;
   final Future<void> Function(String) onSave;
+  final Future<String?> Function()? onImport;
+  final Future<void> Function()? onCancelImport;
   final bool connectAfterSave;
   final String? initialError;
 
@@ -30,10 +36,14 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   bool _showConfig = false;
   bool _saving = false;
   bool _pasting = false;
+  bool _importing = false;
+  bool _importCancelSent = false;
+  int _importEpoch = 0;
   bool _resumed = true;
   String? _error;
+  String? _notice;
 
-  bool get _busy => _saving || _pasting;
+  bool get _busy => _saving || _pasting || _importing;
   bool get _canReveal {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     return _resumed &&
@@ -52,6 +62,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   @override
   void dispose() {
+    _cancelPendingImport();
     WidgetsBinding.instance.removeObserver(this);
     _focusNode.dispose();
     _controller.dispose();
@@ -94,7 +105,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   }
 
   Future<void> _paste() async {
-    if (!mounted || _busy) return;
+    if (!mounted || _busy || !_canReveal) return;
     setState(() => _pasting = true);
     try {
       // Clipboard access happens only after the user presses «Вставить».
@@ -114,7 +125,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         text: config,
         selection: TextSelection.collapsed(offset: config.length),
       );
-      setState(() => _error = null);
+      setState(() { _error = null; _notice = null; });
     } catch (_) {
       if (mounted) {
         setState(() => _error =
@@ -125,8 +136,78 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     }
   }
 
+  void _cancelPendingImport() {
+    if (!_importing || _importCancelSent) return;
+    _importCancelSent = true;
+    _importEpoch++;
+    // Invalidate the draft immediately, before the closing route animation.
+    // A native cancellation failure must not keep this route or expose details.
+    unawaited(_cancelImport());
+  }
+
+  Future<void> _cancelImport() async {
+    try {
+      await widget.onCancelImport?.call();
+    } catch (_) {
+      // Native request generations and the local epoch also reject late replies.
+    }
+  }
+
+  Future<void> _import() async {
+    final read = widget.onImport;
+    if (!mounted || _busy || !_canReveal || read == null) return;
+    final epoch = ++_importEpoch;
+    _clearInputSelection();
+    setState(() {
+      _importing = true;
+      _importCancelSent = false;
+      _showConfig = false;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final config = await read();
+      if (!mounted || epoch != _importEpoch || config == null) return;
+      final validation = _validationError(config);
+      if (validation != null) {
+        setState(() => _error = validation);
+        return;
+      }
+      // Android may deliver the result before onResume. Only replace the masked
+      // draft; never reveal, save, or connect as a consequence of selecting a file.
+      _controller.value = TextEditingValue(text: config,
+          selection: const TextSelection.collapsed(offset: -1));
+      setState(() {
+        _showConfig = false;
+        _notice = 'Файл прочитан. Сохраните профиль.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted || epoch != _importEpoch) return;
+      setState(() => _error = switch (error.code) {
+        'PROFILE_IMPORT_TOO_LARGE' =>
+          'Файл слишком большой: максимум 65 536 байт.',
+        'PROFILE_IMPORT_INVALID' =>
+          'Нужен полный текстовый профиль WireGuard .conf с разделами [Interface] и [Peer].',
+        'PROFILE_IMPORT_BUSY' =>
+          'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.',
+        'PROFILE_IMPORT_INTERRUPTED' =>
+          'Импорт прерван. Выберите файл ещё раз.',
+        'PROFILE_IMPORT_UNAVAILABLE' =>
+          'Не удалось открыть выбор файла. Вставьте конфигурацию вручную.',
+        _ => 'Не удалось прочитать файл. Выберите его заново или вставьте конфигурацию.',
+      });
+    } catch (_) {
+      if (mounted && epoch == _importEpoch) {
+        setState(() => _error =
+            'Не удалось прочитать файл. Выберите его заново или вставьте конфигурацию.');
+      }
+    } finally {
+      if (mounted && epoch == _importEpoch) setState(() => _importing = false);
+    }
+  }
+
   Future<void> _save() async {
-    if (!mounted || _busy) return;
+    if (!mounted || _busy || !_canReveal) return;
     final config = _controller.text;
     final validation = _validationError(config);
     if (validation != null) {
@@ -137,6 +218,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     setState(() {
       _saving = true;
       _error = null;
+      _notice = null;
     });
     try {
       await widget.onSave(config);
@@ -177,6 +259,9 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   Widget build(BuildContext context) {
     return PopScope<String>(
       canPop: !_saving,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) _cancelPendingImport();
+      },
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
         child: Container(
@@ -200,12 +285,13 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     IconButton(
                       key: const Key('close_wireguard_profile'),
                       tooltip: 'Закрыть',
-                      onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                      onPressed: _saving || _pasting
+                          ? null : () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.close),
                     ),
                   ]),
                   const SizedBox(height: 8),
-                  const Text('Вставьте полный текст файла .conf от вашего VPN-провайдера '
+                  const Text('Выберите файл .conf или вставьте полный текст профиля от вашего VPN-провайдера '
                     'с разделами [Interface] и [Peer]. '
                     'Профиль сохраняется только на этом устройстве.',
                     style: TextStyle(color: PushokPalette.muted)),
@@ -235,12 +321,14 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     smartDashesType: SmartDashesType.disabled,
                     smartQuotesType: SmartQuotesType.disabled,
                     onChanged: (_) {
-                      if (_error != null) setState(() => _error = null);
+                      if (_error != null || _notice != null) {
+                        setState(() { _error = null; _notice = null; });
+                      }
                     },
                     decoration: InputDecoration(
                       labelText: 'Конфигурация WireGuard',
                       helperText: _showConfig ? null
-                          : 'Вставьте профиль кнопкой ниже или откройте его значком глаза.',
+                          : 'Добавьте профиль кнопками ниже или откройте его значком глаза.',
                       helperMaxLines: 2,
                       suffixIcon: IconButton(
                         key: const Key('toggle_wireguard_profile_visibility'),
@@ -252,18 +340,36 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [OutlinedButton.icon(
                       key: const Key('paste_wireguard_profile'),
-                      onPressed: _busy ? null : _paste,
+                      onPressed: _busy || !_canReveal ? null : _paste,
                       icon: _pasting
                           ? const SizedBox(width: 18, height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.content_paste_outlined),
                       label: const Text('Вставить'),
                     ),
+                    if (widget.onImport != null) OutlinedButton.icon(
+                      key: const Key('import_wireguard_profile'),
+                      onPressed: _busy || !_canReveal ? null : _import,
+                      icon: _importing
+                          ? const SizedBox(width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.file_open_outlined),
+                      label: const Text('Из файла .conf'),
+                    ),
+                    ],
                   ),
+                  if (_notice != null) ...[
+                    const SizedBox(height: 12),
+                    Semantics(liveRegion: true,
+                      child: Text(_notice!, key: const Key('wireguard_profile_notice'),
+                        style: const TextStyle(color: PushokPalette.mint))),
+                  ],
                   if (_error != null) ...[
                     const SizedBox(height: 12),
                     Semantics(
@@ -276,7 +382,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     key: const Key('save_wireguard_profile'),
-                    onPressed: _busy ? null : _save,
+                    onPressed: _busy || !_canReveal ? null : _save,
                     icon: _saving
                         ? const SizedBox(width: 18, height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2))

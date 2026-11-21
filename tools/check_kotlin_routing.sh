@@ -19,3 +19,6 @@ java -jar "$out/update-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileProtectionPolicy.kt \
   native/android/tests/ProfileProtectionPolicyCheck.kt -include-runtime -d "$out/profile-protection-tests.jar"
 java -jar "$out/profile-protection-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
+  native/android/tests/ProfileImportReaderCheck.kt -include-runtime -d "$out/profile-import-tests.jar"
+java -jar "$out/profile-import-tests.jar"

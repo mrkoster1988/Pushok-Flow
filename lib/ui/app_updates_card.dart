@@ -178,7 +178,7 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
                 fontWeight: FontWeight.w700)));
         break;
       case UpdatePhase.current:
-        body.add(const Text('Установлена последняя версия.',
+        body.add(const Text('Установлена последняя опубликованная версия.',
             style: TextStyle(color: PushokPalette.mint)));
         break;
       case UpdatePhase.downloading:
