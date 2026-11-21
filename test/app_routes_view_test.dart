@@ -199,10 +199,18 @@ void main() {
     await tester.scrollUntilVisible(tile, 160,
       scrollable: _listScrollable());
     await tester.ensureVisible(tile);
-    // A wrapped row can be taller than the viewport. The switch itself remains
-    // an explicit reachable target at the row's vertical centre.
+    await tester.pump();
+    // Bounded labels keep the switch reachable; full values remain available
+    // through the tooltip and Text semantics despite the visual ellipsis.
+    final title = find.descendant(of: tile, matching: find.text('Приложение ${'я' * 100}'));
+    expect(tester.widget<Text>(title).maxLines, 2);
+    final tooltip = find.descendant(of: tile, matching: find.byType(Tooltip));
+    expect(tester.widgetList<Tooltip>(tooltip).map((item) => item.message),
+      containsAll(['Приложение ${'я' * 100}', longPackage]));
     final toggle = find.descendant(of: tile, matching: find.byType(Switch));
     await tester.ensureVisible(toggle);
+    await tester.pump();
+    expect(toggle.hitTestable(), findsOneWidget);
     await tester.tap(toggle);
     await tester.pump();
     expect(toggles, 1);

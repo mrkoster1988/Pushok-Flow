@@ -182,10 +182,24 @@ class _AppRoutesViewState extends State<AppRoutesView> {
       child: SwitchListTile.adaptive(
         key: ValueKey('route_toggle_${app.packageName}'),
         contentPadding: EdgeInsets.zero,
-        title: Text(app.label),
-        subtitle: Text(missing
-            ? 'Нет в списке приложений. Сохранённое исключение.'
-            : app.packageName),
+        // A third-party name or a long package ID must not push the switch
+        // outside a phone-sized viewport. Text semantics retain the full value;
+        // long press also reveals it visually without changing the selection.
+        title: Tooltip(
+          message: app.label,
+          excludeFromSemantics: true,
+          child: Text(app.label, maxLines: 2, overflow: TextOverflow.ellipsis),
+        ),
+        subtitle: Tooltip(
+          message: missing
+              ? 'Нет в списке приложений. Сохранённое исключение.'
+              : app.packageName,
+          excludeFromSemantics: true,
+          child: Text(missing
+              ? 'Нет в списке приложений. Сохранённое исключение.'
+              : app.packageName,
+            maxLines: 2, overflow: TextOverflow.ellipsis),
+        ),
         value: widget.selectedPackages.contains(app.packageName),
         onChanged: _canChange ? (value) => widget.onToggle(app.packageName, value) : null,
       ),
