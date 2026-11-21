@@ -69,7 +69,12 @@ jobs:
           set -o pipefail
           bash tools/bootstrap_android.sh 2>&1 | tee release-diagnostics/bootstrap.log
       - name: Install Flutter dependencies
-        run: flutter pub get
+        run: |
+          set -euo pipefail
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock
+      - name: Preserve resolved Dart dependencies
+        run: python3 tools/capture_dart_dependencies.py --output release-diagnostics/dart-dependencies
       - name: Install pinned Kotlin CLI
         run: |
           set -euo pipefail
@@ -85,11 +90,11 @@ jobs:
       - name: Flutter static analysis
         run: |
           set -o pipefail
-          flutter analyze lib test 2>&1 | tee release-diagnostics/flutter-analyze.log
+          flutter analyze lib test --no-pub 2>&1 | tee release-diagnostics/flutter-analyze.log
       - name: Flutter tests
         run: |
           set -o pipefail
-          flutter test --reporter expanded 2>&1 | tee release-diagnostics/flutter-test.log
+          flutter test --reporter expanded --no-pub 2>&1 | tee release-diagnostics/flutter-test.log
       - name: Validate app manifest
         run: python3 tools/check_android_manifest.py
       - name: Configure persistent private release signing
@@ -106,7 +111,7 @@ jobs:
           PUSHOK_ANDROID_KEY_PASSWORD: ${{ secrets.PUSHOK_ANDROID_KEY_PASSWORD }}
         run: |
           set -o pipefail
-          flutter build apk --release 2>&1 | tee release-diagnostics/flutter-build.log
+          flutter build apk --release --no-pub 2>&1 | tee release-diagnostics/flutter-build.log
       - name: Verify release APK and signing certificate
         run: |
           set -o pipefail

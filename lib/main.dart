@@ -2,11 +2,12 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'design/pushok_theme.dart';
 import 'dart:io' show Platform;
-import 'dart:async' show Timer;
+import 'dart:async' show Timer, unawaited;
 import 'platform/android_app_routes.dart';
 import 'ai/pushok_ai.dart';
 import 'ai/pushok_ai_memory.dart';
 import 'platform/wireguard_tunnel.dart';
+import 'platform/profile_privacy.dart';
 import 'ui/wireguard_profile_editor.dart';
 import 'ui/app_updates_card.dart';
 
@@ -53,6 +54,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   bool _statusRefreshing = false;
   bool _savingRoute = false;
   int _statusEpoch = 0;
+  int _profileRequestEpoch = 0;
+  bool _foreground = true;
   Map<String, int> feedback = {};
   String? feedbackMessage;
   bool get _isAndroid => widget.isAndroid ?? Platform.isAndroid;
@@ -87,8 +90,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTunnel({String? profile}) async {
-    if (!_isAndroid || connecting || _profileBusy || _profileEditorOpen) return;
+    if (!_isAndroid || !_foreground || connecting || _profileBusy || _profileEditorOpen) return;
     final disconnecting = connected;
+    final requestEpoch = _profileRequestEpoch;
     var needsProfile = false;
     _statusEpoch++;
     setState(() { connecting = true; connectionError = null; });
@@ -99,7 +103,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       } else {
         // Read the protected profile only after the user's Connect action.
         final config = profile ?? await WireGuardTunnel.loadProfile();
-        if (!mounted) return;
+        if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
         if (config == null || config.trim().isEmpty) {
           needsProfile = true;
           setState(() => savedProfile = false);
@@ -126,7 +130,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         await _refreshProfileStatus();
       }
     }
-    if (needsProfile && mounted) {
+    if (needsProfile && mounted && _foreground && requestEpoch == _profileRequestEpoch) {
       await _editProfile(connectAfterSave: true, initialConfig: '');
     }
   }
@@ -141,6 +145,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _loadRoutes();
     _refreshProfileStatus();
@@ -158,10 +164,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _startHealthPolling();
       _refreshProfileStatus();
     } else {
+      // A request made before losing focus must not open the editor later,
+      // even if the user returns before a native response arrives.
+      _profileRequestEpoch++;
       _healthPoll?.cancel();
     }
   }
@@ -218,26 +228,43 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _editProfile({bool connectAfterSave = false, String? initialConfig}) async {
-    if (!_isAndroid || connecting || connected || _profileBusy || _profileEditorOpen) return;
+    if (!_isAndroid || !_foreground || connecting || connected || _profileBusy || _profileEditorOpen) return;
     setState(() => _profileBusy = true);
-    var draft = initialConfig ?? '';
-    String? initialError;
-    try {
-      if (initialConfig == null) draft = await WireGuardTunnel.loadProfile() ?? '';
-    } catch (error) {
-      initialError = _connectionMessage(error);
-    }
-    if (!mounted) return;
-    if (connected || connecting) {
-      setState(() => _profileBusy = false);
-      _showNotice('Для изменения профиля отключите VPN.');
-      return;
-    }
-    setState(() { _profileBusy = false; _profileEditorOpen = true; });
+    final requestEpoch = _profileRequestEpoch;
+    ProfilePrivacy? protection;
     String? saved;
     try {
-      saved = await showModalBottomSheet<String>(
-        context: context,
+      try {
+        protection = await ProfilePrivacy.acquire();
+      } catch (_) {
+        // Never expose platform messages/details or open an unprotected editor.
+        if (mounted && _foreground && requestEpoch == _profileRequestEpoch) {
+          _showNotice('Не удалось защитить экран профиля. Закройте и снова откройте приложение.');
+        }
+        return;
+      }
+      if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
+      var draft = initialConfig ?? '';
+      String? initialError;
+      try {
+        if (initialConfig == null) draft = await WireGuardTunnel.loadProfile() ?? '';
+      } catch (error) {
+        initialError = _connectionMessage(error);
+      }
+      if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
+      if (connected || connecting) {
+        _showNotice('Для изменения профиля отключите VPN.');
+        return;
+      }
+      setState(() { _profileBusy = false; _profileEditorOpen = true; });
+      final navigator = Navigator.of(context);
+      final localizations = MaterialLocalizations.of(context);
+      final route = ModalBottomSheetRoute<String>(
+        capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
+        settings: const RouteSettings(name: 'wireguard-profile'),
+        barrierLabel: localizations.scrimLabel,
+        barrierOnTapHint: localizations.scrimOnTapHint(localizations.bottomSheetLabel),
+        modalBarrierColor: Theme.of(context).bottomSheetTheme.modalBarrierColor,
         isScrollControlled: true,
         useSafeArea: true,
         isDismissible: false,
@@ -260,11 +287,34 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           },
         ),
       );
+      // Route.completed also resolves when the Navigator is disposed. Unlike
+      // push()/popped, it waits until the closing animation and overlay are gone.
+      // Do not disable protection while the last frame of the key is visible.
+      unawaited(navigator.push<String>(route));
+      saved = await route.completed;
+      // Also submit a frame without the editor before unprotecting the window
+      // when the Navigator was removed without a closing animation.
+      await WidgetsBinding.instance.endOfFrame;
     } finally {
-      if (mounted) setState(() => _profileEditorOpen = false);
+      if (protection != null) {
+        try {
+          await protection.release();
+        } catch (_) {
+          // Fail closed: native protection stays enabled if cleanup cannot finish.
+          if (mounted && _foreground) {
+            _showNotice('Защита экрана осталась включённой. Для снимков других экранов перезапустите приложение.');
+          }
+        }
+      }
+      if (mounted) setState(() { _profileBusy = false; _profileEditorOpen = false; });
     }
     if (!mounted || saved == null) return;
     if (connectAfterSave) {
+      // A slow save must not start VPN permission UI after app switching.
+      if (!_foreground || requestEpoch != _profileRequestEpoch) {
+        if (_foreground) _showNotice('Профиль сохранён. Нажмите «Подключить», когда будете готовы.');
+        return;
+      }
       await _toggleTunnel(profile: saved);
     } else {
       _showNotice('Профиль сохранён на устройстве. Можно подключаться.');
@@ -324,7 +374,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.24.0'))]),
+      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.25.0'))]),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],

@@ -22,27 +22,60 @@ class WireGuardProfileEditor extends StatefulWidget {
   State<WireGuardProfileEditor> createState() => _WireGuardProfileEditorState();
 }
 
-class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
+class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
+    with WidgetsBindingObserver {
   static const _maxConfigLength = 65536;
   late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
   bool _showConfig = false;
   bool _saving = false;
   bool _pasting = false;
+  bool _resumed = true;
   String? _error;
 
   bool get _busy => _saving || _pasting;
+  bool get _canReveal {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return _resumed &&
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed);
+  }
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialConfig);
     _error = widget.initialError;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _resumed = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+    final resumed = state == AppLifecycleState.resumed;
+    setState(() {
+      _resumed = resumed;
+      if (!resumed) _showConfig = false;
+    });
+    if (!resumed) _clearInputSelection();
+  }
+
+  void _clearInputSelection() {
+    _focusNode.unfocus();
+    // Clear only input state. The complete multiline draft must remain intact.
+    _controller.value = _controller.value.copyWith(
+      selection: const TextSelection.collapsed(offset: -1),
+      composing: TextRange.empty,
+    );
   }
 
   String? _validationError(String config) {
@@ -61,7 +94,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
   }
 
   Future<void> _paste() async {
-    if (_busy) return;
+    if (!mounted || _busy) return;
     setState(() => _pasting = true);
     try {
       // Clipboard access happens only after the user presses «Вставить».
@@ -93,14 +126,14 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
   }
 
   Future<void> _save() async {
-    if (_busy) return;
+    if (!mounted || _busy) return;
     final config = _controller.text;
     final validation = _validationError(config);
     if (validation != null) {
       setState(() => _error = validation);
       return;
     }
-    FocusManager.instance.primaryFocus?.unfocus();
+    _focusNode.unfocus();
     setState(() {
       _saving = true;
       _error = null;
@@ -133,9 +166,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
   }
 
   void _toggleVisibility() {
-    if (_busy) return;
-    if (_showConfig) FocusManager.instance.primaryFocus?.unfocus();
+    // A previously queued tap must not reveal a profile after the app left
+    // the foreground, even if the button has not rebuilt yet.
+    if (!mounted || _busy || !_canReveal) return;
     setState(() => _showConfig = !_showConfig);
+    if (!_showConfig) _clearInputSelection();
   }
 
   @override
@@ -174,10 +209,14 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
                     'с разделами [Interface] и [Peer]. '
                     'Профиль сохраняется только на этом устройстве.',
                     style: TextStyle(color: PushokPalette.muted)),
+                  const SizedBox(height: 8),
+                  const Text('При переключении приложений профиль скрывается.',
+                    style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
                   const SizedBox(height: 16),
                   TextField(
                     key: const Key('wireguard_profile_field'),
                     controller: _controller,
+                    focusNode: _focusNode,
                     enabled: !_busy,
                     // A masked field must be single-line. Keyboard edits there
                     // would remove every newline from a WireGuard configuration.
@@ -189,6 +228,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
                     textInputAction: _showConfig
                         ? TextInputAction.newline : TextInputAction.done,
                     enableInteractiveSelection: _showConfig,
+                    autofillHints: null,
                     autocorrect: false,
                     enableSuggestions: false,
                     enableIMEPersonalizedLearning: false,
@@ -205,7 +245,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor> {
                       suffixIcon: IconButton(
                         key: const Key('toggle_wireguard_profile_visibility'),
                         tooltip: _showConfig ? 'Скрыть конфигурацию' : 'Показать конфигурацию',
-                        onPressed: _busy ? null : _toggleVisibility,
+                        onPressed: _busy || !_canReveal ? null : _toggleVisibility,
                         icon: Icon(_showConfig
                             ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                       ),

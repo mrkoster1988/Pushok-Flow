@@ -43,6 +43,7 @@ class MainActivity : FlutterActivity() {
     private val secureStore by lazy { SecureWireGuardStore(applicationContext) }
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
     private val appUpdates by lazy { AppUpdates(this) }
+    private val profileScreenProtection by lazy { ProfileScreenProtection(this) }
     private var lastErrorCode: String?
         get() = Session.lastErrorCode
         set(value) { Session.lastErrorCode = value }
@@ -104,6 +105,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         appUpdates.dispose()
+        profileScreenProtection.dispose()
         // Android may recreate the Activity while the VPN permission dialog is open.
         // A MethodChannel.Result owned by the destroyed Activity must not be left pending.
         // Fail closed and let the user retry from the new screen; never start a tunnel
@@ -119,8 +121,14 @@ class MainActivity : FlutterActivity() {
     private val channelName = "shop.pushok.flow/app_routes"
     private val prefs by lazy { getSharedPreferences("pushok_flow_routes", MODE_PRIVATE) }
 
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        profileScreenProtection.dispose()
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->

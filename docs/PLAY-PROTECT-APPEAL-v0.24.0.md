@@ -1,6 +1,6 @@
 # Запрос на пересмотр Play Protect — Pushok Flow 0.24.0
 
-**Статус: подготовлен для проверки владельцем, не отправлен.**
+**Статус: отправка согласована владельцем, обращение ещё не отправлено.** Официальная форма Google остановилась на CAPTCHA; её прохождение передано владельцу. Подтверждения регистрации и номера обращения нет.
 
 Адресат — команда Google Play Protect, через [официальную форму](https://support.google.com/googleplay/android-developer/contact/protectappeals). Текст ниже предназначен для поля объяснения; это не воспроизведение неизвестного набора обязательных полей формы. Владелец указывает свою контактную информацию только в официальной форме. Модель телефона и версия Android не известны и не выдуманы.
 
@@ -14,7 +14,7 @@ Hello Google Play Protect team,
 
 Please review the Play Protect classification of Pushok Flow 0.24.0 and identify the detection category, affected component or behavior, and any required remediation.
 
-On 21 November 2026, a tester reported that installation was blocked with the Russian message “Вредоносное приложение заблокировано” (“Harmful app blocked”). The expanded explanation says the app may pose a threat to the device but provides no category, component or detection identifier. The tester confirmed the filename Pushok-Flow-v0.24.0.apk. We have not independently obtained the SHA-256 of the copy on the tester's phone; the identifiers below describe the published file that was provided for this test.
+On 21 November 2026, a tester reported that Google Play Protect displayed the Russian warning “Вредоносное приложение заблокировано” (“Harmful app blocked”) during installation. The expanded dialog also offered an “Install anyway” option. The explanation says the app may pose a threat to the device but provides no category, component or detection identifier. The tester confirmed the filename Pushok-Flow-v0.24.0.apk. We have not independently obtained the SHA-256 of the copy on the tester's phone; the identifiers below describe the published file that was provided for this test.
 
 Published artifact:
 

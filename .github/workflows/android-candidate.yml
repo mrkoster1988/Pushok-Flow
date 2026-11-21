@@ -116,7 +116,12 @@ jobs:
           set -o pipefail
           bash tools/bootstrap_android.sh 2>&1 | tee candidate-diagnostics/bootstrap.log
       - name: Install Flutter dependencies
-        run: flutter pub get
+        run: |
+          set -euo pipefail
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock
+      - name: Preserve resolved Dart dependencies
+        run: python3 tools/capture_dart_dependencies.py --output candidate-diagnostics/dart-dependencies
       - name: Install pinned Kotlin CLI
         run: |
           set -euo pipefail
@@ -132,11 +137,11 @@ jobs:
       - name: Flutter static analysis
         run: |
           set -o pipefail
-          flutter analyze lib test 2>&1 | tee candidate-diagnostics/flutter-analyze.log
+          flutter analyze lib test --no-pub 2>&1 | tee candidate-diagnostics/flutter-analyze.log
       - name: Flutter tests
         run: |
           set -o pipefail
-          flutter test --reporter expanded 2>&1 | tee candidate-diagnostics/flutter-test.log
+          flutter test --reporter expanded --no-pub 2>&1 | tee candidate-diagnostics/flutter-test.log
       - name: Validate app manifest
         run: python3 tools/check_android_manifest.py
       - name: Build release candidate with a temporary build key
@@ -144,7 +149,7 @@ jobs:
           set -o pipefail
           # This candidate is never published or installed as the trusted release.
           # The generated Flutter template uses its temporary debug signing key.
-          flutter build apk --release 2>&1 | tee candidate-diagnostics/flutter-build.log
+          flutter build apk --release --no-pub 2>&1 | tee candidate-diagnostics/flutter-build.log
       - name: Verify candidate package and preserve exact bytes
         run: |
           python3 - <<'PY'

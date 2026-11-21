@@ -1,10 +1,6 @@
-name: Resolve initial Dart dependency lockfile
+name: Verify the Dart dependency baseline
 
 on:
-  # This bootstrap trigger is removed after the generated lockfile is reviewed.
-  push:
-    paths:
-      - '.github/workflows/resolve-dart-lockfile.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,47 +22,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Resolve or verify the Dart dependency lockfile
+      - name: Verify the committed Dart dependency lockfile
         run: |
           set -euo pipefail
-          # Resolve only the initial missing baseline. Never upgrade an existing lock.
-          if [[ -f pubspec.lock ]]; then
-            flutter pub get --enforce-lockfile
-          else
-            flutter pub get
-          fi
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock
       - name: Preserve the exact lockfile and resolved dependency graph
-        run: |
-          set -euo pipefail
-          mkdir -p dart-dependency-baseline
-          cp pubspec.yaml pubspec.lock dart-dependency-baseline/
-          flutter pub deps --json > dart-dependency-baseline/pub-deps.json
-          flutter --version --machine > dart-dependency-baseline/flutter-version.json
-          python3 - <<'PY'
-          import hashlib, json, os
-          from pathlib import Path
-          output = Path('dart-dependency-baseline')
-          graph = json.loads((output / 'pub-deps.json').read_text())
-          toolchain = json.loads((output / 'flutter-version.json').read_text())
-          if not isinstance(graph.get('packages'), list) or not graph['packages']:
-              raise SystemExit('The resolved Dart dependency graph is missing packages.')
-          if toolchain.get('frameworkVersion') != '3.50.0':
-              raise SystemExit('The resolved lockfile must use the pinned Flutter 3.50.0 SDK.')
-          metadata = {
-              'kind': 'dart-dependency-baseline',
-              'sourceCommit': os.environ['GITHUB_SHA'],
-              'workflowRunId': os.environ['GITHUB_RUN_ID'],
-              'flutterVersion': toolchain['frameworkVersion'],
-              'packageCount': len(graph['packages']),
-              'filesSha256': {
-                  path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                  for path in sorted(output.iterdir()) if path.is_file()
-              },
-              'note': 'Resolved from this commit for review; not evidence of historical APK dependencies.',
-          }
-          (output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
-          print(f"Preserved {metadata['packageCount']} resolved Dart packages and the exact lockfile.")
-          PY
+        run: python3 tools/capture_dart_dependencies.py --output dart-dependency-baseline
       - name: Upload the dependency baseline for review
         uses: actions/upload-artifact@v4
         with:

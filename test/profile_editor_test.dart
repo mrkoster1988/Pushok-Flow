@@ -23,6 +23,7 @@ Future<void> _openEditor(
   bool connectAfterSave = false,
   ValueChanged<String?>? onResult,
 }) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   await tester.pumpWidget(MaterialApp(
     theme: buildPushokTheme(),
     home: Scaffold(body: Builder(builder: (context) => Center(
@@ -93,6 +94,7 @@ void main() {
     expect(field.obscureText, isTrue);
     expect(field.readOnly, isTrue);
     expect(field.maxLines, 1);
+    expect(field.autofillHints, isNull);
     await tester.tap(find.byKey(_visibility));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
@@ -106,6 +108,184 @@ void main() {
     await tester.pumpAndSettle();
     expect(saved, _config);
     expect(result, _config);
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Every non-resumed state hides the draft and rejects a queued reveal',
+      (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    const draft = '$_config\n# Unsaved local edit\n';
+    String? saved;
+    await _openEditor(tester,
+      initialConfig: _config,
+      onSave: (config) async { saved = config; },
+    );
+
+    for (final transition in const [
+      (AppLifecycleState.inactive,
+        [AppLifecycleState.inactive], [AppLifecycleState.resumed]),
+      (AppLifecycleState.hidden,
+        [AppLifecycleState.inactive, AppLifecycleState.hidden],
+        [AppLifecycleState.inactive, AppLifecycleState.resumed]),
+      (AppLifecycleState.paused,
+        [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused],
+        [AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed]),
+      (AppLifecycleState.detached,
+        [AppLifecycleState.inactive, AppLifecycleState.hidden,
+          AppLifecycleState.paused, AppLifecycleState.detached],
+        [AppLifecycleState.resumed]),
+    ]) {
+      final state = transition.$1;
+      await tester.tap(find.byKey(_visibility));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
+      await tester.enterText(find.byKey(_field), draft);
+      final controller = tester.widget<TextField>(find.byKey(_field)).controller!;
+      controller.value = controller.value.copyWith(
+        selection: TextSelection(baseOffset: 0, extentOffset: draft.length),
+        composing: const TextRange(start: 1, end: 4),
+      );
+      final queuedReveal = tester.widget<IconButton>(find.byKey(_visibility)).onPressed!;
+
+      for (final next in transition.$2) {
+        tester.binding.handleAppLifecycleStateChanged(next);
+      }
+      tester.binding.handleAppLifecycleStateChanged(state);
+      // Call the previously captured action before a rebuild can disable it.
+      queuedReveal();
+      for (final next in transition.$3) {
+        tester.binding.handleAppLifecycleStateChanged(next);
+      }
+      await tester.pumpAndSettle();
+
+      final field = tester.widget<TextField>(find.byKey(_field));
+      expect(field.obscureText, isTrue, reason: state.name);
+      expect(field.readOnly, isTrue);
+      expect(field.controller!.text, draft);
+      expect(field.controller!.selection.isCollapsed, isTrue);
+      expect(field.controller!.value.composing, TextRange.empty);
+      expect(field.focusNode!.hasFocus, isFalse);
+      expect(tester.testTextInput.isVisible, isFalse);
+    }
+
+    // Returning to the app never reveals automatically; a new tap still works.
+    await tester.tap(find.byKey(_visibility));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saved, draft);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A pending paste can finish in the background without revealing or altering its text',
+      (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    const pasted = '[Interface]\r\nPrivateKey = pasted-test-key\r\n\r\n'
+        '[Peer]\r\nPublicKey = pasted-test-peer\r\n';
+    final pending = Completer<Object?>();
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return pending.future;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    String? saved;
+    await _openEditor(tester,
+      initialConfig: _config,
+      onSave: (config) async { saved = config; },
+    );
+    await tester.tap(find.byKey(_visibility));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(_paste));
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+
+    pending.complete({'text': pasted});
+    await tester.pumpAndSettle();
+    var field = tester.widget<TextField>(find.byKey(_field));
+    expect(field.controller!.text, pasted);
+    expect(field.obscureText, isTrue);
+    expect(field.controller!.selection.isCollapsed, isTrue);
+    expect(tester.widget<IconButton>(find.byKey(_visibility)).onPressed, isNull);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    field = tester.widget<TextField>(find.byKey(_field));
+    expect(field.obscureText, isTrue);
+    expect(field.controller!.text, pasted);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saved, pasted);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A save failure after leaving the app preserves a hidden draft and safe feedback',
+      (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    final pending = Completer<void>();
+    String? submitted;
+    await _openEditor(tester,
+      initialConfig: _config,
+      onSave: (config) { submitted = config; return pending.future; },
+    );
+    await tester.tap(find.byKey(_visibility));
+    await tester.pumpAndSettle();
+    await _tapSave(tester);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(tester.widget<TextField>(find.byKey(_field)).enabled, isFalse);
+    pending.completeError(PlatformException(code: 'PROFILE_SAVE_FAILED',
+        message: 'SENSITIVE_SAVE_DETAIL', details: {'privateKey': 'SENSITIVE_SAVE_DETAIL'}));
+    await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byKey(_field));
+    expect(field.obscureText, isTrue);
+    expect(field.controller!.text, _config);
+    expect(submitted, _config);
+    expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
+    expect(find.textContaining('SENSITIVE_SAVE_DETAIL'), findsNothing);
+    expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNotNull);
+    await tester.tap(find.byKey(_close));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A pending paste after disposal cannot change the next screen',
+      (tester) async {
+    final pending = Completer<Object?>();
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return pending.future;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await _openEditor(tester,
+      initialConfig: _config,
+      onSave: (_) async {},
+    );
+    await tester.tap(find.byKey(_paste));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: Text('Следующий экран')),
+    ));
+    pending.complete({'text': _config});
+    await tester.pumpAndSettle();
+    expect(find.text('Следующий экран'), findsOneWidget);
     expect(find.byType(WireGuardProfileEditor), findsNothing);
     expect(tester.takeException(), isNull);
   });

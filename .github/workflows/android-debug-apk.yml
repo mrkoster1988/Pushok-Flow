@@ -37,7 +37,12 @@ jobs:
           set -o pipefail
           bash tools/bootstrap_android.sh 2>&1 | tee diagnostics/bootstrap.log
       - name: Install dependencies
-        run: flutter pub get
+        run: |
+          set -euo pipefail
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock
+      - name: Preserve resolved Dart dependencies
+        run: python3 tools/capture_dart_dependencies.py --output diagnostics/dart-dependencies
       - name: Ensure Android tooling is installed
         run: |
           test -n "${ANDROID_HOME:-}"
@@ -61,11 +66,11 @@ jobs:
       - name: Static analysis
         run: |
           set -o pipefail
-          flutter analyze lib 2>&1 | tee diagnostics/flutter-analyze.log
+          flutter analyze lib --no-pub 2>&1 | tee diagnostics/flutter-analyze.log
       - name: Flutter widget tests
         run: |
           set -o pipefail
-          flutter test --reporter expanded 2>&1 | tee diagnostics/flutter-test.log
+          flutter test --reporter expanded --no-pub 2>&1 | tee diagnostics/flutter-test.log
       - name: Validate app manifest before merge
         run: |
           python tools/check_android_manifest.py
@@ -76,7 +81,7 @@ jobs:
       - name: Build debug APK (test use only)
         run: |
           set -o pipefail
-          flutter build apk --debug -v 2>&1 | tee diagnostics/flutter-build.log
+          flutter build apk --debug --no-pub -v 2>&1 | tee diagnostics/flutter-build.log
       - name: Confirm APK exists
         run: test -s build/app/outputs/flutter-apk/app-debug.apk
       - name: Validate APK package name, INTERNET permission and VPN service

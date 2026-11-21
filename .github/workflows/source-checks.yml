@@ -23,8 +23,20 @@ jobs:
           flutter-version: '3.50.0'
           channel: stable
           cache: true
-      - run: flutter pub get
+      - run: |
+          set -euo pipefail
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock
+      - name: Preserve resolved Dart dependencies
+        run: python3 tools/capture_dart_dependencies.py --output dart-dependency-diagnostics
+      - name: Upload resolved Dart dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-source-dart-dependencies
+          path: dart-dependency-diagnostics/
+          if-no-files-found: error
+          retention-days: 30
       - name: Audit Dart package versions
         run: flutter pub outdated || true
-      - run: flutter analyze lib test
-      - run: flutter test
+      - run: flutter analyze lib test --no-pub
+      - run: flutter test --no-pub

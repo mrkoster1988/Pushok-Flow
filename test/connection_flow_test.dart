@@ -21,8 +21,13 @@ class _AndroidBridge {
   bool failProfileExists = false;
   PlatformException? connectError;
   PlatformException? saveError;
+  Object? privacyError;
+  bool invalidPrivacyToken = false;
   Completer<void>? connectGate;
+  Completer<void>? saveGate;
   Completer<String?>? loadGate;
+  Completer<String>? privacyGate;
+  final privacyTokens = <String>{};
   final calls = <MethodCall>[];
 
   List<MethodCall> named(String method) =>
@@ -46,6 +51,7 @@ class _AndroidBridge {
         if (loadGate != null) return await loadGate!.future;
         return savedProfile;
       case 'saveWireGuardProfile':
+        if (saveGate != null) await saveGate!.future;
         if (saveError != null) throw saveError!;
         savedProfile = (call.arguments as Map)['config'] as String;
         return true;
@@ -67,6 +73,23 @@ class _AndroidBridge {
           'uptimeSeconds': connected ? 12 : 0,
           'lastErrorCode': null,
         };
+    }
+    throw MissingPluginException(call.method);
+  }
+
+  Future<Object?> handlePrivacy(MethodCall call) async {
+    calls.add(call);
+    switch (call.method) {
+      case 'acquire':
+        if (privacyError != null) throw privacyError!;
+        if (invalidPrivacyToken) return '';
+        final token = privacyGate == null
+            ? 'test-lease-${named('acquire').length}' : await privacyGate!.future;
+        privacyTokens.add(token);
+        return token;
+      case 'release':
+        privacyTokens.remove((call.arguments as Map)['token']);
+        return true;
     }
     throw MissingPluginException(call.method);
   }
@@ -96,16 +119,21 @@ Future<void> _openRoutes(WidgetTester tester) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('shop.pushok.flow/app_routes');
+  const privacyChannel = MethodChannel('shop.pushok.flow/profile_privacy');
   late _AndroidBridge bridge;
 
   setUp(() {
     bridge = _AndroidBridge();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, bridge.handle);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(privacyChannel, bridge.handlePrivacy);
   });
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(privacyChannel, null);
   });
 
   testWidgets('Connect without a profile opens setup without requesting VPN', (tester) async {
@@ -140,6 +168,7 @@ void main() {
       expect(bridge.named('connectWireGuard'), hasLength(1));
       expect((bridge.named('connectWireGuard').single.arguments as Map)['config'], _profile);
       expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(bridge.named('acquire'), isEmpty);
       expect(find.text('Трафик подключён'), findsOneWidget);
       await _openRoutes(tester);
       final toggle = tester.widget<SwitchListTile>(find.byType(SwitchListTile));
@@ -260,6 +289,164 @@ void main() {
       bridge.loadGate!.complete(_profile);
       await tester.pumpAndSettle();
       expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  for (final profile in <String?>[_profile, null]) {
+    testWidgets('Delayed Connect profile lookup cannot open VPN or editor after app switching (${profile == null ? 'missing' : 'stored'})', (tester) async {
+      bridge.loadGate = Completer<String?>();
+      await _withApp(tester, () async {
+        await tester.tap(find.byKey(const Key('pushok_connect_button')));
+        await tester.pump();
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        bridge.loadGate!.complete(profile);
+        await tester.pumpAndSettle();
+        expect(bridge.named('connectWireGuard'), isEmpty);
+        expect(bridge.named('acquire'), isEmpty);
+        expect(find.byType(WireGuardProfileEditor), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    });
+  }
+
+  testWidgets('Editor waits for protection before loading and releases after its closing animation', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.privacyGate = Completer<String>();
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await tester.pump();
+      expect(bridge.named('acquire'), hasLength(1));
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+
+      bridge.privacyGate!.complete('protected-editor');
+      await tester.pumpAndSettle();
+      expect(bridge.named('loadWireGuardProfile'), hasLength(1));
+      expect(bridge.privacyTokens, {'protected-editor'});
+      await tester.tap(find.byKey(const Key('toggle_wireguard_profile_visibility')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('close_wireguard_profile')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(bridge.named('release'), isEmpty);
+      expect(bridge.privacyTokens, isNotEmpty);
+      await tester.pumpAndSettle();
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(bridge.privacyTokens, isEmpty);
+      expect(bridge.named('release'), hasLength(1));
+      expect((bridge.named('release').single.arguments as Map)['token'], 'protected-editor');
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  for (final failure in ['platform error', 'missing plugin', 'empty token']) {
+    testWidgets('Privacy $failure keeps the profile unopened and reports no native details', (tester) async {
+      bridge.savedProfile = _profile;
+      if (failure == 'platform error') {
+        bridge.privacyError = PlatformException(code: 'FAIL', message: 'SECRET_DETAIL');
+      } else if (failure == 'missing plugin') {
+        bridge.privacyError = MissingPluginException('SECRET_DETAIL');
+      } else {
+        bridge.invalidPrivacyToken = true;
+      }
+      await _withApp(tester, () async {
+        await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+        await tester.pumpAndSettle();
+        expect(find.byType(WireGuardProfileEditor), findsNothing);
+        expect(bridge.named('loadWireGuardProfile'), isEmpty);
+        expect(bridge.named('release'), isEmpty);
+        expect(find.textContaining('Не удалось защитить экран профиля.'), findsOneWidget);
+        expect(find.textContaining('SECRET_DETAIL'), findsNothing);
+        // Failed protection does not leave the editor button busy forever.
+        bridge.privacyError = null;
+        bridge.invalidPrivacyToken = false;
+        await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+        await tester.pumpAndSettle();
+        expect(find.byType(WireGuardProfileEditor), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    });
+  }
+
+  for (final waitFor in ['protection', 'profile load']) {
+    testWidgets('App switching during $waitFor cancels a late editor and releases protection', (tester) async {
+      bridge.savedProfile = _profile;
+      if (waitFor == 'protection') {
+        bridge.privacyGate = Completer<String>();
+      } else {
+        bridge.loadGate = Completer<String?>();
+      }
+      await _withApp(tester, () async {
+        await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+        await tester.pump();
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        bridge.privacyGate?.complete('late-lease');
+        bridge.loadGate?.complete(_profile);
+        await tester.pumpAndSettle();
+        expect(find.byType(WireGuardProfileEditor), findsNothing);
+        expect(bridge.privacyTokens, isEmpty);
+        expect(bridge.named('release'), hasLength(1));
+        if (waitFor == 'protection') expect(bridge.named('loadWireGuardProfile'), isEmpty);
+        expect(bridge.named('connectWireGuard'), isEmpty);
+        expect(tester.takeException(), isNull);
+      });
+    });
+  }
+
+  testWidgets('Disposed app releases a late protection acknowledgement without reading the key', (tester) async {
+    bridge.privacyGate = Completer<String>();
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+      bridge.privacyGate!.complete('disposed-lease');
+      await tester.pumpAndSettle();
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('release'), hasLength(1));
+      expect(bridge.privacyTokens, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Disposing an open editor releases its protection even without a pop result', (tester) async {
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.privacyTokens, isNotEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      expect(bridge.privacyTokens, isEmpty);
+      expect(bridge.named('release'), hasLength(1));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Save started before app switching preserves the profile without starting a late VPN request', (tester) async {
+    bridge.saveGate = Completer<void>();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return {'text': _profile};
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('paste_wireguard_profile')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_wireguard_profile')));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      bridge.saveGate!.complete();
+      await tester.pumpAndSettle();
+      expect(bridge.savedProfile, _profile);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.privacyTokens, isEmpty);
+      expect(find.text('Профиль сохранён. Нажмите «Подключить», когда будете готовы.'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
