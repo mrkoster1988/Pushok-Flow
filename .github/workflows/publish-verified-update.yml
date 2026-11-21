@@ -1,0 +1,237 @@
+name: Publish verified public v0.24.0 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - release-staging/v0.24.0.json
+      - .github/workflows/publish-verified-update.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pushok-flow-android-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'mrkoster1988/Pushok-Flow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      SOURCE_SHA: 355813cbf74a8f69a9cdf4c83869faa9d7b46b13
+      RELEASE_TAG: v0.24.0
+      RELEASE_APK: Pushok-Flow-v0.24.0.apk
+      RELEASE_CERTIFICATE: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
+    steps:
+      - name: Check out public publisher and delta
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out the exact previously tested application source
+        uses: actions/checkout@v4
+        with:
+          ref: 355813cbf74a8f69a9cdf4c83869faa9d7b46b13
+          path: verified-source
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check successful source run and refuse an existing release or tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist release-diagnostics
+          python3 - <<'PY'
+          import json, os, sys, urllib.error, urllib.request
+          from pathlib import Path
+          sys.path.insert(0, 'tools')
+          from restore_signed_apk import read_staging, require
+          staging = read_staging(Path('release-staging/v0.24.0.json'))
+          repo = staging['repository']
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                     'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+          def get(resource, missing=False):
+              request = urllib.request.Request(f'https://api.github.com/repos/{repo}/{resource}', headers=headers)
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      data = response.read(1000001)
+              except urllib.error.HTTPError as error:
+                  if missing and error.code == 404:
+                      return None
+                  raise SystemExit(f'GitHub preflight failed: HTTP {error.code}')
+              require(len(data) <= 1000000, 'Unexpectedly large GitHub metadata')
+              return json.loads(data)
+          for resource in ('releases/tags/v0.24.0', 'git/ref/tags/v0.24.0', 'releases/latest'):
+              require(get(resource, missing=True) is None,
+                      'A tag or release already exists; this first-release publisher never overwrites it.')
+          run = get(f"actions/runs/{staging['sourceRunId']}")
+          require(run.get('status') == 'completed' and run.get('conclusion') == 'success',
+                  'Candidate workflow did not complete successfully')
+          require(run.get('head_sha') == staging['sourceCommit'] and run.get('head_branch') == 'main'
+                  and run.get('event') == 'push' and run.get('path') == '.github/workflows/android-candidate.yml',
+                  'Candidate workflow is not the approved main build')
+          require(run.get('repository', {}).get('full_name') == repo
+                  and run.get('head_repository', {}).get('full_name') == repo,
+                  'Candidate came from another repository')
+          expected = staging['sourceArtifact']
+          artifact = get(f"actions/artifacts/{expected['id']}")
+          require(artifact.get('id') == expected['id'] and artifact.get('name') == expected['name']
+                  and artifact.get('expired') is False and artifact.get('size_in_bytes') == expected['zipSizeBytes']
+                  and artifact.get('digest') == 'sha256:' + expected['zipSha256'],
+                  'Candidate artifact metadata does not match the approved archive')
+          require(artifact.get('workflow_run', {}).get('id') == staging['sourceRunId']
+                  and artifact.get('workflow_run', {}).get('head_sha') == staging['sourceCommit'],
+                  'Candidate artifact belongs to another build')
+          Path('release-diagnostics/source-run.json').write_text(json.dumps(run, indent=2))
+          Path('release-diagnostics/source-artifact.json').write_text(json.dumps(artifact, indent=2))
+          print('Exact successful build and artifact confirmed; no previous release or tag exists.')
+          PY
+      - name: Download the exact public candidate artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # gh handles authenticated API redirects without forwarding our token to a CDN.
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14674086637/zip" \
+            > "$RUNNER_TEMP/approved-candidate.zip"
+      - name: Restore the already signed and verified public APK
+        run: |
+          python3 tools/restore_signed_apk.py \
+            --staging release-staging/v0.24.0.json \
+            --candidate-zip "$RUNNER_TEMP/approved-candidate.zip" \
+            --output "dist/$RELEASE_APK"
+      - name: Verify exact release bytes, signature, package and update manifest
+        run: |
+          set -euo pipefail
+          flow_tools="$ANDROID_HOME/build-tools/37.0.0"
+          test -x "$flow_tools/apksigner"
+          test -x "$flow_tools/aapt"
+          export PATH="$flow_tools:$PATH"
+          export LD_LIBRARY_PATH="$flow_tools/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          "$flow_tools/zipalign" -c -P 16 4 "dist/$RELEASE_APK"
+          python3 verified-source/tools/verify_release_apk.py "dist/$RELEASE_APK" \
+            --pubspec verified-source/pubspec.yaml \
+            --expected-certificate-sha256 "$RELEASE_CERTIFICATE" \
+            --output dist/verified-release.json 2>&1 | tee release-diagnostics/apk-validation.log
+          python3 verified-source/tools/create_update_manifest.py \
+            --apk "dist/$RELEASE_APK" --pubspec verified-source/pubspec.yaml \
+            --verified dist/verified-release.json --output dist
+          python3 - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools')
+          from restore_signed_apk import read_staging, require
+          approved = read_staging(Path('release-staging/v0.24.0.json'))['release']
+          actual = json.loads(Path('dist/update.json').read_text())
+          for field in ('packageName', 'versionName', 'versionCode', 'sizeBytes', 'sha256', 'certificateSha256'):
+              require(actual.get(field) == approved[field], 'Final update metadata differs: ' + field)
+          require(actual.get('schemaVersion') == 1 and actual.get('minSdk') == 24,
+                  'Unexpected updater compatibility metadata')
+          require(actual.get('apkUrl') == 'https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.24.0/Pushok-Flow-v0.24.0.apk',
+                  'Unexpected public APK URL')
+          PY
+      - name: Preserve verified release assets before publication
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-verified-public-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Create exact source tag and publish all three verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > release-diagnostics/release-notes.md <<'NOTES'
+          Pushok Flow 0.24.0 (24) — первая версия с постоянной подписью и обновлениями через «Профиль → Версия и обновления».
+
+          Следующие совместимые версии устанавливаются поверх приложения с сохранением локальных данных; Android запрашивает подтверждение установки.
+
+          При переходе с прежнего debug APK подпись отличается: требуется однократное удаление старой установки. Сначала сохраните исходную WireGuard-конфигурацию вне приложения.
+
+          Проверки исходной сборки: 114 Python-тестов, 40 Flutter-тестов, три исполняемых набора Kotlin (WireGuardRouting, TunnelHealth, UpdatePolicy), Flutter analyzer и release-сборка. Готовый APK повторно проверен по SHA256, постоянному сертификату, package/version/minSdk и выравниванию. Реальное VPN-подключение и установка следующего обновления на физическом устройстве пока не проверены.
+
+          Исходники: https://github.com/mrkoster1988/Pushok-Flow/commit/355813cbf74a8f69a9cdf4c83869faa9d7b46b13
+
+          SHA256 APK: `fb7c45e7bfdf2fb804a3b92cc2f4d7acb9af9173aa093307cbad975fdcf6f228`
+
+          SHA256 сертификата: `8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047`
+          NOTES
+          # POST creates a new ref only; never force-update or replace an existing tag.
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$RELEASE_TAG" -f sha="$SOURCE_SHA" > release-diagnostics/tag.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          tag = json.loads(Path('release-diagnostics/tag.json').read_text())
+          if tag.get('object', {}).get('type') != 'commit' or tag['object']['sha'] != os.environ['SOURCE_SHA']:
+              raise SystemExit('Release tag does not point at the exact tested application commit.')
+          PY
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title 'Pushok Flow 0.24.0' \
+            --notes-file release-diagnostics/release-notes.md --draft
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            "dist/$RELEASE_APK" "dist/$RELEASE_APK.sha256" dist/update.json
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > release-diagnostics/release-draft.json
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > release-diagnostics/tag-before-publish.json
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          release = json.loads(Path('release-diagnostics/release-draft.json').read_text())
+          if release.get('tag_name') != os.environ['RELEASE_TAG'] or release.get('draft') is not True:
+              raise SystemExit('Unexpected release state; publication stopped.')
+          expected = [os.environ['RELEASE_APK'], os.environ['RELEASE_APK'] + '.sha256', 'update.json']
+          assets = release.get('assets', [])
+          if sorted(a['name'] for a in assets) != sorted(expected):
+              raise SystemExit('The three release assets are incomplete; leaving draft unpublished.')
+          for asset in assets:
+              local = Path('dist') / asset['name']
+              with local.open('rb') as stream:
+                  digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+              if asset.get('state') != 'uploaded' or asset.get('size') != local.stat().st_size or asset.get('digest') != digest:
+                  raise SystemExit('Uploaded asset bytes differ; leaving draft unpublished.')
+          tag = json.loads(Path('release-diagnostics/tag-before-publish.json').read_text())
+          if tag.get('object', {}).get('type') != 'commit' or tag['object']['sha'] != os.environ['SOURCE_SHA']:
+              raise SystemExit('Release tag changed; leaving draft unpublished.')
+          PY
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: Confirm the public updater endpoint returns the verified manifest
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, time, urllib.error, urllib.request
+          from pathlib import Path
+          expected = Path('dist/update.json').read_bytes()
+          url = 'https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json'
+          for attempt in range(8):
+              try:
+                  # This public request deliberately carries no Authorization header.
+                  with urllib.request.urlopen(url, timeout=20) as response:
+                      actual = response.read(65537)
+                  if len(actual) <= 65536 and hashlib.sha256(actual).digest() == hashlib.sha256(expected).digest() and json.loads(actual) == json.loads(expected):
+                      Path('release-diagnostics/public-update.json').write_bytes(actual)
+                      print('Public latest/download/update.json exactly matches the verified release manifest.')
+                      break
+              except (OSError, ValueError):
+                  pass
+              if attempt == 7:
+                  raise SystemExit('Release published, but public updater endpoint has not been confirmed; inspect before reporting success.')
+              time.sleep(5)
+          PY
+      - name: Preserve public publication diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-public-release-diagnostics
+          path: release-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
