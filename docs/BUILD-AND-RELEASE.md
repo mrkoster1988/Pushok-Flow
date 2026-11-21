@@ -2,7 +2,13 @@
 
 > **Статус устройства — 21.11.2026:** после предупреждения Google Play Protect получены скриншоты работающего интерфейса v0.24.0. Способ завершения установки и снятие предупреждения не подтверждены. Подпись, хэш и результаты CI ниже остаются фактами о файле, но не заменяют проверку безопасности. [Отчёт и необходимые сведения](PLAY-PROTECT-v0.24.0.md).
 
-## Текущий выпуск v0.28.0
+## Текущий выпуск v0.29.0
+
+[Опубликован v0.29.0](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.29.0): поиск и фильтр исключений в «Маршрутах», очистка с подтверждением, обработка устаревших ответов и ошибок сохранения. Коммит APK `388dbb8231074405027d08cbb71c778d886188f6` прошёл [Source checks 44945075946](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44945075946) и [Android candidate 44945075956](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44945075956): 133 Python, 149 Flutter, семь Kotlin-наборов, анализатор и Android-сборка.
+
+APK с прежним постоянным сертификатом: `60824350` байт, SHA-256 `dee13244d06a8fd3baaa7f06cce8399e6e63ec66ef6521e3fb8f10ec3ec0daba`. [Публикация 44945733434](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44945733434) выпустила проверенные файлы; её последний шаг ещё получал старый манифест 0.28. [Отдельная проверка 44945945661](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44945945661) затем получила точный публичный манифест `0.29.0/29` без авторизации. Все реквизиты и ограничения: [RELEASE-v0.29.0.md](RELEASE-v0.29.0.md).
+
+## Предыдущий выпуск v0.28.0
 
 [Опубликован v0.28.0](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.28.0): главная очищена от карточек маршрутов и профиля, несколько именованных профилей перенесены в «Серверы». Точный коммит APK `5e290506b07327efa945fdee244a25f3ab03335e` успешно проверен в [Source checks 44942419662](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44942419662) и [Android candidate 44942419691](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44942419691): 133 Python, 119 Flutter, шесть Kotlin-наборов, анализатор без замечаний и Android-сборка.
 
@@ -61,7 +67,7 @@ Workflow `publish-verified-update.yml` подготовил выпуск: ска
 CI закрепляет Flutter `3.50.0`, Java 17, Kotlin CLI `2.2.21`, Material UI `1.11.1` и WireGuard `1.0.20260102`. Компилятором Kotlin для Android-приложения управляет Gradle-шаблон Flutter.
 
 1. Открыть **Actions → Android release candidate for persistent signing → Run workflow** для нужной ревизии. Workflow также запускается при изменениях кода в `main` и pull request.
-2. Дождаться успешных проверок исходников, пяти Kotlin-модулей, анализа Dart, Flutter-тестов, манифеста и `flutter build apk --release --no-pub`.
+2. Дождаться успешных проверок исходников, семи Kotlin-модулей, анализа Dart, Flutter-тестов, манифеста и `flutter build apk --release --no-pub`.
 3. Скачать кандидат и инструменты подписи из одного запуска. Проверить их контрольные суммы и `sourceCommit` в метаданных.
 4. Выполнить локальную подпись и проверку по [UPDATES.md](UPDATES.md). В таблицу выше записать SHA-256 и размер окончательного подписанного APK.
 5. Опубликовать APK, `.sha256` и `update.json` вместе в GitHub Release и проверить публичные файлы. В v0.24.0 для этого использован `publish-verified-update.yml`, который восстанавливает и проверяет уже подписанный файл без закрытого ключа в CI; порядок описан в [UPDATES.md](UPDATES.md).
