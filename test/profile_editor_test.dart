@@ -194,6 +194,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(field.controller!.text, 'Работа');
     expect(field.focusNode!.hasFocus, isFalse);
+    // Even a return before FocusManager commits the queued unfocus must finish
+    // cleanup; it cannot depend on an inactive-only post-frame callback.
+    await tester.ensureVisible(find.byKey(_name));
+    await tester.enterText(find.byKey(_name), 'Работа');
+    await tester.pump();
+    expect(field.focusNode!.hasFocus, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(field.focusNode!.hasFocus, isFalse);
+    expect(field.controller!.selection, const TextSelection.collapsed(offset: -1));
+    expect(field.controller!.value.composing, TextRange.empty);
+    expect(field.controller!.text, 'Работа');
     await _tapEditorKey(tester, _close);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

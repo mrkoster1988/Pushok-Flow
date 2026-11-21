@@ -668,7 +668,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   Widget servers() => ListView(children: [
     WireGuardProfilesCard(
       catalog: _profiles,
-      loading: _statusRefreshing || _profileBusy,
+      // Confirmation and the protected editor block actions without pretending
+      // that a catalog read is running behind the modal route.
+      loading: _statusRefreshing,
       error: !_isAndroid ? 'Профили WireGuard доступны в приложении для Android.'
           : _profilesError,
       mutationsEnabled: _canManageProfiles,

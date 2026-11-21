@@ -38,6 +38,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   late final TextEditingController _nameController;
   final FocusNode _focusNode = FocusNode();
   final FocusNode _nameFocusNode = FocusNode();
+  bool _clearNameAfterUnfocus = false;
   bool _showConfig = false;
   bool _saving = false;
   bool _pasting = false;
@@ -60,6 +61,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     super.initState();
     _controller = TextEditingController(text: widget.initialConfig);
     _nameController = TextEditingController(text: widget.initialName);
+    _nameFocusNode.addListener(_finishNameInputCleanup);
     _error = widget.initialError;
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _resumed = lifecycle == null || lifecycle == AppLifecycleState.resumed;
@@ -71,6 +73,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     _cancelPendingImport();
     WidgetsBinding.instance.removeObserver(this);
     _focusNode.dispose();
+    _nameFocusNode.removeListener(_finishNameInputCleanup);
     _nameFocusNode.dispose();
     _controller.dispose();
     _nameController.dispose();
@@ -89,6 +92,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   }
 
   void _clearInputSelection() {
+    _clearNameAfterUnfocus = true;
     _focusNode.unfocus();
     _nameFocusNode.unfocus();
     // Clear only input state. The complete multiline draft must remain intact.
@@ -96,6 +100,16 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       selection: const TextSelection.collapsed(offset: -1),
       composing: TextRange.empty,
     );
+    _nameController.clearComposing();
+    _finishNameInputCleanup();
+  }
+
+  void _finishNameInputCleanup() {
+    if (!mounted || !_clearNameAfterUnfocus || _nameFocusNode.hasFocus) return;
+    _clearNameAfterUnfocus = false;
+    // FocusManager commits unfocus asynchronously. While the name field still
+    // has focus, EditableText repairs an invalid selection to the text end.
+    // Clear it after actual focus loss; no frame or resumed app is required.
     _nameController.value = _nameController.value.copyWith(
       selection: const TextSelection.collapsed(offset: -1),
       composing: TextRange.empty,
