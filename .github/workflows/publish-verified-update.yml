@@ -2,11 +2,6 @@ name: Publish verified public v0.24.0 APK
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - release-staging/v0.24.0.json
-      - .github/workflows/publish-verified-update.yml
 
 permissions:
   contents: read
@@ -182,7 +177,11 @@ jobs:
             --notes-file release-diagnostics/release-notes.md --draft
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             "dist/$RELEASE_APK" "dist/$RELEASE_APK.sha256" dist/update.json
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > release-diagnostics/release-draft.json
+          # The REST lookup by tag excludes unpublished drafts. Resolve the
+          # authenticated CLI release first, then read its numeric REST ID.
+          release_id=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > release-diagnostics/release-draft.json
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > release-diagnostics/tag-before-publish.json
           python3 - <<'PY'
           import hashlib, json, os

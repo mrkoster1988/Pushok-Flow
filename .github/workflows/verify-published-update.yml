@@ -1,0 +1,62 @@
+name: Verify published v0.24.0 updater endpoint
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-published-update.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'mrkoster1988/Pushok-Flow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch and verify the public updater manifest without credentials
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, time, urllib.error, urllib.request
+          from pathlib import Path
+          url = 'https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json'
+          expected_sha = '89224573d16faf703f32182039f9332357c3bd016a0c0f357122462d3e5dc3c8'
+          expected = {
+              'schemaVersion': 1,
+              'packageName': 'shop.pushok.flow',
+              'versionName': '0.24.0',
+              'versionCode': 24,
+              'minSdk': 24,
+              'apkUrl': 'https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.24.0/Pushok-Flow-v0.24.0.apk',
+              'sha256': 'fb7c45e7bfdf2fb804a3b92cc2f4d7acb9af9173aa093307cbad975fdcf6f228',
+              'sizeBytes': 60332830,
+              'certificateSha256': '8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047',
+          }
+          last_error = 'No public response'
+          for attempt in range(5):
+              try:
+                  # No token, Authorization header, session or signed-in checkout.
+                  request = urllib.request.Request(url, headers={
+                      'Accept': 'application/json', 'User-Agent': 'Pushok-Flow-public-release-check'})
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      payload = response.read(432)
+                  if len(payload) != 431 or hashlib.sha256(payload).hexdigest() != expected_sha:
+                      raise ValueError('Public manifest bytes or SHA256 differ from the verified release')
+                  if json.loads(payload) != expected:
+                      raise ValueError('Public manifest schema or release fields differ')
+                  print('Public latest/download/update.json verified: 431 bytes; SHA256 ' + expected_sha)
+                  print('Verified v0.24.0 (24), package, minSdk, APK URL/size/SHA256 and persistent certificate.')
+                  Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(
+                      'Public updater endpoint verified without credentials.\n\n'
+                      + url + '\n\nManifest: 431 bytes, SHA256 `' + expected_sha + '`.\n', encoding='utf-8')
+                  break
+              except urllib.error.HTTPError as error:
+                  last_error = f'Public endpoint returned HTTP {error.code}'
+              except (OSError, ValueError) as error:
+                  last_error = str(error) if isinstance(error, ValueError) else 'Public request did not complete'
+              if attempt == 4:
+                  raise SystemExit(last_error)
+              time.sleep(3)
+          PY
