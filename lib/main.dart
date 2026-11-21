@@ -797,12 +797,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         gradient: LinearGradient(colors: _tunnelConfirmed
           ? [PushokPalette.mint, PushokPalette.glowCyan]
           : [PushokPalette.glowCyan, PushokPalette.electricBlue, PushokPalette.glowViolet]),
-        boxShadow: [
-          BoxShadow(color: (_tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan)
-            .withValues(alpha: .42), blurRadius: 30, spreadRadius: 3),
-          if (!_tunnelConfirmed) BoxShadow(color: PushokPalette.glowViolet
-            .withValues(alpha: .24), blurRadius: 24, spreadRadius: 1),
-        ]),
+        boxShadow: [BoxShadow(color: (_tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan)
+          .withValues(alpha: .45), blurRadius: 30, spreadRadius: 3)]),
       child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
         key: const Key('pushok_connect_button'),
         customBorder: const CircleBorder(),
@@ -817,10 +813,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           Text(connecting ? (connected ? 'Отключение' : 'Подключение') : connected ? 'Отключить' : 'Подключить',
             textAlign: TextAlign.center, style: const TextStyle(color: Colors.white,
               fontWeight: FontWeight.w800, fontSize: 20)),
-          const SizedBox(height: 4),
-          Text('трафик', textAlign: TextAlign.center,
-            style: TextStyle(color: PushokPalette.muted.withValues(alpha: .9),
-              fontWeight: FontWeight.w500, fontSize: 14)),
         ]),
       )),
     )),
