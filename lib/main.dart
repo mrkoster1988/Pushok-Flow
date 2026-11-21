@@ -8,8 +8,10 @@ import 'ai/pushok_ai.dart';
 import 'ai/pushok_ai_memory.dart';
 import 'platform/wireguard_tunnel.dart';
 import 'platform/profile_privacy.dart';
+import 'platform/tunnel_diagnostics.dart';
 import 'ui/wireguard_profile_editor.dart';
 import 'ui/app_updates_card.dart';
+import 'ui/tunnel_diagnostics_card.dart';
 
 void main() => runApp(const PushokFlowApp());
 
@@ -45,7 +47,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   String? connectionError;
   bool savedProfile = false;
   String? lastErrorCode;
-  int uptimeSeconds = 0;
+  TunnelDiagnostics _diagnostics = const TunnelDiagnostics.unavailable();
+  bool _diagnosticsStale = true;
   Timer? _healthPoll;
   bool connected = false;
   bool connecting = false;
@@ -59,6 +62,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   Map<String, int> feedback = {};
   String? feedbackMessage;
   bool get _isAndroid => widget.isAndroid ?? Platform.isAndroid;
+  bool get _nativeBusy => _diagnostics.isKnown &&
+      _diagnostics.transitioning && !_diagnosticsStale;
+  bool get _tunnelConfirmed => connected && _diagnostics.isKnown &&
+      !_diagnosticsStale && !_nativeBusy && !connecting;
 
   void _showNotice(String message) {
     if (!mounted) return;
@@ -90,16 +97,24 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTunnel({String? profile}) async {
-    if (!_isAndroid || !_foreground || connecting || _profileBusy || _profileEditorOpen) return;
+    if (!_isAndroid || !_foreground || connecting || _nativeBusy || _profileBusy || _profileEditorOpen) return;
     final disconnecting = connected;
     final requestEpoch = _profileRequestEpoch;
     var needsProfile = false;
     _statusEpoch++;
-    setState(() { connecting = true; connectionError = null; });
+    setState(() {
+      connecting = true;
+      connectionError = null;
+      _diagnosticsStale = true;
+    });
     try {
       if (disconnecting) {
         await WireGuardTunnel.disconnect();
-        if (mounted) setState(() { connected = false; uptimeSeconds = 0; });
+        if (mounted) setState(() {
+          connected = false;
+          _diagnostics = const TunnelDiagnostics(isKnown: true, connected: false,
+              statistics: TunnelStatistics.inactive());
+        });
       } else {
         // Read the protected profile only after the user's Connect action.
         final config = profile ?? await WireGuardTunnel.loadProfile();
@@ -110,7 +125,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         } else {
           final ok = await WireGuardTunnel.connect(config);
           if (!mounted) return;
-          setState(() { connected = ok; savedProfile = true; });
+          setState(() {
+            connected = ok;
+            savedProfile = true;
+            _diagnostics = TunnelDiagnostics(isKnown: true, connected: ok);
+          });
           if (!ok) {
             final message = _connectionMessage(StateError('not connected'));
             setState(() => connectionError = message);
@@ -156,9 +175,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   void _startHealthPolling() {
     _healthPoll?.cancel();
-    if (!_isAndroid) return;
+    if (!_isAndroid || !_foreground) return;
     _healthPoll = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (connected && !connecting && mounted) _refreshProfileStatus();
+      if ((connected || _nativeBusy || !_diagnostics.isKnown) &&
+          !connecting && mounted && _foreground) _refreshProfileStatus();
     });
   }
 
@@ -172,6 +192,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       // A request made before losing focus must not open the editor later,
       // even if the user returns before a native response arrives.
       _profileRequestEpoch++;
+      // A sample requested before app switching is no longer a fresh reading.
+      _statusEpoch++;
+      setState(() => _diagnosticsStale = true);
       _healthPoll?.cancel();
     }
   }
@@ -201,34 +224,54 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshProfileStatus() async {
-    if (!_isAndroid || !mounted || connecting || _statusRefreshing) return;
-    _statusRefreshing = true;
+    if (!_isAndroid || !mounted || !_foreground || connecting || _statusRefreshing) return;
+    setState(() => _statusRefreshing = true);
     final epoch = _statusEpoch;
     try {
       try {
-        final exists = await WireGuardTunnel.savedProfileExists;
-        if (mounted && epoch == _statusEpoch) {
+        final exists = await WireGuardTunnel.savedProfileExists
+            .timeout(const Duration(seconds: 5));
+        if (mounted && _foreground && epoch == _statusEpoch) {
           setState(() => savedProfile = exists);
         }
       } catch (_) { // A profile-store error must not prevent status refresh.
       }
-      if (!mounted) return;
+      if (!mounted || !_foreground || epoch != _statusEpoch) return;
       try {
-        final info = await WireGuardTunnel.diagnostics();
-        if (mounted && epoch == _statusEpoch) setState(() {
-          connected = info['connected'] == true;
-          lastErrorCode = info['lastErrorCode'] as String?;
-          uptimeSeconds = (info['uptimeSeconds'] as num?)?.toInt() ?? 0;
+        final info = await WireGuardTunnel.diagnostics()
+            .timeout(const Duration(seconds: 5));
+        if (mounted && _foreground && epoch == _statusEpoch) setState(() {
+          _diagnostics = info;
+          _diagnosticsStale = !info.isKnown;
+          if (info.isKnown) {
+            connected = info.connected;
+          } else if (info.connected) {
+            // Retain an explicit last-known UP state for the Disconnect action.
+            // An unknown read must never claim a successful disconnect.
+            connected = true;
+          }
+          lastErrorCode = info.lastErrorCode;
         });
-      } catch (_) { // No secrets in UI diagnostics.
+      } catch (_) {
+        if (mounted && _foreground && epoch == _statusEpoch) setState(() {
+          _diagnostics = TunnelDiagnostics.unavailable(connected: connected);
+          _diagnosticsStale = true;
+          lastErrorCode = null;
+        });
       }
     } finally {
-      _statusRefreshing = false;
+      if (mounted) {
+        setState(() => _statusRefreshing = false);
+        // Coalesce a resume/connect refresh behind an older in-flight sample.
+        if (_foreground && !connecting && epoch != _statusEpoch) {
+          unawaited(_refreshProfileStatus());
+        }
+      }
     }
   }
 
   Future<void> _editProfile({bool connectAfterSave = false, String? initialConfig}) async {
-    if (!_isAndroid || !_foreground || connecting || connected || _profileBusy || _profileEditorOpen) return;
+    if (!_isAndroid || !_foreground || connecting || _nativeBusy || connected || _profileBusy || _profileEditorOpen) return;
     setState(() => _profileBusy = true);
     final requestEpoch = _profileRequestEpoch;
     ProfilePrivacy? protection;
@@ -252,7 +295,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         initialError = _connectionMessage(error);
       }
       if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
-      if (connected || connecting) {
+      if (connected || connecting || _nativeBusy) {
         _showNotice('Для изменения профиля отключите VPN.');
         return;
       }
@@ -322,7 +365,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _deleteProfile() async {
-    if (!_isAndroid || connected || connecting || _profileBusy || _profileEditorOpen) return;
+    if (!_isAndroid || connected || connecting || _nativeBusy || _profileBusy || _profileEditorOpen) return;
     _statusEpoch++;
     setState(() => _profileBusy = true);
     try {
@@ -354,7 +397,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _setBypass(String packageName, bool value) async {
-    if (connected || connecting || _savingRoute) return;
+    if (connected || connecting || _nativeBusy || _savingRoute) return;
     final updated = {...bypassPackages};
     if (value) { updated.add(packageName); } else { updated.remove(packageName); }
     setState(() => _savingRoute = true);
@@ -374,7 +417,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.25.0'))]),
+      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.26.0'))]),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],
@@ -413,19 +456,20 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       height: constraints.maxWidth < 340 ? 176 : 202,
       padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(shape: BoxShape.circle,
-        gradient: LinearGradient(colors: connected
+        gradient: LinearGradient(colors: _tunnelConfirmed
           ? [PushokPalette.mint, PushokPalette.glowCyan]
           : [PushokPalette.glowCyan, PushokPalette.electricBlue, PushokPalette.glowViolet]),
-        boxShadow: [BoxShadow(color: (connected ? PushokPalette.mint : PushokPalette.glowCyan)
+        boxShadow: [BoxShadow(color: (_tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan)
           .withValues(alpha: .45), blurRadius: 30, spreadRadius: 3)]),
       child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
         key: const Key('pushok_connect_button'),
         customBorder: const CircleBorder(),
-        onTap: connecting || _profileBusy || _profileEditorOpen || !_isAndroid
+        onTap: connecting || _nativeBusy || _profileBusy || _profileEditorOpen || !_isAndroid
             ? null : () => _toggleTunnel(),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(connected ? Icons.check_circle_outline : Icons.power_settings_new,
-            color: connected ? PushokPalette.mint : PushokPalette.glowCyan, size: 54),
+          Icon(_tunnelConfirmed ? Icons.check_circle_outline
+              : connected ? Icons.info_outline : Icons.power_settings_new,
+            color: _tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan, size: 54),
           const SizedBox(height: 10),
           Text(connecting ? (connected ? 'Отключение' : 'Подключение') : connected ? 'Отключить' : 'Подключить',
             textAlign: TextAlign.center, style: const TextStyle(color: Colors.white,
@@ -437,9 +481,17 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     )),
     const SizedBox(height: 18),
     Center(child: PushokStatusChip(
-      label: connecting ? (connected ? 'Отключение VPN' : 'Соединение устанавливается') : connected ? 'Трафик подключён' : 'Статус: отключено',
-      icon: connecting ? Icons.sync : connected ? Icons.verified_user_outlined : Icons.circle,
-      color: connecting ? PushokPalette.glowCyan : connected ? PushokPalette.mint : PushokPalette.orange)),
+      label: connecting ? (connected ? 'Отключение туннеля' : 'Соединение устанавливается')
+          : _nativeBusy ? 'Состояние изменяется'
+          : _isAndroid && (_diagnosticsStale || !_diagnostics.isKnown)
+              ? 'Статус уточняется'
+              : connected ? 'Туннель включён' : 'Статус: отключено',
+      icon: connecting || _nativeBusy ? Icons.sync
+          : _diagnosticsStale ? Icons.info_outline
+          : connected ? Icons.shield_outlined : Icons.circle,
+      color: connecting || _nativeBusy ? PushokPalette.glowCyan
+          : _diagnosticsStale ? PushokPalette.muted
+          : connected ? PushokPalette.mint : PushokPalette.orange)),
     if (connectionError != null) Padding(
       padding: const EdgeInsets.only(top: 10),
       child: Semantics(liveRegion: true, child: Text(connectionError!,
@@ -448,14 +500,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     ),
     if (!connected && !connecting) Center(child: TextButton.icon(
       key: const Key('configure_wireguard_profile'),
-      onPressed: !_isAndroid || _profileBusy || _profileEditorOpen ? null : () => _editProfile(),
+      onPressed: !_isAndroid || _nativeBusy || _profileBusy || _profileEditorOpen ? null : () => _editProfile(),
       icon: Icon(savedProfile ? Icons.check_circle_outline : Icons.add_circle_outline, size: 18),
       label: Text(savedProfile ? 'Профиль сохранён · изменить' : 'Добавить профиль WireGuard'),
     )),
-    if (connected && uptimeSeconds > 0) Center(child: Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Text('Время соединения: ${Duration(seconds: uptimeSeconds).inMinutes} мин ${uptimeSeconds % 60} сек',
-        style: const TextStyle(color: PushokPalette.muted, fontSize: 12)))),
     const SizedBox(height: 18),
     Row(children: [
       Expanded(child: _homeShortcut(Icons.dns_outlined, 'Серверы', 2)),
@@ -464,6 +512,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       const SizedBox(width: 9),
       Expanded(child: _homeShortcut(Icons.auto_awesome_outlined, 'Pushok ИИ', 3)),
     ]),
+    if (_isAndroid) ...[
+      const SizedBox(height: 14),
+      TunnelDiagnosticsCard(
+        diagnostics: _diagnostics,
+        refreshing: _statusRefreshing,
+        stale: _diagnosticsStale,
+        onRefresh: connecting || _profileBusy || _profileEditorOpen || !_foreground
+            ? null : _refreshProfileStatus,
+      ),
+    ],
     const SizedBox(height: 14),
     PushokPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Row(children: [Icon(Icons.shield_outlined, color: PushokPalette.glowCyan),
@@ -503,13 +561,13 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       Wrap(spacing: 8, runSpacing: 8, children: [
         OutlinedButton.icon(
           key: const Key('edit_wireguard_profile'),
-          onPressed: !_isAndroid || connected || connecting || _profileBusy || _profileEditorOpen
+          onPressed: !_isAndroid || connected || connecting || _nativeBusy || _profileBusy || _profileEditorOpen
               ? null : () => _editProfile(),
           icon: const Icon(Icons.edit_outlined),
           label: Text(savedProfile ? 'Изменить профиль' : 'Добавить профиль')),
         if (savedProfile) OutlinedButton.icon(
           key: const Key('delete_wireguard_profile'),
-          onPressed: !_isAndroid || connected || connecting || _profileBusy || _profileEditorOpen
+          onPressed: !_isAndroid || connected || connecting || _nativeBusy || _profileBusy || _profileEditorOpen
               ? null : _deleteProfile,
           icon: const Icon(Icons.delete_outline), label: const Text('Удалить')),
       ]),
@@ -547,7 +605,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       child: card(SwitchListTile.adaptive(
         contentPadding: EdgeInsets.zero, title: Text(app.label), subtitle: Text(app.packageName),
         value: bypassPackages.contains(app.packageName),
-        onChanged: connected || connecting || _savingRoute ? null : (v) => _setBypass(app.packageName, v),
+        onChanged: connected || connecting || _nativeBusy || _savingRoute ? null : (v) => _setBypass(app.packageName, v),
       )),
     )),
     if (!_isAndroid) card(const Text('iOS: исключение приложений в обычном VPN недоступно.')),
@@ -582,7 +640,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         icon: const Icon(Icons.delete_outline), label: const Text('Очистить память Pushok ИИ')),
       if (feedbackMessage != null) Text(feedbackMessage!, style: const TextStyle(color: PushokFlowApp.secondary)),
       const SizedBox(height: 12),
-      const Text('Автоматическое обучение, диагностика сети и рекомендации на основе результатов — следующие этапы.',
+      const Text('Статистика WireGuard доступна на главной. Автоматическое обучение '
+        'и проверка доступности сайтов — следующие этапы.',
         style: TextStyle(color: PushokFlowApp.secondary)),
     ])),
   ]);

@@ -134,11 +134,55 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "vpnStatus" -> io.execute {
-                        val active = try { backend?.getState(tunnel) == Tunnel.State.UP } catch (_: Exception) { connected }
-                        connected = active
-                        if (!active) Session.connectedSinceElapsedMs = null
+                        val currentBackend = backend
+                        var stateKnown = true
+                        var active = try {
+                            currentBackend?.getState(tunnel) == Tunnel.State.UP
+                        } catch (_: Exception) {
+                            stateKnown = false
+                            connected // Keep the last known state; a read failure is not a disconnect.
+                        }
+                        var samples: List<TunnelHealth.PeerSample>? = null
+                        var sampledSessionStartMs: Long? = null
+                        if (stateKnown && active && !Session.operationInProgress.get()) {
+                            sampledSessionStartMs = Session.connectedSinceElapsedMs
+                            samples = try {
+                                val statistics = currentBackend?.getStatistics(tunnel)
+                                    ?: throw IllegalStateException("Tunnel backend unavailable")
+                                statistics.peers().map { key ->
+                                    val peer = statistics.peer(key)
+                                        ?: throw IllegalStateException("Incomplete tunnel statistics")
+                                    TunnelHealth.PeerSample(peer.rxBytes(), peer.txBytes(),
+                                        peer.latestHandshakeEpochMillis())
+                                }
+                            } catch (_: Exception) {
+                                // Native errors may contain profile data. The UI receives only
+                                // unavailable numeric statistics, never raw exceptions or keys.
+                                null
+                            }
+                            // A service can stop during the native statistics read. Discard its
+                            // metrics if the tunnel state changed before the snapshot is returned.
+                            try {
+                                active = currentBackend?.getState(tunnel) == Tunnel.State.UP
+                            } catch (_: Exception) {
+                                stateKnown = false
+                                active = connected
+                                samples = null
+                            }
+                        }
+                        if (stateKnown) {
+                            connected = active
+                            if (!active) Session.connectedSinceElapsedMs = null
+                        }
+                        val currentSessionStartMs = Session.connectedSinceElapsedMs
+                        // A replacement Activity has its own IO executor. If a reconnect
+                        // finished during the read, old-session bytes must not accompany
+                        // the new session's uptime even when both state reads returned UP.
+                        if (sampledSessionStartMs != currentSessionStartMs) samples = null
                         val status = TunnelHealth.snapshot(active, Session.operationInProgress.get(),
-                            Session.connectedSinceElapsedMs, SystemClock.elapsedRealtime(), lastErrorCode)
+                            currentSessionStartMs, SystemClock.elapsedRealtime(), lastErrorCode,
+                            stateKnown = stateKnown, peerSamples = samples,
+                            nowEpochMs = System.currentTimeMillis())
                         runOnUiThread { result.success(status) }
                     }
                     "savedProfileExists" -> result.success(secureStore.exists())

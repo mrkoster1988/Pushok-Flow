@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/main.dart';
 import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
+import 'package:pushok_flow/ui/tunnel_diagnostics_card.dart';
 
 // Synthetic test data; the platform channel is mocked and never opens a VPN.
 const _profile = '[Interface]\n'
@@ -15,6 +16,22 @@ const _profile = '[Interface]\n'
     'AllowedIPs = 0.0.0.0/0\n'
     'Endpoint = vpn.example:51820\n';
 
+Map<String, Object?> _statistics({int rx = 2048, int tx = 1024, int? age = 5}) => {
+  'status': 'available',
+  'rxBytes': rx,
+  'txBytes': tx,
+  'latestHandshakeAgeSeconds': age,
+  'handshakeStatus': age == null ? 'never' : 'observed',
+};
+
+Map<String, Object?> _snapshot({bool active = true, int rx = 2048}) => {
+  'connected': active,
+  'state': active ? 'connected' : 'disconnected',
+  'uptimeSeconds': active ? 12 : 0,
+  'lastErrorCode': null,
+  'statistics': active ? _statistics(rx: rx) : {'status': 'inactive'},
+};
+
 class _AndroidBridge {
   String? savedProfile;
   bool connected = false;
@@ -22,11 +39,16 @@ class _AndroidBridge {
   PlatformException? connectError;
   PlatformException? saveError;
   Object? privacyError;
+  Object? statusError;
+  String? statusState;
+  bool? statusConnected;
+  Map<String, Object?> statistics = _statistics();
   bool invalidPrivacyToken = false;
   Completer<void>? connectGate;
   Completer<void>? saveGate;
   Completer<String?>? loadGate;
   Completer<String>? privacyGate;
+  Completer<Object?>? statusGate;
   final privacyTokens = <String>{};
   final calls = <MethodCall>[];
 
@@ -67,11 +89,14 @@ class _AndroidBridge {
         connected = false;
         return {'connected': false};
       case 'vpnStatus':
+        if (statusError != null) throw statusError!;
+        if (statusGate != null) return await statusGate!.future;
         return {
-          'connected': connected,
-          'state': connected ? 'connected' : 'disconnected',
+          'connected': statusConnected ?? connected,
+          'state': statusState ?? (connected ? 'connected' : 'disconnected'),
           'uptimeSeconds': connected ? 12 : 0,
           'lastErrorCode': null,
+          'statistics': connected ? statistics : {'status': 'inactive'},
         };
     }
     throw MissingPluginException(call.method);
@@ -115,6 +140,14 @@ Future<void> _openRoutes(WidgetTester tester) async {
   ));
   await tester.pumpAndSettle();
 }
+
+Future<void> _showDiagnostics(WidgetTester tester) async {
+  await tester.ensureVisible(find.byKey(const Key('tunnel_diagnostics_card')));
+  await tester.pumpAndSettle();
+}
+
+String? _diagnosticValue(WidgetTester tester, String key) =>
+    tester.widget<Text>(find.byKey(Key(key))).data;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -169,7 +202,7 @@ void main() {
       expect((bridge.named('connectWireGuard').single.arguments as Map)['config'], _profile);
       expect(find.byType(WireGuardProfileEditor), findsNothing);
       expect(bridge.named('acquire'), isEmpty);
-      expect(find.text('Трафик подключён'), findsOneWidget);
+      expect(find.text('Туннель включён'), findsOneWidget);
       await _openRoutes(tester);
       final toggle = tester.widget<SwitchListTile>(find.byType(SwitchListTile));
       expect(toggle.onChanged, isNull);
@@ -195,7 +228,7 @@ void main() {
       expect(bridge.calls.indexWhere((c) => c.method == 'saveWireGuardProfile'),
           lessThan(bridge.calls.indexWhere((c) => c.method == 'connectWireGuard')));
       expect(bridge.savedProfile, _profile);
-      expect(find.text('Трафик подключён'), findsOneWidget);
+      expect(find.text('Туннель включён'), findsOneWidget);
     });
   });
 
@@ -248,7 +281,7 @@ void main() {
       expect(bridge.named('connectWireGuard'), hasLength(1));
       bridge.connectGate!.complete();
       await tester.pumpAndSettle();
-      expect(find.text('Трафик подключён'), findsOneWidget);
+      expect(find.text('Туннель включён'), findsOneWidget);
     });
   });
 
@@ -256,7 +289,7 @@ void main() {
     bridge.savedProfile = _profile;
     bridge.connected = true;
     await _withApp(tester, () async {
-      expect(find.text('Трафик подключён'), findsOneWidget);
+      expect(find.text('Туннель включён'), findsOneWidget);
       final polls = bridge.named('vpnStatus').length;
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump(const Duration(seconds: 31));
@@ -273,7 +306,7 @@ void main() {
     bridge.failProfileExists = true;
     bridge.connected = true;
     await _withApp(tester, () async {
-      expect(find.text('Трафик подключён'), findsOneWidget);
+      expect(find.text('Туннель включён'), findsOneWidget);
       expect(bridge.named('vpnStatus'), isNotEmpty);
       expect(tester.takeException(), isNull);
     });
@@ -420,6 +453,142 @@ void main() {
       await tester.pumpAndSettle();
       expect(bridge.privacyTokens, isEmpty);
       expect(bridge.named('release'), hasLength(1));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Live diagnostics show measured bytes and recover after a safe read failure', (tester) async {
+    bridge.connected = true;
+    await _withApp(tester, () async {
+      expect(find.text('Туннель включён'), findsOneWidget);
+      expect(find.text('Трафик подключён'), findsNothing);
+      await _showDiagnostics(tester);
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '2,0 КиБ');
+      expect(_diagnosticValue(tester, 'tunnel_tx_value'), '1,0 КиБ');
+      expect(_diagnosticValue(tester, 'tunnel_handshake_value'), '5 сек назад');
+
+      bridge.statusError = PlatformException(code: 'NATIVE_FAILURE',
+          message: 'PRIVATE_PROFILE_DETAIL', details: {'key': 'PRIVATE_PROFILE_DETAIL'});
+      await tester.tap(find.byKey(const Key('refresh_tunnel_diagnostics')));
+      await tester.pumpAndSettle();
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
+      expect(find.textContaining('PRIVATE_PROFILE_DETAIL'), findsNothing);
+      expect(tester.widget<TunnelDiagnosticsCard>(find.byType(TunnelDiagnosticsCard)).stale, isTrue);
+
+      bridge.statusError = null;
+      bridge.statistics = _statistics(rx: 4096, tx: 0, age: null);
+      await tester.tap(find.byKey(const Key('refresh_tunnel_diagnostics')));
+      await tester.pumpAndSettle();
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '4,0 КиБ');
+      expect(_diagnosticValue(tester, 'tunnel_tx_value'), '0 Б');
+      expect(_diagnosticValue(tester, 'tunnel_handshake_value'), 'Ещё не зафиксировано');
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('A late pre-disconnect sample cannot restore the previous connection or counters', (tester) async {
+    bridge.connected = true;
+    await _withApp(tester, () async {
+      await _showDiagnostics(tester);
+      final pending = Completer<Object?>();
+      bridge.statusGate = pending;
+      await tester.tap(find.byKey(const Key('refresh_tunnel_diagnostics')));
+      await tester.pump();
+      // Keep the read pending while the user performs the newer operation.
+      await tester.drag(find.byType(ListView).first, const Offset(0, 1200));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pump();
+      expect(bridge.named('disconnectWireGuard'), hasLength(1));
+      bridge.statusGate = null;
+      pending.complete(_snapshot(rx: 999999));
+      await tester.pumpAndSettle();
+      expect(find.text('Статус: отключено'), findsOneWidget);
+      expect(find.text('Туннель включён'), findsNothing);
+      await _showDiagnostics(tester);
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
+      expect(_diagnosticValue(tester, 'tunnel_handshake_value'), 'Нет активного туннеля');
+      expect(bridge.named('vpnStatus').length, greaterThanOrEqualTo(3));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Returning to the app replaces a delayed background sample with a new reading', (tester) async {
+    bridge.connected = true;
+    await _withApp(tester, () async {
+      await _showDiagnostics(tester);
+      final pending = Completer<Object?>();
+      bridge.statusGate = pending;
+      await tester.tap(find.byKey(const Key('refresh_tunnel_diagnostics')));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      bridge.statistics = _statistics(rx: 8192);
+      bridge.statusGate = null;
+      pending.complete(_snapshot(rx: 999999));
+      await tester.pumpAndSettle();
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '8,0 КиБ');
+      expect(tester.widget<TunnelDiagnosticsCard>(find.byType(TunnelDiagnosticsCard)).stale, isFalse);
+      expect(bridge.named('vpnStatus').length, greaterThanOrEqualTo(3));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Unknown native state cannot silently drop a known active tunnel or expose old metrics', (tester) async {
+    bridge.connected = true;
+    await _withApp(tester, () async {
+      await _showDiagnostics(tester);
+      bridge.statusState = 'unknown';
+      bridge.statusConnected = false;
+      await tester.tap(find.byKey(const Key('refresh_tunnel_diagnostics')));
+      await tester.pumpAndSettle();
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
+      expect(_diagnosticValue(tester, 'tunnel_handshake_value'), 'Данные недоступны');
+      await tester.drag(find.byType(ListView).first, const Offset(0, 1200));
+      await tester.pumpAndSettle();
+      expect(find.text('Отключить'), findsOneWidget);
+      expect(find.text('Туннель включён'), findsNothing);
+      expect(find.text('Статус уточняется'), findsOneWidget);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('A diagnostic timeout hides stale data and ignores the eventual old response', (tester) async {
+    bridge.connected = true;
+    await _withApp(tester, () async {
+      await _showDiagnostics(tester);
+      final pending = Completer<Object?>();
+      bridge.statusGate = pending;
+      await tester.tap(find.byKey(const Key('refresh_tunnel_diagnostics')));
+      await tester.pump();
+      expect(tester.widget<IconButton>(find.byKey(const Key('refresh_tunnel_diagnostics'))).onPressed, isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump();
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
+      bridge.statusGate = null;
+      pending.complete(_snapshot(rx: 999999));
+      await tester.pumpAndSettle();
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
+      await tester.tap(find.byKey(const Key('refresh_tunnel_diagnostics')));
+      await tester.pumpAndSettle();
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '2,0 КиБ');
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Native transitions keep old counters hidden and prevent competing actions', (tester) async {
+    bridge.connected = true;
+    bridge.statusState = 'transitioning';
+    await _withApp(tester, () async {
+      expect(find.text('Состояние изменяется'), findsOneWidget);
+      expect(tester.widget<InkWell>(find.byKey(const Key('pushok_connect_button'))).onTap, isNull);
+      await _showDiagnostics(tester);
+      expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
+      await _openRoutes(tester);
+      expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged, isNull);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
       expect(tester.takeException(), isNull);
     });
   });

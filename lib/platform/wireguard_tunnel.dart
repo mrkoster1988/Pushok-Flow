@@ -1,5 +1,7 @@
 import 'package:flutter/services.dart';
 
+import 'tunnel_diagnostics.dart';
+
 class WireGuardTunnel {
   static const _channel = MethodChannel('shop.pushok.flow/app_routes');
 
@@ -28,8 +30,8 @@ class WireGuardTunnel {
   static Future<bool> get savedProfileExists async =>
       await _channel.invokeMethod<bool>('savedProfileExists') ?? false;
 
-  static Future<Map<dynamic, dynamic>> diagnostics() async =>
-      await _channel.invokeMethod<Map<dynamic, dynamic>>('vpnStatus') ?? {};
+  static Future<TunnelDiagnostics> diagnostics() async =>
+      TunnelDiagnostics.fromPlatform(await _channel.invokeMethod<Object?>('vpnStatus'));
 
   static Future<void> disconnect() async {
     await _channel.invokeMethod('disconnectWireGuard');

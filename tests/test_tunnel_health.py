@@ -8,7 +8,11 @@ class TunnelHealthTests(unittest.TestCase):
         content = (ROOT / 'native/android/app/src/main/kotlin/shop/pushok/flow/TunnelHealth.kt').read_text()
         for field in ['"connected"', '"state"', '"uptimeSeconds"', '"lastErrorCode"']:
             self.assertIn(field, content)
-        for field in ['"PrivateKey"', '"Endpoint"', '"ipAddress"', '"host"']:
+        for field in ['"statistics"', '"rxBytes"', '"txBytes"',
+                      '"latestHandshakeAgeSeconds"', '"handshakeStatus"']:
+            self.assertIn(field, content)
+        for field in ['"PrivateKey"', '"Endpoint"', '"ipAddress"', '"host"',
+                      '"peerKey"', '"publicKey"', '"peerSamples"']:
             self.assertNotIn(field, content)
 
     def test_health_is_compiled_and_bundled(self):
@@ -20,7 +24,8 @@ class TunnelHealthTests(unittest.TestCase):
         ui = (ROOT / 'lib/main.dart').read_text()
         self.assertIn('_healthPoll?.cancel()', ui)
         self.assertIn('Timer.periodic', ui)
-        self.assertIn("connected = info['connected'] == true", ui)
+        self.assertIn('WireGuardTunnel.diagnostics()', ui)
+        self.assertIn('if (info.isKnown)', ui)
 
 if __name__ == '__main__':
     unittest.main()

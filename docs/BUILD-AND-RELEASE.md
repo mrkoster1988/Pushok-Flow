@@ -2,9 +2,13 @@
 
 > **Статус устройства — 21.11.2026:** получен скриншот блокировки Pushok Flow в Google Play Protect. Установка и приёмка v0.24.0 не подтверждены. Подпись, хэш и результаты CI ниже остаются фактами о файле, но не заменяют проверку безопасности. [Отчёт и необходимые сведения](PLAY-PROTECT-v0.24.0.md).
 
-## Текущий этап разработки v0.25.0
+## Текущий этап разработки v0.26.0
 
-В текущих исходниках версия `0.25.0+25`, защита экрана редактора и закреплённый `pubspec.lock`. Публичный выпуск этой версии не опубликован. [CI Android 44931961014](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44931961014) и [Source checks 44931961052](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44931961052) успешно проверили коммит `5b6fc15e62370615f87a6289c233e0b3b3cedeec`: 119 Python, 55 Flutter, четыре Kotlin-набора и release-кандидат. Кандидат использует временную подпись и не является обновлением для установки. Все CI-сборки теперь проверяют lockfile через `flutter pub get --enforce-lockfile`; анализ, тесты и сборка используют `--no-pub`. Диагностика сохраняет точные входные файлы и разрешённый состав Dart-зависимостей. Полный объём и результаты: [RELEASE-v0.25.0.md](RELEASE-v0.25.0.md).
+В текущих исходниках версия `0.26.0+26`: диагностика WireGuard на главной, проверяемые числовые показатели и обработка устаревших ответов. Публичный выпуск этой версии не опубликован; полная проверка Flutter и Android-кандидата ожидает CI. Защита редактора и закреплённый lockfile v0.25.0 сохранены; новые зависимости и разрешения не добавлены. Объём работы и результаты: [RELEASE-v0.26.0.md](RELEASE-v0.26.0.md).
+
+## Проверенный этап v0.25.0
+
+В версии `0.25.0+25` добавлены защита экрана редактора и закреплённый `pubspec.lock`. Публичный выпуск этой версии не опубликован. [CI Android 44931961014](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44931961014) и [Source checks 44931961052](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44931961052) успешно проверили коммит `5b6fc15e62370615f87a6289c233e0b3b3cedeec`: 119 Python, 55 Flutter, четыре Kotlin-набора и release-кандидат. Кандидат использует временную подпись и не является обновлением для установки. Все CI-сборки теперь проверяют lockfile через `flutter pub get --enforce-lockfile`; анализ, тесты и сборка используют `--no-pub`. Диагностика сохраняет точные входные файлы и разрешённый состав Dart-зависимостей. Полный объём и результаты: [RELEASE-v0.25.0.md](RELEASE-v0.25.0.md).
 
 ## Выпуск v0.24.0
 
@@ -45,7 +49,7 @@ Workflow `publish-verified-update.yml` подготовил выпуск: ска
 CI закрепляет Flutter `3.50.0`, Java 17, Kotlin CLI `2.2.21`, Material UI `1.11.1` и WireGuard `1.0.20260102`. Компилятором Kotlin для Android-приложения управляет Gradle-шаблон Flutter.
 
 1. Открыть **Actions → Android release candidate for persistent signing → Run workflow** для нужной ревизии. Workflow также запускается при изменениях кода в `main` и pull request.
-2. Дождаться успешных проверок исходников, трёх Kotlin-модулей, анализа Dart, Flutter-тестов, манифеста и `flutter build apk --release`.
+2. Дождаться успешных проверок исходников, четырёх Kotlin-модулей, анализа Dart, Flutter-тестов, манифеста и `flutter build apk --release --no-pub`.
 3. Скачать кандидат и инструменты подписи из одного запуска. Проверить их контрольные суммы и `sourceCommit` в метаданных.
 4. Выполнить локальную подпись и проверку по [UPDATES.md](UPDATES.md). В таблицу выше записать SHA-256 и размер окончательного подписанного APK.
 5. Опубликовать APK, `.sha256` и `update.json` вместе в GitHub Release и проверить публичные файлы. В v0.24.0 для этого использован `publish-verified-update.yml`, который восстанавливает и проверяет уже подписанный файл без закрытого ключа в CI; порядок описан в [UPDATES.md](UPDATES.md).
@@ -65,12 +69,13 @@ CI закрепляет Flutter `3.50.0`, Java 17, Kotlin CLI `2.2.21`, Material
 ```bash
 python3 -m unittest discover -s tests -v
 bash tools/bootstrap_android.sh
-flutter pub get
+flutter pub get --enforce-lockfile
+git diff --exit-code -- pubspec.lock
 bash tools/check_kotlin_routing.sh
-flutter analyze lib test
-flutter test --reporter expanded
+flutter analyze lib test --no-pub
+flutter test --no-pub --reporter expanded
 python3 tools/check_android_manifest.py
-flutter build apk --release
+flutter build apk --release --no-pub
 python3 tools/verify_android_apk.py build/app/outputs/flutter-apk/app-release.apk
 ```
 
