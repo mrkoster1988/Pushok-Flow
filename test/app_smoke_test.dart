@@ -15,7 +15,12 @@ void main() {
     expect(find.byKey(const Key('tunnel_diagnostics_card')), findsNothing);
     expect(find.byKey(const Key('connection_error')), findsNothing);
     expect(find.text('Твой интернет. Твои правила.'), findsNothing);
-    expect(find.text('трафик'), findsNothing);
+    final trafficCaption = find.text('трафик');
+    expect(trafficCaption, findsOneWidget);
+    expect(find.descendant(
+      of: find.byKey(const Key('pushok_connect_button')),
+      matching: trafficCaption,
+    ), findsOneWidget);
     expect(find.byKey(const Key('open_app_information')), findsOneWidget);
     expect(tester.binding.transientCallbackCount, greaterThan(0));
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
