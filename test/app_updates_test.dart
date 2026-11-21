@@ -13,6 +13,8 @@ Map<String, Object?> _status({
   int downloaded = 0,
   int total = 0,
   String? error,
+  int? checkedAt,
+  String? checkStage,
 }) => {
   'installedVersion': '0.24.0',
   'installedBuild': 24,
@@ -25,6 +27,8 @@ Map<String, Object?> _status({
   'totalBytes': total,
   'installPermissionGranted': permission,
   'errorCode': error,
+  'checkedAtMillis': checkedAt,
+  'checkStage': checkStage,
 };
 
 class _UpdatesBridge {
@@ -49,6 +53,8 @@ class _UpdatesBridge {
         return Map<String, Object?>.of(state);
       case 'checkForUpdates':
         if (checkError != null) throw checkError!;
+        state = {...state, 'phase': 'checking', 'checkStage': 'release',
+          'errorCode': null};
         state = checkGate == null
             ? _status(phase: 'available') : await checkGate!.future;
         return state;
@@ -67,11 +73,16 @@ class _UpdatesBridge {
 }
 
 Future<void> _withCard(WidgetTester tester,
-    Future<void> Function() body, {bool isAndroid = true, bool settle = true}) async {
+    Future<void> Function() body, {bool isAndroid = true, bool settle = true,
+      double textScale = 1, Size size = const Size(390, 844)}) async {
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-  await tester.binding.setSurfaceSize(const Size(390, 844));
+  await tester.binding.setSurfaceSize(size);
   await tester.pumpWidget(MaterialApp(
     theme: buildPushokTheme(),
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+      child: child!,
+    ),
     home: Scaffold(body: SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: AppUpdatesCard(isAndroid: isAndroid),
@@ -132,6 +143,13 @@ void main() {
       {..._status(phase: 'ready'), 'availableVersion': 'https://SECRET.example'},
       {..._status(), 'installPermissionGranted': 'true'},
       {..._status(), 'totalBytes': -1},
+      {..._status(), 'checkedAtMillis': '1000'},
+      {..._status(), 'checkedAtMillis': 0},
+      {..._status(), 'checkedAtMillis': -1},
+      {..._status(), 'checkedAtMillis': 8640000000000001},
+      {..._status(phase: 'checking'), 'checkStage': 'SECRET_NATIVE_DETAIL'},
+      {..._status(phase: 'checking'), 'checkStage': 1},
+      {..._status(phase: 'available'), 'checkStage': 'manifest'},
     ];
     for (final data in invalid) {
       expect(() => UpdateStatus.fromMap(data), throwsFormatException);
@@ -146,6 +164,46 @@ void main() {
       'details': 'SECRET_NATIVE_DETAIL',
     });
     expect(status.errorCode, 'UPDATE_UNKNOWN');
+  });
+
+  test('Successful check time is optional and survives pending or failed phases', () {
+    expect(UpdateStatus.fromMap(_status()).checkedAtMillis, isNull);
+    final timestamp = DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch;
+    final checked = UpdateStatus.fromMap(_status(
+        phase: 'current', checkedAt: timestamp));
+    final pending = checked.withPhase(UpdatePhase.checking);
+    expect(pending.checkedAtMillis, timestamp);
+    expect(pending.checkStage, isNull);
+    final staged = UpdateStatus.fromMap(_status(
+        phase: 'checking', checkedAt: timestamp, checkStage: 'manifest'));
+    expect(staged.checkStage, 'manifest');
+    final failed = staged.withPhase(UpdatePhase.error,
+        errorCode: 'UPDATE_METADATA_STALE');
+    expect(failed.checkedAtMillis, timestamp);
+    expect(failed.checkStage, isNull);
+    for (final code in ['UPDATE_METADATA_STALE', 'UPDATE_RATE_LIMITED']) {
+      expect(UpdateStatus.fromMap(_status(phase: 'error', error: code))
+          .errorCode, code);
+    }
+  });
+
+  test('A late status read cannot replace the fallback from a completed check', () async {
+    final updates = AppUpdates(isAndroid: true);
+    await updates.updateStatus();
+    final oldRead = Completer<Map<String, Object?>>();
+    bridge.statusGate = oldRead;
+    final oldResponse = updates.updateStatus();
+    // Wait until the platform has accepted the delayed read before checking.
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.statusGate, isNull);
+    expect((await updates.checkForUpdates()).phase, UpdatePhase.available);
+    oldRead.complete(_status(phase: 'current'));
+    await oldResponse;
+    bridge.checkError = PlatformException(code: 'UPDATE_NETWORK_ERROR');
+    final failed = await updates.checkForUpdates();
+    expect(failed.phase, UpdatePhase.error);
+    expect(failed.availableVersion, '0.25.0');
+    expect(failed.availableBuild, 25);
   });
 
   test('Unsupported platforms never invoke update or installer channels', () async {
@@ -251,17 +309,23 @@ void main() {
     });
   });
 
-  testWidgets('Reopening an ongoing check offers a refresh without automatically checking again', (tester) async {
-    bridge.state = _status(phase: 'checking');
+  testWidgets('Reopening an ongoing check follows its stages and result without a second check', (tester) async {
+    bridge.state = _status(phase: 'checking', checkStage: 'release');
     await _withCard(tester, () async {
-      expect(find.byKey(const Key('refresh_app_update_status')), findsOneWidget);
+      expect(find.text('Ищем новую версию…'), findsOneWidget);
       final initialReads = bridge.count('updateStatus');
-      await tester.pump(const Duration(seconds: 5));
-      expect(bridge.count('updateStatus'), initialReads);
+      bridge.state = _status(phase: 'checking', checkStage: 'manifest');
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(bridge.count('updateStatus'), initialReads + 1);
+      expect(find.text('Проверяем сведения об обновлении…'), findsOneWidget);
       bridge.state = _status(phase: 'available');
-      await tester.tap(find.byKey(const Key('refresh_app_update_status')));
+      await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('download_app_update')), findsOneWidget);
+      final completedReads = bridge.count('updateStatus');
+      await tester.pump(const Duration(seconds: 3));
+      expect(bridge.count('updateStatus'), completedReads);
       expect(bridge.count('checkForUpdates'), 0);
       expect(bridge.count('downloadUpdate'), 0);
     }, settle: false);
@@ -315,6 +379,171 @@ void main() {
       expect(find.byKey(const Key('app_update_progress')), findsNothing);
     });
   });
+
+  testWidgets('A pending read before a pause cannot block or replace the resumed read', (tester) async {
+    bridge.state = _status(phase: 'available');
+    await _withCard(tester, () async {
+      final oldRead = Completer<Map<String, Object?>>();
+      bridge.statusGate = oldRead;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(bridge.statusGate, isNull);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      bridge.state = _status(phase: 'ready', permission: true);
+      final readsBeforeResume = bridge.count('updateStatus');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(bridge.count('updateStatus'), readsBeforeResume + 1);
+      expect(find.byKey(const Key('install_app_update')), findsOneWidget);
+
+      oldRead.complete(_status(phase: 'checking', checkStage: 'release'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('install_app_update')), findsOneWidget);
+      expect(find.byKey(const Key('app_update_check_stage')), findsNothing);
+      expect(bridge.count('checkForUpdates'), 0);
+      expect(bridge.count('installUpdate'), 0);
+    });
+  });
+
+  testWidgets('Checking polls stop in background and a background result is not displayed', (tester) async {
+    bridge.state = _status(phase: 'checking', checkStage: 'release');
+    await _withCard(tester, () async {
+      final oldRead = Completer<Map<String, Object?>>();
+      bridge.statusGate = oldRead;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      final backgroundReads = bridge.count('updateStatus');
+      oldRead.complete(_status(phase: 'available'));
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.byKey(const Key('download_app_update')), findsNothing);
+      expect(bridge.count('updateStatus'), backgroundReads);
+
+      bridge.state = _status(phase: 'ready', permission: true);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('install_app_update')), findsOneWidget);
+      expect(bridge.count('checkForUpdates'), 0);
+    }, settle: false);
+  });
+
+  testWidgets('An old check completion after resume cannot replace the new native snapshot', (tester) async {
+    final response = Completer<Map<String, Object?>>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'checkForUpdates') {
+        bridge.calls.add(call.method);
+        bridge.state = _status(phase: 'checking', checkStage: 'release');
+        return response.future;
+      }
+      return bridge.handle(call);
+    });
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('check_app_updates')));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      bridge.state = _status(phase: 'ready', permission: true);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(find.byKey(const Key('install_app_update')), findsOneWidget);
+      expect(tester.widget<FilledButton>(
+          find.byKey(const Key('install_app_update'))).onPressed, isNull);
+
+      response.complete(_status(phase: 'current'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('install_app_update')), findsOneWidget);
+      expect(tester.widget<FilledButton>(
+          find.byKey(const Key('install_app_update'))).onPressed, isNotNull);
+      expect(find.text('Новых версий не найдено.'), findsNothing);
+      expect(bridge.count('checkForUpdates'), 1);
+      expect(bridge.count('installUpdate'), 0);
+    });
+  });
+
+  testWidgets('The last successful check time remains historical during a failed recheck', (tester) async {
+    final timestamp = DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch;
+    bridge.state = _status(phase: 'current', checkedAt: timestamp);
+    bridge.checkGate = Completer<Map<String, Object?>>();
+    await _withCard(tester, () async {
+      const label = 'Последняя успешная проверка: 22.11.2026, 00:35';
+      expect(find.text(label), findsOneWidget);
+      expect(find.text('Новых версий не найдено.'), findsOneWidget);
+      expect(find.textContaining('последняя опубликованная'), findsNothing);
+      await tester.tap(find.byKey(const Key('check_app_updates')));
+      await tester.pump();
+      expect(find.text(label), findsOneWidget);
+      expect(find.text('Новых версий не найдено.'), findsNothing);
+
+      bridge.checkGate!.complete(_status(phase: 'error',
+          error: 'UPDATE_METADATA_STALE', checkedAt: timestamp));
+      await tester.pumpAndSettle();
+      expect(find.text(label), findsOneWidget);
+      expect(find.textContaining('Не удалось получить свежие сведения'), findsOneWidget);
+      expect(find.text('Новых версий не найдено.'), findsNothing);
+      expect(find.byKey(const Key('check_app_updates')), findsOneWidget);
+    });
+  });
+
+  for (final phase in ['available', 'ready']) {
+    testWidgets('A failed recheck retains the $phase action and previous check time', (tester) async {
+      final timestamp = DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch;
+      bridge.state = _status(phase: phase, permission: true, checkedAt: timestamp);
+      bridge.checkGate = Completer<Map<String, Object?>>();
+      final primary = Key(phase == 'ready' ? 'install_app_update' : 'download_app_update');
+      await _withCard(tester, () async {
+        expect(find.byKey(primary), findsOneWidget);
+        expect(find.byKey(const Key('check_app_updates')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('check_app_updates')));
+        await tester.pump();
+        bridge.checkGate!.complete(_status(phase: phase, permission: true,
+            checkedAt: timestamp, error: 'UPDATE_METADATA_STALE'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(primary), findsOneWidget);
+        expect(tester.widget<FilledButton>(find.byKey(primary)).onPressed, isNotNull);
+        expect(find.byKey(const Key('app_update_error')), findsOneWidget);
+        expect(find.byKey(const Key('app_update_checked_at')), findsOneWidget);
+        expect(bridge.count('checkForUpdates'), 1);
+        expect(bridge.count('downloadUpdate'), 0);
+        expect(bridge.count('installUpdate'), 0);
+      });
+    });
+  }
+
+  testWidgets('A first rate-limited check has no success timestamp or current claim', (tester) async {
+    bridge.checkError = PlatformException(code: 'UPDATE_RATE_LIMITED',
+        message: 'SECRET_NATIVE_DETAIL');
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('check_app_updates')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('временно ограничил проверки'), findsOneWidget);
+      expect(find.textContaining('SECRET'), findsNothing);
+      expect(find.byKey(const Key('app_update_checked_at')), findsNothing);
+      expect(find.text('Новых версий не найдено.'), findsNothing);
+      expect(find.byKey(const Key('check_app_updates')), findsOneWidget);
+    });
+  });
+
+  for (final phase in ['checking', 'available', 'ready']) {
+    testWidgets('The $phase card fits 320 pixels with enlarged text', (tester) async {
+      bridge.state = _status(phase: phase, permission: true,
+          checkedAt: DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch,
+          checkStage: phase == 'checking' ? 'manifest' : null,
+          error: phase == 'ready' ? 'UPDATE_METADATA_STALE' : null);
+      await _withCard(tester, () async {
+        expect(find.byKey(const Key('app_update_checked_at')), findsOneWidget);
+        if (phase != 'checking') {
+          final check = find.byKey(const Key('check_app_updates'));
+          await tester.ensureVisible(check);
+          await tester.pumpAndSettle();
+          expect(tester.getRect(check).width, lessThanOrEqualTo(320));
+        }
+        expect(tester.takeException(), isNull);
+        expect(bridge.count('checkForUpdates'), 0);
+      }, settle: phase != 'checking', textScale: 2, size: const Size(320, 568));
+    });
+  }
 
   testWidgets('Network failures show a safe message and allow another check', (tester) async {
     bridge.checkError = PlatformException(code: 'UPDATE_NETWORK_ERROR',

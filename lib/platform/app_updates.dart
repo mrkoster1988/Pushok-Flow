@@ -19,6 +19,8 @@ const _knownErrorCodes = <String>{
   'UPDATE_BUSY',
   'UPDATE_NETWORK_ERROR',
   'UPDATE_METADATA_INVALID',
+  'UPDATE_METADATA_STALE',
+  'UPDATE_RATE_LIMITED',
   'UPDATE_INCOMPATIBLE',
   'UPDATE_SIGNATURE_MISMATCH',
   'UPDATE_DOWNLOAD_FAILED',
@@ -50,6 +52,8 @@ class UpdateStatus {
     this.totalBytes = 0,
     this.errorCode,
     this.installPermissionGranted = false,
+    this.checkedAtMillis,
+    this.checkStage,
   });
 
   const UpdateStatus.unavailable({this.errorCode = 'UNSUPPORTED_PLATFORM'})
@@ -60,7 +64,9 @@ class UpdateStatus {
         availableBuild = null,
         downloadedBytes = 0,
         totalBytes = 0,
-        installPermissionGranted = false;
+        installPermissionGranted = false,
+        checkedAtMillis = null,
+        checkStage = null;
 
   final String installedVersion;
   final int installedBuild;
@@ -71,6 +77,9 @@ class UpdateStatus {
   final int totalBytes;
   final String? errorCode;
   final bool installPermissionGranted;
+  /// The last successful native verification, never the start of a request.
+  final int? checkedAtMillis;
+  final String? checkStage;
 
   double? get downloadProgress => totalBytes <= 0
       ? null
@@ -121,6 +130,18 @@ class UpdateStatus {
     if (permission != null && permission is! bool) {
       throw const FormatException('Invalid install permission');
     }
+    final checkedAtMillis = data['checkedAtMillis'] == null
+        ? null : number(data['checkedAtMillis']);
+    if (checkedAtMillis != null &&
+        (checkedAtMillis == 0 || checkedAtMillis > 8640000000000000)) {
+      throw const FormatException('Invalid update check time');
+    }
+    final checkStage = data['checkStage'];
+    if (checkStage != null && (checkStage is! String ||
+        phase != UpdatePhase.checking ||
+        !const {'release', 'manifest'}.contains(checkStage))) {
+      throw const FormatException('Invalid update check stage');
+    }
 
     return UpdateStatus(
       installedVersion: installedVersion,
@@ -132,6 +153,8 @@ class UpdateStatus {
       totalBytes: number(data['totalBytes'], fallback: 0),
       errorCode: data['errorCode'] == null ? null : _safeErrorCode(data['errorCode']),
       installPermissionGranted: permission == true,
+      checkedAtMillis: checkedAtMillis,
+      checkStage: checkStage,
     );
   }
 
@@ -146,6 +169,9 @@ class UpdateStatus {
         totalBytes: totalBytes,
         errorCode: errorCode,
         installPermissionGranted: installPermissionGranted,
+        checkedAtMillis: checkedAtMillis,
+        checkStage: nextPhase == UpdatePhase.checking &&
+            phase == UpdatePhase.checking ? checkStage : null,
       );
 }
 
@@ -155,19 +181,40 @@ class AppUpdates {
   static const _channel = MethodChannel('shop.pushok.flow/updates');
   final bool _isAndroid;
   UpdateStatus _lastStatus = const UpdateStatus.unavailable();
+  int _operationRevision = 0;
+  int _statusRequest = 0;
 
-  Future<UpdateStatus> updateStatus() => _invoke('updateStatus');
-  Future<UpdateStatus> checkForUpdates() => _invoke('checkForUpdates');
-  Future<UpdateStatus> downloadUpdate() => _invoke('downloadUpdate');
-  Future<UpdateStatus> openInstallPermission() => _invoke('openInstallPermission');
-  Future<UpdateStatus> installUpdate() => _invoke('installUpdate');
+  Future<UpdateStatus> updateStatus() {
+    final revision = _operationRevision;
+    final request = ++_statusRequest;
+    return _invoke('updateStatus', accept: () =>
+        revision == _operationRevision && request == _statusRequest);
+  }
 
-  Future<UpdateStatus> _invoke(String method) async {
+  Future<UpdateStatus> checkForUpdates() => _operation('checkForUpdates');
+  Future<UpdateStatus> downloadUpdate() => _operation('downloadUpdate');
+  Future<UpdateStatus> openInstallPermission() => _operation('openInstallPermission');
+  Future<UpdateStatus> installUpdate() => _operation('installUpdate');
+
+  Future<UpdateStatus> _operation(String method) async {
+    final revision = ++_operationRevision;
+    try {
+      return await _invoke(method,
+          accept: () => revision == _operationRevision);
+    } finally {
+      // A late poll from this operation must not become the fallback for a
+      // future channel error after its final result has already been accepted.
+      if (revision == _operationRevision) _operationRevision++;
+    }
+  }
+
+  Future<UpdateStatus> _invoke(String method,
+      {required bool Function() accept}) async {
     if (!_isAndroid) return const UpdateStatus.unavailable();
     try {
       final data = await _channel.invokeMapMethod<Object?, Object?>(method);
       final status = UpdateStatus.fromMap(data);
-      _lastStatus = status;
+      if (accept()) _lastStatus = status;
       return status;
     } on MissingPluginException {
       return _lastStatus.withPhase(UpdatePhase.unavailable,

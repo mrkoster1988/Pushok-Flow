@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 import urllib.error
@@ -54,15 +55,21 @@ def _public_url_for_log(url):
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '', ''))
 
 
-def public_manifest(observation=None):
+def public_manifest(observation=None, request_url=MANIFEST_URL):
     # Deliberately no token/session. This is the address installed v0.24 uses.
+    prefix = f'https://github.com/{REPOSITORY}/releases/download/v'
+    pinned_version = request_url[len(prefix):-len('/update.json')] if (
+        request_url.startswith(prefix) and request_url.endswith('/update.json')) else None
+    require(request_url == MANIFEST_URL or version(pinned_version), 'Unexpected public manifest URL')
     if observation is not None:
-        observation.update(requestUrl=MANIFEST_URL,
+        observation.update(requestUrl=request_url,
             requestedAt=datetime.now(timezone.utc).isoformat())
-    request = urllib.request.Request(MANIFEST_URL, headers={
-        'Accept': 'application/json', 'User-Agent': 'Pushok-Flow-Public-Check', 'Cache-Control': 'no-cache'})
+    request = urllib.request.Request(request_url, headers={
+        'Accept': 'application/json', 'User-Agent': 'Pushok-Flow-Public-Check',
+        'Cache-Control': 'no-cache, max-age=0', 'Pragma': 'no-cache'})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
+            require(response.getcode() == 200, 'Public manifest did not return HTTP 200')
             raw = response.read(65537)
             if observation is not None:
                 observation.update(httpStatus=response.getcode(),
@@ -93,6 +100,39 @@ def public_manifest(observation=None):
             observation['failure'] = 'INVALID_MANIFEST'
         raise
     return result, raw
+
+
+def public_latest_release(observation):
+    """Read the v0.31 discovery endpoint without a token, cookie or session."""
+    url = API_ROOT + 'releases/latest'
+    observation.update(requestUrl=url, requestedAt=datetime.now(timezone.utc).isoformat())
+    request = urllib.request.Request(url, headers={
+        'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': API_VERSION,
+        'User-Agent': 'Pushok-Flow-Public-Check', 'Cache-Control': 'no-cache, max-age=0',
+        'Pragma': 'no-cache'})
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:
+            require(response.getcode() == 200, 'Public release metadata did not return HTTP 200')
+            raw = response.read(256 * 1024 + 1)
+            observation.update(httpStatus=response.getcode(), sizeBytes=len(raw),
+                sha256=hashlib.sha256(raw).hexdigest(), age=response.headers.get('Age', '')[:64])
+    except urllib.error.HTTPError as error:
+        observation.update(httpStatus=error.code, failure='HTTP_ERROR',
+            retryAfter=(error.headers.get('Retry-After', '') if error.headers else '')[:64],
+            rateLimitReset=(error.headers.get('X-RateLimit-Reset', '') if error.headers else '')[:64])
+        raise
+    require(len(raw) <= 256 * 1024, 'Public release metadata too large')
+    release = json.loads(raw)
+    require(type(release) is dict, 'Invalid public release metadata')
+    tag = release.get('tag_name')
+    require(type(release.get('id')) is int and release['id'] > 0
+        and type(tag) is str and tag.startswith('v') and version(tag[1:])
+        and release.get('draft') is False and release.get('prerelease') is False
+        and type(release.get('published_at')) is str
+        and re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', release['published_at']),
+        'The release is not a published stable version')
+    observation['observedTag'] = tag
+    return tag
 
 
 def require_previous(document):
@@ -277,9 +317,40 @@ def verify_public(document, dist, diagnostics):
             time.sleep(5)
 
 
+def verify_discovery(document, dist, diagnostics):
+    """Check release selection and exact pinned bytes used by the new updater."""
+    expected = (dist/'update.json').read_bytes()
+    require(json.loads(expected) == manifest(document['release']), 'Expected manifest differs')
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    report = {'expectedTag': document['release']['tag'], 'attempts': []}
+    for attempt in range(4):
+        observation = {'attempt': attempt+1, 'release': {}, 'manifest': {}, 'matches': False}
+        try:
+            tag = public_latest_release(observation['release'])
+            require(tag == document['release']['tag'], 'Public release selection has not reached this version')
+            url = f'https://github.com/{REPOSITORY}/releases/download/{tag}/update.json'
+            current, raw = public_manifest(observation['manifest'], request_url=url)
+            require(current['versionName'] == tag[1:] and raw == expected,
+                'Pinned public update manifest differs from the selected release')
+            observation['matches'] = True
+            print('Public release discovery and pinned update.json exactly match the verified release, without credentials.')
+            return
+        except (OSError, ValueError):
+            observation['failure'] = 'DISCOVERY_NOT_CONFIRMED'
+            if observation['release'].get('httpStatus') in (403, 429):
+                raise ValueError('Public release discovery was rate-limited or denied; no immediate retry was attempted') from None
+            if attempt == 3:
+                raise ValueError('Public release discovery is not confirmed; inspect update-discovery-observations.json') from None
+        finally:
+            report['attempts'].append(observation)
+            (diagnostics/'update-discovery-observations.json').write_text(json.dumps(report, indent=2)+'\n')
+            print('Update discovery observation: '+json.dumps(observation, ensure_ascii=False))
+        time.sleep(5)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('preflight', 'verify-assets', 'publish', 'verify-public'))
+    parser.add_argument('command', choices=('preflight', 'verify-assets', 'publish', 'verify-public', 'verify-discovery'))
     parser.add_argument('--release-version', required=True)
     parser.add_argument('--dist', type=Path, default=Path('dist'))
     parser.add_argument('--diagnostics', type=Path, default=Path('release-diagnostics'))
@@ -294,8 +365,10 @@ def main():
             verify_local_assets(document, args.dist)
         elif args.command == 'publish':
             publish(document, args.dist, args.diagnostics)
-        else:
+        elif args.command == 'verify-public':
             verify_public(document, args.dist, args.diagnostics)
+        else:
+            verify_discovery(document, args.dist, args.diagnostics)
     except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as error:
         print(f'Public release stopped: {error}', file=sys.stderr)
         return 1

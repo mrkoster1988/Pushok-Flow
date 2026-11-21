@@ -51,17 +51,8 @@ class AppUpdates(activity: Activity) {
     private var pendingResult: MethodChannel.Result? = null
     @Volatile private var connection: HttpsURLConnection? = null
     private val installed = try { installedPackage() } catch (_: Exception) { null }
-    private var state = State(if (installed == null) "unavailable" else "idle",
+    private var state = UpdateState(if (installed == null) "unavailable" else "idle",
         errorCode = if (installed == null) "UPDATE_INCOMPATIBLE" else null)
-
-    private data class State(
-        val phase: String,
-        val manifest: UpdateManifest? = null,
-        val apk: File? = null,
-        val downloadedBytes: Long = 0,
-        val totalBytes: Long = 0,
-        val errorCode: String? = null,
-    )
 
     companion object {
         // One process-wide queue also serializes cache writes across Activity recreation.
@@ -105,15 +96,15 @@ class AppUpdates(activity: Activity) {
         pendingResult = null
         busy.set(false)
         if (result != null) {
-            changeState { it.copy(phase = "error", apk = null, errorCode = "UPDATE_INTERRUPTED") }
+            changeState { it.copy(phase = "error", apk = null, errorCode = "UPDATE_INTERRUPTED", checkStage = null) }
             result.success(snapshot())
         }
         activityReference.clear()
     }
 
-    private fun readState(): State = synchronized(stateLock) { state }
+    private fun readState(): UpdateState = synchronized(stateLock) { state }
 
-    private fun changeState(transform: (State) -> State) {
+    private fun changeState(transform: (UpdateState) -> UpdateState) {
         synchronized(stateLock) { state = transform(state) }
     }
 
@@ -125,7 +116,7 @@ class AppUpdates(activity: Activity) {
         runIo(result, { it.copy(phase = "checking", errorCode = null) }, "UPDATE_APK_INVALID", work = {
             restoreStarted.set(true)
             val restored = restoreCandidate()
-            changeState { restored ?: State(if (installed == null) "unavailable" else "idle",
+            changeState { restored ?: UpdateState(if (installed == null) "unavailable" else "idle",
                 errorCode = if (installed == null) "UPDATE_INCOMPATIBLE" else null) }
         })
     }
@@ -146,11 +137,14 @@ class AppUpdates(activity: Activity) {
             "totalBytes" to current.totalBytes,
             "errorCode" to error,
             "installPermissionGranted" to permission,
+            "checkedAtMillis" to current.checkedAtMillis,
+            "checkStage" to current.checkStage,
         )
     }
 
-    private fun runIo(result: MethodChannel.Result, initial: (State) -> State,
-        defaultError: String, work: () -> Unit, onSuccess: (() -> Unit)? = null) {
+    private fun runIo(result: MethodChannel.Result, initial: (UpdateState) -> UpdateState,
+        defaultError: String, work: () -> Unit, onSuccess: (() -> Unit)? = null,
+        onFailure: ((String) -> UpdateState)? = null) {
         if (disposed.get()) {
             result.success(snapshot("UPDATE_INTERRUPTED"))
             return
@@ -172,11 +166,12 @@ class AppUpdates(activity: Activity) {
                 // Never return or log URLs, filesystem paths, or raw platform errors.
                 failure = defaultError
             }
+            val failureCode = failure
             main.post {
                 if (disposed.get() || pendingResult !== result) return@post
-                if (failure != null) {
-                    changeState { it.copy(phase = if (failure == "UPDATE_UNAVAILABLE")
-                        "unavailable" else "error", apk = null, errorCode = failure) }
+                if (failureCode != null) {
+                    changeState { onFailure?.invoke(failureCode) ?: it.copy(phase = if (failureCode == "UPDATE_UNAVAILABLE")
+                        "unavailable" else "error", apk = null, errorCode = failureCode, checkStage = null) }
                 } else {
                     try { onSuccess?.invoke() }
                     catch (error: UpdateFailure) {
@@ -193,46 +188,53 @@ class AppUpdates(activity: Activity) {
     }
 
     private fun checkForUpdates(result: MethodChannel.Result) {
-        runIo(result, { State("checking") }, "UPDATE_NETWORK_ERROR", work = {
+        val previous = readState()
+        val session = UpdateCheckSession(previous, installed?.let(::versionCode) ?: 0L)
+        runIo(result, { session.checking("release") }, "UPDATE_NETWORK_ERROR", work = {
             restoreStarted.set(true)
-            val deadline = SystemClock.elapsedRealtime() + CHECK_TIMEOUT_MS
-            val bytes = ByteArrayOutputStream()
-            withConnection(URI(UpdatePolicy.MANIFEST_URL), null, deadline) { remote ->
-                val length = remote.contentLengthLong
-                if (length > UpdatePolicy.MAX_METADATA_BYTES) throw UpdateFailure("UPDATE_METADATA_INVALID")
-                remote.inputStream.use { input ->
-                    val buffer = ByteArray(8192)
-                    while (true) {
-                        ensureActive(deadline)
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        if (bytes.size() + count > UpdatePolicy.MAX_METADATA_BYTES) {
-                            throw UpdateFailure("UPDATE_METADATA_INVALID")
-                        }
-                        bytes.write(buffer, 0, count)
-                    }
-                }
+            // Restore first, including when a new Activity calls check directly.
+            // Network failure must never remove a verified downloaded update.
+            val cached = try { restoreCandidate() } catch (failure: UpdateFailure) {
+                if (failure.code == "UPDATE_INTERRUPTED" || failure.code == "UPDATE_NETWORK_ERROR") throw failure
+                null
             }
-            val manifest = parseManifest(bytes.toByteArray())
+            session.recover(cached)
+            changeState { session.checking("release") }
+            val deadline = SystemClock.elapsedRealtime() + CHECK_TIMEOUT_MS
+            val releaseBytes = readRemoteMetadata(URI(UpdatePolicy.LATEST_RELEASE_URL), deadline,
+                UpdatePolicy.MAX_RELEASE_BYTES, releaseApi = true)
+            val release = UpdatePolicy.publishedRelease(jsonValues(parseJson(releaseBytes)))
+            changeState { session.checking("manifest") }
+            val manifest = parseManifest(readRemoteMetadata(URI(UpdatePolicy.manifestUrl(release)),
+                deadline, UpdatePolicy.MAX_METADATA_BYTES, release = release))
             val current = installedPackage()
             UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
-            if (manifest.versionCode <= versionCode(current)) {
-                discardStoredCandidate()
-                changeState { State("current") }
-            } else {
-                // A manual network check must not force a second download of the
-                // same verified candidate recovered after process recreation.
-                val cached = try { restoreCandidate() } catch (failure: UpdateFailure) {
-                    if (failure.code == "UPDATE_INTERRUPTED") throw failure
-                    null
-                }
-                if (cached != null && cached.manifest == manifest) changeState { cached }
-                else {
-                    discardStoredCandidate()
-                    changeState { State("available", manifest = manifest, totalBytes = manifest.sizeBytes) }
+            val next = session.complete(release, manifest, current.versionName ?: "0.0.0",
+                System.currentTimeMillis())
+            // Only a complete, consistent check may supersede the stored candidate.
+            if (next.phase != "ready") discardStoredCandidate()
+            changeState { next }
+        }, onFailure = session::failed)
+    }
+
+    private fun readRemoteMetadata(uri: URI, deadline: Long, maxBytes: Int,
+        releaseApi: Boolean = false, release: PublishedUpdateRelease? = null): ByteArray {
+        val bytes = ByteArrayOutputStream()
+        withConnection(uri, null, deadline, releaseApi = releaseApi, release = release) { remote ->
+            if (remote.contentLengthLong > maxBytes) throw UpdateFailure("UPDATE_METADATA_INVALID")
+            remote.inputStream.use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    ensureActive(deadline)
+                    remote.readTimeout = remainingTimeout(deadline, 20_000)
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (bytes.size() + count > maxBytes) throw UpdateFailure("UPDATE_METADATA_INVALID")
+                    bytes.write(buffer, 0, count)
                 }
             }
-        })
+        }
+        return bytes.toByteArray()
     }
 
     private fun downloadUpdate(result: MethodChannel.Result) {
@@ -245,7 +247,8 @@ class AppUpdates(activity: Activity) {
             result.success(snapshot("UPDATE_NOT_READY"))
             return
         }
-        runIo(result, { State("downloading", manifest, totalBytes = manifest.sizeBytes) },
+        runIo(result, { UpdateState("downloading", manifest, totalBytes = manifest.sizeBytes,
+            checkedAtMillis = it.checkedAtMillis) },
             "UPDATE_DOWNLOAD_FAILED", work = {
                 val current = installedPackage()
                 UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
@@ -301,7 +304,8 @@ class AppUpdates(activity: Activity) {
                     }
                     try { persistCandidate(manifest, verified) }
                     catch (failure: Exception) { verified.delete(); throw failure }
-                    changeState { State("ready", manifest, verified, manifest.sizeBytes, manifest.sizeBytes) }
+                    changeState { UpdateState("ready", manifest, verified, manifest.sizeBytes, manifest.sizeBytes,
+                        checkedAtMillis = it.checkedAtMillis) }
                 } finally {
                     temporary.delete()
                 }
@@ -394,29 +398,47 @@ class AppUpdates(activity: Activity) {
 
     private fun parseManifest(bytes: ByteArray): UpdateManifest = manifestFromJson(parseJson(bytes))
 
-    private fun manifestFromJson(json: JSONObject): UpdateManifest {
+    private fun jsonValues(json: JSONObject): Map<String, Any?> {
         val values = mutableMapOf<String, Any?>()
         json.keys().forEach { key -> values[key] = json.get(key) }
-        return UpdatePolicy.manifest(values)
+        return values
     }
 
+    private fun manifestFromJson(json: JSONObject): UpdateManifest = UpdatePolicy.manifest(jsonValues(json))
+
+    private fun remainingTimeout(deadline: Long, limit: Int): Int =
+        (deadline - SystemClock.elapsedRealtime()).coerceIn(1, limit.toLong()).toInt()
+
     private fun withConnection(initial: URI, apkVersion: String?, deadline: Long,
+        releaseApi: Boolean = false, release: PublishedUpdateRelease? = null,
         consume: (HttpsURLConnection) -> Unit) {
         var uri = initial
         repeat(6) { redirect ->
             ensureActive(deadline)
-            if (!UpdatePolicy.allowedRequest(uri, apkVersion)) throw UpdateFailure("UPDATE_METADATA_INVALID")
+            val allowed = when {
+                releaseApi -> UpdatePolicy.allowedReleaseRequest(uri)
+                apkVersion != null -> UpdatePolicy.allowedRequest(uri, apkVersion)
+                release != null -> UpdatePolicy.allowedManifestRequest(uri, release)
+                else -> false
+            }
+            if (!allowed) throw UpdateFailure("UPDATE_METADATA_INVALID")
             val remote = uri.toURL().openConnection() as? HttpsURLConnection
                 ?: throw UpdateFailure("UPDATE_NETWORK_ERROR")
             connection = remote
             try {
                 remote.instanceFollowRedirects = false
-                remote.connectTimeout = 15_000
-                remote.readTimeout = 20_000
+                remote.connectTimeout = remainingTimeout(deadline, 15_000)
+                remote.readTimeout = remainingTimeout(deadline, 20_000)
                 remote.useCaches = false
                 remote.setRequestProperty("Accept-Encoding", "identity")
-                remote.setRequestProperty("Accept", "application/octet-stream")
+                remote.setRequestProperty("Accept", if (releaseApi) "application/vnd.github+json" else "application/octet-stream")
                 remote.setRequestProperty("User-Agent", "Pushok-Flow-Updater")
+                if (apkVersion == null) {
+                    // Request revalidation; these headers do not prove global CDN freshness.
+                    remote.setRequestProperty("Cache-Control", "no-cache, max-age=0")
+                    remote.setRequestProperty("Pragma", "no-cache")
+                }
+                if (releaseApi) remote.setRequestProperty("X-GitHub-Api-Version", "2026-03-10")
                 val status = remote.responseCode
                 ensureActive(deadline)
                 if (status in setOf(301, 302, 303, 307, 308)) {
@@ -427,7 +449,13 @@ class AppUpdates(activity: Activity) {
                     uri = try { uri.resolve(location) }
                         catch (_: Exception) { throw UpdateFailure("UPDATE_METADATA_INVALID") }
                 } else {
-                    if (status == 404 && apkVersion == null) throw UpdateFailure("UPDATE_UNAVAILABLE")
+                    if (status == 429 || (status == 403 &&
+                            (remote.getHeaderField("X-RateLimit-Remaining") == "0" ||
+                                remote.getHeaderField("Retry-After") != null))) {
+                        throw UpdateFailure("UPDATE_RATE_LIMITED")
+                    }
+                    if (status == 404 && releaseApi) throw UpdateFailure("UPDATE_UNAVAILABLE")
+                    if (status == 404 && release != null) throw UpdateFailure("UPDATE_METADATA_STALE")
                     if (status != 200) throw UpdateFailure("UPDATE_NETWORK_ERROR")
                     val encoding = remote.contentEncoding
                     if (encoding != null && !encoding.equals("identity", ignoreCase = true)) {
@@ -516,7 +544,7 @@ class AppUpdates(activity: Activity) {
         } catch (_: Exception) { /* An unusable cache entry is never offered for installation. */ }
     }
 
-    private fun restoreCandidate(): State? {
+    private fun restoreCandidate(): UpdateState? {
         val store = candidateStore()
         if (!store.baseFile.exists() && !File(store.baseFile.path + ".bak").exists()) return null
         var candidate: File? = null
@@ -537,7 +565,7 @@ class AppUpdates(activity: Activity) {
             }
             verifyReadyFile(file, manifest)
             ensureActive()
-            return State("ready", manifest, file, manifest.sizeBytes, manifest.sizeBytes)
+            return UpdateState("ready", manifest, file, manifest.sizeBytes, manifest.sizeBytes)
         } catch (failure: UpdateFailure) {
             if (failure.code != "UPDATE_INTERRUPTED" && failure.code != "UPDATE_NETWORK_ERROR") {
                 discardStoredCandidate(candidate)

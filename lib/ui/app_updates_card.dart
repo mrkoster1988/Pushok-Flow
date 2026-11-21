@@ -20,10 +20,12 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
   UpdateStatus? _status;
   Timer? _pollTimer;
   bool _operationPending = false;
-  bool _refreshPending = false;
+  int? _activeRefresh;
+  int _refreshSequence = 0;
   bool _refreshAgain = false;
   bool _foreground = true;
   int _revision = 0;
+  int _lifecycleRevision = 0;
 
   @override
   void initState() {
@@ -45,14 +47,21 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleRevision++;
+    _revision++;
     _foreground = state == AppLifecycleState.resumed;
     _pollTimer?.cancel();
+    // An old read can remain pending across a pause. It must neither block the
+    // resume read nor overwrite the state that the resume read observes.
+    _activeRefresh = null;
+    _refreshAgain = false;
     if (_foreground) unawaited(_refreshStatus());
   }
 
   void _schedulePoll() {
     _pollTimer?.cancel();
-    if (!mounted || !_foreground || _status?.phase != UpdatePhase.downloading) {
+    if (!mounted || !_foreground ||
+        !{UpdatePhase.checking, UpdatePhase.downloading}.contains(_status?.phase)) {
       return;
     }
     _pollTimer = Timer(const Duration(seconds: 1), () {
@@ -62,24 +71,28 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
 
   Future<void> _refreshStatus() async {
     if (!mounted || !_foreground) return;
-    if (_refreshPending) {
+    if (_activeRefresh != null) {
       _refreshAgain = true;
       return;
     }
-    _refreshPending = true;
+    final request = ++_refreshSequence;
+    _activeRefresh = request;
     final revision = _revision;
     try {
       final status = await _updates.updateStatus();
-      if (!mounted || revision != _revision) return;
+      if (!mounted || !_foreground || revision != _revision ||
+          _activeRefresh != request) return;
       setState(() => _status = status);
     } finally {
-      _refreshPending = false;
-      if (mounted) {
-        if (_refreshAgain && _foreground) {
-          _refreshAgain = false;
-          unawaited(_refreshStatus());
-        } else {
-          _schedulePoll();
+      if (_activeRefresh == request) {
+        _activeRefresh = null;
+        if (mounted) {
+          if (_refreshAgain && _foreground) {
+            _refreshAgain = false;
+            unawaited(_refreshStatus());
+          } else {
+            _schedulePoll();
+          }
         }
       }
     }
@@ -88,8 +101,11 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
   Future<void> _run(Future<UpdateStatus> Function() action,
       {UpdatePhase? pendingPhase}) async {
     if (_operationPending || !mounted || !_foreground) return;
+    final lifecycleRevision = _lifecycleRevision;
     _revision++;
     _pollTimer?.cancel();
+    _activeRefresh = null;
+    _refreshAgain = false;
     setState(() {
       _operationPending = true;
       if (pendingPhase != null) _status = _status!.withPhase(pendingPhase);
@@ -99,6 +115,15 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
     if (!mounted) return;
     // A status poll started during the operation must not overwrite its result.
     _revision++;
+    _activeRefresh = null;
+    _refreshAgain = false;
+    if (!_foreground || lifecycleRevision != _lifecycleRevision) {
+      // Native work may finish while Android's permission/installer UI is in
+      // front, or after a pause/resume. Obtain a new snapshot on return.
+      _operationPending = false;
+      if (_foreground) unawaited(_refreshStatus());
+      return;
+    }
     setState(() {
       _operationPending = false;
       _status = status;
@@ -114,6 +139,10 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
         return 'Не удалось проверить обновления. Проверьте интернет и попробуйте снова.';
       case 'UPDATE_METADATA_INVALID':
         return 'Не удалось получить сведения об обновлении. Попробуйте позже.';
+      case 'UPDATE_METADATA_STALE':
+        return 'Не удалось получить свежие сведения об обновлении. Попробуйте ещё раз.';
+      case 'UPDATE_RATE_LIMITED':
+        return 'Сервис обновлений временно ограничил проверки. Попробуйте позже.';
       case 'UPDATE_INCOMPATIBLE':
         return 'Это обновление не подходит для вашего устройства. Дождитесь совместимой версии.';
       case 'UPDATE_SIGNATURE_MISMATCH':
@@ -144,11 +173,18 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
       ? '${(count / 1024).ceil()} КБ'
       : '${(count / (1024 * 1024)).toStringAsFixed(1).replaceAll('.', ',')} МБ';
 
+  String _checkTime(int milliseconds) {
+    final time = DateTime.fromMillisecondsSinceEpoch(milliseconds);
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${two(time.day)}.${two(time.month)}.${time.year}, '
+        '${two(time.hour)}:${two(time.minute)}';
+  }
+
   Widget _button({required Key key, required String label,
       required IconData icon, required Future<UpdateStatus> Function() action,
       UpdatePhase? pendingPhase}) => FilledButton.icon(
     key: key,
-    onPressed: _operationPending ? null
+    onPressed: _operationPending || !_foreground ? null
         : () => _run(action, pendingPhase: pendingPhase),
     icon: Icon(icon),
     label: Text(label, textAlign: TextAlign.center),
@@ -164,11 +200,18 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
             style: TextStyle(color: PushokPalette.muted)));
         break;
       case UpdatePhase.checking:
-        body.add(const Row(children: [
-          SizedBox(width: 18, height: 18,
+        body.add(Row(children: [
+          const SizedBox(width: 18, height: 18,
               child: CircularProgressIndicator(strokeWidth: 2)),
-          SizedBox(width: 12),
-          Expanded(child: Text('Проверяем обновления…')),
+          const SizedBox(width: 12),
+          Expanded(child: Semantics(liveRegion: true, child: Text(
+            switch (status.checkStage) {
+              'release' => 'Ищем новую версию…',
+              'manifest' => 'Проверяем сведения об обновлении…',
+              _ => 'Проверяем обновления…',
+            },
+            key: const Key('app_update_check_stage'),
+          ))),
         ]));
         break;
       case UpdatePhase.available:
@@ -178,8 +221,10 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
                 fontWeight: FontWeight.w700)));
         break;
       case UpdatePhase.current:
-        body.add(const Text('Установлена последняя опубликованная версия.',
-            style: TextStyle(color: PushokPalette.mint)));
+        if (status.errorCode == null) {
+          body.add(const Text('Новых версий не найдено.',
+              style: TextStyle(color: PushokPalette.mint)));
+        }
         break;
       case UpdatePhase.downloading:
         body.addAll([
@@ -224,6 +269,15 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
         break;
     }
 
+    if (status.checkedAtMillis != null) {
+      if (body.isNotEmpty) body.add(const SizedBox(height: 12));
+      body.add(Text(
+        'Последняя успешная проверка: ${_checkTime(status.checkedAtMillis!)}',
+        key: const Key('app_update_checked_at'),
+        style: const TextStyle(color: PushokPalette.muted),
+      ));
+    }
+
     if (status.phase == UpdatePhase.error || unavailableError ||
         (status.errorCode != null && status.phase != UpdatePhase.unavailable)) {
       if (body.isNotEmpty) body.add(const SizedBox(height: 12));
@@ -249,12 +303,6 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
           : _button(key: const Key('allow_app_update_install'),
               label: 'Разрешить установку', icon: Icons.settings_outlined,
               action: _updates.openInstallPermission);
-    } else if (status.phase == UpdatePhase.checking && !_operationPending) {
-      // A check may have been started by a previous instance of this card.
-      // Status can be refreshed explicitly without another network check.
-      action = _button(key: const Key('refresh_app_update_status'),
-          label: 'Обновить статус', icon: Icons.refresh,
-          action: _updates.updateStatus);
     } else if (status.phase != UpdatePhase.downloading &&
         status.phase != UpdatePhase.checking &&
         status.errorCode != 'UNSUPPORTED_PLATFORM' &&
@@ -264,6 +312,19 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
           action: _updates.checkForUpdates, pendingPhase: UpdatePhase.checking);
     }
     if (action != null) body.addAll([const SizedBox(height: 16), action]);
+    if (status.phase == UpdatePhase.available || status.phase == UpdatePhase.ready) {
+      body.addAll([
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('check_app_updates'),
+          onPressed: _operationPending || !_foreground ? null
+              : () => _run(_updates.checkForUpdates,
+                  pendingPhase: UpdatePhase.checking),
+          icon: const Icon(Icons.refresh),
+          label: const Text('Проверить обновления', textAlign: TextAlign.center),
+        ),
+      ]);
+    }
     return body;
   }
 

@@ -61,7 +61,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('app_information_sheet')), findsOneWidget);
       expect(tester.widget<Text>(find.byKey(const Key('app_information_version'))).data,
-          contains('0.30.0'));
+          contains('0.31.0'));
       final close = find.byKey(const Key('close_app_information'));
       expect(close.hitTestable(), findsOneWidget);
       await tester.tap(close);
