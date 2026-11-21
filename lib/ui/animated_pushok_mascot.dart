@@ -49,7 +49,7 @@ class _AnimatedPushokMascotState extends State<AnimatedPushokMascot>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _dependenciesReady = true;
-    _tickerEnabled = TickerMode.of(context);
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = MediaQuery.disableAnimationsOf(context);
     _syncAnimation();
     if (!_imagesRequested) {

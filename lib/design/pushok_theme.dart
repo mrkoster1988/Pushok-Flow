@@ -154,7 +154,7 @@ class _PushokNeonBackdropState extends State<PushokNeonBackdrop>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _dependenciesReady = true;
-    _motionEnabled = TickerMode.of(context) &&
+    _motionEnabled = TickerMode.valuesOf(context).enabled &&
       !MediaQuery.disableAnimationsOf(context);
     _syncAnimation();
   }
