@@ -154,7 +154,7 @@ class UpdateStatus {
       errorCode: data['errorCode'] == null ? null : _safeErrorCode(data['errorCode']),
       installPermissionGranted: permission == true,
       checkedAtMillis: checkedAtMillis,
-      checkStage: checkStage,
+      checkStage: checkStage as String?,
     );
   }
 
