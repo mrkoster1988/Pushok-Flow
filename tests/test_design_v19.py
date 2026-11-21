@@ -15,4 +15,8 @@ class ApprovedVisualContract(unittest.TestCase):
         self.assertIn('42860.png',doc)
         self.assertIn('Pushok ИИ',doc)
     def test_version(self):
-        self.assertRegex((ROOT/'pubspec.yaml').read_text(), r'version: 0\.(?:19|2[0-9])\.0\+(?:19|2[0-9])')
+        version = (ROOT/'pubspec.yaml').read_text().split('version: ', 1)[1].splitlines()[0]
+        name, build = version.split('+')
+        self.assertRegex(name, r'^0\.\d+\.0$')
+        self.assertGreaterEqual(int(name.split('.')[1]), 19)
+        self.assertGreaterEqual(int(build), 19)

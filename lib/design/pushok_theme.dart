@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 /// Единые визуальные правила Pushok (Flow, Proxy, Pushok ИИ).
@@ -119,40 +121,165 @@ class PushokStatusChip extends StatelessWidget {
 }
 
 
-/// Декоративные неоновые волны из утверждённого референса.
-/// Рисуются программно: не блокируют касания и не требуют сети.
-class PushokNeonBackdrop extends StatelessWidget {
+/// Медленный свет и тонкие волны. Перерисовывается только декоративный слой;
+/// содержимое страницы не перестраивается на каждом кадре.
+class PushokNeonBackdrop extends StatefulWidget {
   const PushokNeonBackdrop({super.key, required this.child});
   final Widget child;
+
+  @override
+  State<PushokNeonBackdrop> createState() => _PushokNeonBackdropState();
+}
+
+class _PushokNeonBackdropState extends State<PushokNeonBackdrop>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  late final AnimationController _phase;
+  late final _FlowWavePainter _painter;
+  bool _foreground = true;
+  bool _dependenciesReady = false;
+  bool _motionEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
+    _phase = AnimationController(vsync: this,
+      duration: const Duration(seconds: 24));
+    _painter = _FlowWavePainter(_phase);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _dependenciesReady = true;
+    _motionEnabled = TickerMode.of(context) &&
+      !MediaQuery.disableAnimationsOf(context);
+    _syncAnimation();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _syncAnimation();
+  }
+
+  void _syncAnimation() {
+    if (_foreground && _dependenciesReady && _motionEnabled) {
+      if (!_phase.isAnimating) _phase.repeat();
+    } else {
+      // Keep the current phase so returning to the app never jumps to frame 0.
+      _phase.stop(canceled: false);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _phase.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => Stack(children: [
     const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
       gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-        colors: [Color(0xFF031128), Color(0xFF071A38), Color(0xFF030C20)])))),
-    Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _FlowWavePainter()))),
-    child,
+        colors: [Color(0xFF030C20), Color(0xFF07192E), Color(0xFF03091B)])))),
+    Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
+      child: CustomPaint(painter: _painter),
+    ))),
+    RepaintBoundary(child: widget.child),
   ]);
 }
 
 class _FlowWavePainter extends CustomPainter {
+  _FlowWavePainter(this.phase) : super(repaint: phase);
+
+  final Animation<double> phase;
+
   @override
   void paint(Canvas canvas, Size size) {
-    void wave(double height, Color color, double shift) {
-      final path = Path()..moveTo(-30, height);
-      path.cubicTo(size.width * .25, height - 82 + shift,
-          size.width * .56, height + 86 - shift,
-          size.width + 30, height - 26);
-      canvas.drawPath(path, Paint()..color = color.withValues(alpha: .18)
-        ..style = PaintingStyle.stroke..strokeWidth = 26..maskFilter = const MaskFilter.blur(BlurStyle.normal, 21));
-      canvas.drawPath(path, Paint()..color = color.withValues(alpha: .78)
-        ..style = PaintingStyle.stroke..strokeWidth = 2.1);
+    if (size.isEmpty) return;
+    final angle = phase.value * math.pi * 2;
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+
+    // Elliptical gradients create depth without a costly full-screen blur.
+    void aurora(Offset center, double width, double height, Color color,
+        double opacity) {
+      final bounds = Rect.fromCenter(center: center,
+        width: width, height: height);
+      canvas.drawOval(bounds, Paint()..shader = RadialGradient(
+        colors: [color.withValues(alpha: opacity),
+          color.withValues(alpha: opacity * .32),
+          color.withValues(alpha: 0)],
+        stops: const [0, .42, 1],
+      ).createShader(bounds));
     }
-    wave(size.height * .19, PushokPalette.glowCyan, 8);
-    wave(size.height * .88, PushokPalette.glowViolet, -16);
-    wave(size.height * .92, PushokPalette.electricBlue, 24);
+
+    aurora(Offset(size.width * (.14 + .11 * math.sin(angle)),
+      size.height * (.21 + .045 * math.cos(angle))),
+      size.width * 1.6, size.height * .78, PushokPalette.glowCyan, .115);
+    aurora(Offset(size.width * (.94 + .08 * math.cos(angle + .7)),
+      size.height * (.48 + .07 * math.sin(angle))),
+      size.width * 1.55, size.height * .88, PushokPalette.electricBlue, .12);
+    aurora(Offset(size.width * (.32 + .17 * math.sin(angle + 2.1)),
+      size.height * (.88 + .045 * math.cos(angle + 1.4))),
+      size.width * 1.9, size.height * .7, PushokPalette.glowViolet, .115);
+
+    void wave(double baseline, Color color, double offset, double strength) {
+      final height = size.height * baseline;
+      final swell = math.sin(angle + offset);
+      final drift = math.cos(angle + offset);
+      final path = Path()..moveTo(-28, height + swell * 12);
+      path.cubicTo(size.width * .23, height - 45 + drift * 20,
+        size.width * .59, height + 55 - swell * 18,
+        size.width + 28, height - 18 + drift * 12);
+      final strokeBounds = Rect.fromLTWH(0, height - 80, size.width, 160);
+      canvas.drawPath(path, Paint()
+        ..color = color.withValues(alpha: .075 * strength)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 15
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 11));
+      canvas.drawPath(path, Paint()
+        ..shader = LinearGradient(colors: [
+          color.withValues(alpha: .06 * strength),
+          color.withValues(alpha: .4 * strength),
+          color.withValues(alpha: .12 * strength),
+        ], stops: const [0, .46, 1]).createShader(strokeBounds)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1);
+      canvas.save();
+      canvas.translate(0, 7 + drift * 2);
+      canvas.drawPath(path, Paint()
+        ..color = color.withValues(alpha: .065 * strength)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = .6);
+      canvas.restore();
+    }
+
+    wave(.22, PushokPalette.glowCyan, .2, .85);
+    wave(.84, PushokPalette.glowViolet, 2.2, 1);
+    wave(.91, PushokPalette.electricBlue, 3.9, .9);
+
+    // Deterministic, widely spaced specks drift gently; no random flashing.
+    for (var i = 0; i < 9; i++) {
+      final seed = i * 2.399963;
+      final x = size.width * (.07 + ((i * .137) % .86)) +
+        math.sin(angle + seed) * 7;
+      final y = size.height * (.08 + ((i * .213) % .82)) +
+        math.cos(angle + seed) * 10;
+      final visibility = .11 + .05 * math.sin(angle + seed);
+      canvas.drawCircle(Offset(x, y), i.isEven ? 1 : .7,
+        Paint()..color = PushokPalette.cyan.withValues(alpha: visibility));
+    }
+    canvas.restore();
   }
+
   @override
-  bool shouldRepaint(covariant _FlowWavePainter oldDelegate) => false;
+  bool shouldRepaint(covariant _FlowWavePainter oldDelegate) =>
+    oldDelegate.phase != phase;
 }
 
 class PushokNeonButton extends StatelessWidget {

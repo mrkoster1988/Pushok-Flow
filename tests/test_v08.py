@@ -49,7 +49,10 @@ class V08Tests(unittest.TestCase):
     def test_version_in_ui(self):
         self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.(?:[89]|[1-9][0-9])\.0\+(?:[89]|[1-9][0-9])')
         version = (ROOT / 'pubspec.yaml').read_text().split('version: ', 1)[1].splitlines()[0].split('+')[0]
-        self.assertIn(f"applicationVersion: '{version}'", (ROOT / 'lib/main.dart').read_text())
+        self.assertIn(f"version: '{version}'", (ROOT / 'lib/main.dart').read_text())
+        information = (ROOT / 'lib/ui/app_information_sheet.dart').read_text()
+        self.assertIn("Text('Версия $version'", information)
+        self.assertIn('applicationVersion: version', information)
 
     def test_android_ci_checks_manifest_before_compile(self):
         ci = (ROOT / '.github/workflows/android-debug-apk.yml').read_text()

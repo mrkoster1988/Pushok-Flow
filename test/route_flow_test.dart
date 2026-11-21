@@ -87,7 +87,7 @@ Finder _toggle(String package) => find.byKey(Key('route_toggle_$package'));
 
 Future<void> _withRoutes(WidgetTester tester, Future<void> Function() body) async {
   await tester.binding.setSurfaceSize(const Size(390, 844));
-  await tester.pumpWidget(const PushokFlowApp(isAndroid: true));
+  await tester.pumpWidget(const PushokFlowApp(isAndroid: true, animationsEnabled: false));
   await tester.pumpAndSettle();
   await _nav(tester, 'Маршруты');
   await tester.pumpAndSettle();

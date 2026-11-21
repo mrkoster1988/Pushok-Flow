@@ -12,15 +12,17 @@ import 'platform/tunnel_diagnostics.dart';
 import 'ui/wireguard_profile_editor.dart';
 import 'ui/wireguard_profiles_card.dart';
 import 'ui/app_updates_card.dart';
-import 'ui/tunnel_diagnostics_card.dart';
+import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
+import 'ui/animated_pushok_mascot.dart';
 
 void main() => runApp(const PushokFlowApp());
 
 class PushokFlowApp extends StatelessWidget {
-  const PushokFlowApp({super.key, this.isAndroid});
+  const PushokFlowApp({super.key, this.isAndroid, this.animationsEnabled = true});
   // Tests exercise the real Android channel flow without requiring an emulator.
   final bool? isAndroid;
+  final bool animationsEnabled;
   static const bg = PushokPalette.background;
   static const panel = PushokPalette.surface;
   static const teal = PushokPalette.teal;
@@ -29,6 +31,14 @@ class PushokFlowApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'Pushok Flow', debugShowCheckedModeBanner: false,
         theme: buildPushokTheme(),
+        builder: (context, child) {
+          final media = MediaQuery.of(context);
+          return MediaQuery(
+            data: media.copyWith(
+              disableAnimations: media.disableAnimations || !animationsEnabled),
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
         home: FlowHome(isAndroid: isAndroid),
       );
 }
@@ -52,6 +62,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   String? lastErrorCode;
   TunnelDiagnostics _diagnostics = const TunnelDiagnostics.unavailable();
   bool _diagnosticsStale = true;
+  final _informationRevision = ValueNotifier<int>(0);
+  bool _informationOpen = false;
   Timer? _healthPoll;
   bool connected = false;
   bool connecting = false;
@@ -77,6 +89,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   bool get _tunnelConfirmed => connected && _diagnostics.isKnown &&
       !_diagnosticsStale && !_nativeBusy && !connecting;
   bool get _canManageProfiles => _isAndroid && _foreground &&
+      !_informationOpen &&
       !connected && !connecting && !_nativeBusy && !_profileBusy &&
       !_savingRoute && !_routeConfirmationOpen &&
       !_profileEditorOpen && !_statusRefreshing && _profiles != null &&
@@ -126,7 +139,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTunnel({String? profile}) async {
-    if (!_isAndroid || !_foreground || connecting || _nativeBusy || _profileBusy ||
+    if (!_isAndroid || !_foreground || _informationOpen || connecting || _nativeBusy || _profileBusy ||
         _profileEditorOpen || _savingRoute || _routeConfirmationOpen) return;
     final tunnelIntent = ++_tunnelIntentEpoch;
     final disconnecting = connected;
@@ -138,6 +151,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       connectionError = null;
       _diagnosticsStale = true;
     });
+    _notifyInformation();
     try {
       if (disconnecting) {
         await WireGuardTunnel.disconnect();
@@ -184,6 +198,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     } finally {
       if (mounted) {
         setState(() => connecting = false);
+        _notifyInformation();
         await _refreshProfileStatus();
       }
     }
@@ -195,6 +210,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   void dispose() {
     _healthPoll?.cancel();
+    _informationRevision.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -241,6 +257,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       });
       _healthPoll?.cancel();
     }
+    _notifyInformation();
   }
 
   Future<void> _loadAiFeedback() async {
@@ -271,6 +288,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (!_isAndroid || !mounted || !_foreground || connecting || _statusRefreshing ||
         _profileBusy || _profileEditorOpen || _savingRoute) return;
     setState(() => _statusRefreshing = true);
+    _notifyInformation();
     final epoch = _statusEpoch;
     try {
       try {
@@ -313,6 +331,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     } finally {
       if (mounted) {
         setState(() => _statusRefreshing = false);
+        _notifyInformation();
         // Coalesce a resume/connect refresh behind an older in-flight sample.
         if (_foreground && !connecting && epoch != _statusEpoch) {
           unawaited(_refreshProfileStatus());
@@ -677,10 +696,66 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Widget card(Widget child) => PushokPanel(child: child);
 
+  void _notifyInformation() {
+    if (mounted) _informationRevision.value++;
+  }
+
+  Future<void> _openInformation() async {
+    if (!mounted || !_foreground || _informationOpen || connecting ||
+        _profileBusy || _profileEditorOpen) return;
+    // Close the Routes search keyboard before presenting the scrollable panel.
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _informationOpen = true);
+    unawaited(_refreshProfileStatus());
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: PushokPalette.midnight,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          side: BorderSide(color: PushokPalette.border),
+        ),
+        builder: (sheetContext) => ValueListenableBuilder<int>(
+          valueListenable: _informationRevision,
+          builder: (context, revision, child) => AppInformationSheet(
+            version: '0.30.0',
+            isAndroid: _isAndroid,
+            diagnostics: _diagnostics,
+            refreshing: _statusRefreshing,
+            stale: _diagnosticsStale,
+            connectionError: connectionError,
+            lastErrorCode: lastErrorCode,
+            onRefresh: !_foreground || connecting || _profileBusy ||
+                _profileEditorOpen || _savingRoute || _statusRefreshing
+                    ? null : _refreshProfileStatus,
+            onClose: () => Navigator.of(sheetContext).pop(),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _informationOpen = false);
+      } else {
+        _informationOpen = false;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.29.0'))]),
+      appBar: AppBar(
+        title: const Text('Pushok Flow', style: TextStyle(fontWeight: FontWeight.w700)),
+        actions: [IconButton(
+          key: const Key('open_app_information'),
+          icon: const Icon(Icons.info_outline),
+          tooltip: 'Информация и диагностика',
+          onPressed: connecting || _profileBusy || _profileEditorOpen
+              ? null : _openInformation,
+        )],
+      ),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],
@@ -708,14 +783,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Widget home() => LayoutBuilder(builder: (context, constraints) => ListView(children: [
     const SizedBox(height: 6),
-    // Маскот — оригинальное изображение, предоставленное владельцем бренда.
-    Center(child: Column(children: [
-      Image.asset('assets/mascot/pushok.png', height: constraints.maxHeight < 540 ? 126 : 160,
-        fit: BoxFit.contain, semanticLabel: 'Фирменный рыжий котёнок Pushok'),
-      const SizedBox(height: 2),
-      const Text('Твой интернет. Твои правила.', textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-    ])),
+    Center(child: AnimatedPushokMascot(
+      key: const Key('pushok_mascot'),
+      height: constraints.maxHeight < 540 ? 126 : 160,
+      connected: _tunnelConfirmed)),
     const SizedBox(height: 18),
     Center(child: AnimatedContainer(
       duration: const Duration(milliseconds: 450),
@@ -742,8 +813,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           Text(connecting ? (connected ? 'Отключение' : 'Подключение') : connected ? 'Отключить' : 'Подключить',
             textAlign: TextAlign.center, style: const TextStyle(color: Colors.white,
               fontWeight: FontWeight.w800, fontSize: 20)),
-          if (!connected && !connecting) const Text('трафик',
-            style: TextStyle(color: PushokPalette.muted, fontSize: 13)),
         ]),
       )),
     )),
@@ -760,25 +829,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       color: connecting || _nativeBusy ? PushokPalette.glowCyan
           : _diagnosticsStale ? PushokPalette.muted
           : connected ? PushokPalette.mint : PushokPalette.orange)),
-    if (connectionError != null) Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Semantics(liveRegion: true, child: Text(connectionError!,
-        key: const Key('connection_error'), textAlign: TextAlign.center,
-        style: const TextStyle(color: PushokPalette.orange))),
-    ),
-    if (_isAndroid) ...[
-      const SizedBox(height: 14),
-      TunnelDiagnosticsCard(
-        diagnostics: _diagnostics,
-        refreshing: _statusRefreshing,
-        stale: _diagnosticsStale,
-        onRefresh: connecting || _profileBusy || _profileEditorOpen || !_foreground
-            ? null : _refreshProfileStatus,
-      ),
-    ],
-    if (lastErrorCode != null) Padding(padding: const EdgeInsets.all(8),
-      child: Text('Pushok ИИ · код диагностики: $lastErrorCode',
-        style: const TextStyle(color: PushokPalette.muted))),
   ]));
 
   Widget routes() => AppRoutesView(
@@ -844,7 +894,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         icon: const Icon(Icons.delete_outline), label: const Text('Очистить память Pushok ИИ')),
       if (feedbackMessage != null) Text(feedbackMessage!, style: const TextStyle(color: PushokFlowApp.secondary)),
       const SizedBox(height: 12),
-      const Text('Статистика WireGuard доступна на главной. Автоматическое обучение '
+      const Text('Статистика WireGuard доступна по кнопке ⓘ справа сверху. Автоматическое обучение '
         'и проверка доступности сайтов — следующие этапы.',
         style: TextStyle(color: PushokFlowApp.secondary)),
     ])),
