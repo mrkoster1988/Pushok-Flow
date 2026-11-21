@@ -32,8 +32,31 @@ Map<String, Object?> _snapshot({bool active = true, int rx = 2048}) => {
   'statistics': active ? _statistics(rx: rx) : {'status': 'inactive'},
 };
 
+const _firstProfileId = '11111111-1111-4111-8111-111111111111';
+const _secondProfileId = '22222222-2222-4222-8222-222222222222';
+
 class _AndroidBridge {
-  String? savedProfile;
+  final profiles = <String, Map<String, String>>{};
+  String? activeProfileId;
+  int _nextProfileId = 0;
+  String? get savedProfile => profiles[activeProfileId]?['config'];
+  set savedProfile(String? config) {
+    if (config == null) {
+      profiles.clear();
+      activeProfileId = null;
+    } else {
+      activeProfileId ??= _firstProfileId;
+      profiles[activeProfileId!] = {'name': 'Мой профиль', 'config': config};
+    }
+  }
+  Map<String, Object?> get catalog => {
+    'profiles': [for (final entry in profiles.entries)
+      {'id': entry.key, 'name': entry.value['name']}],
+    'activeProfileId': activeProfileId,
+  };
+  Completer<Object?>? catalogGate;
+  Object? loadError;
+  Object? mutationError;
   bool connected = false;
   bool failProfileExists = false;
   PlatformException? connectError;
@@ -71,9 +94,16 @@ class _AndroidBridge {
       case 'savedProfileExists':
         if (failProfileExists) throw PlatformException(code: 'PROFILE_LOAD_FAILED');
         return savedProfile != null;
+      case 'listWireGuardProfiles':
+        if (failProfileExists) throw PlatformException(code: 'PROFILE_LOAD_FAILED',
+            message: 'PRIVATE_CATALOG_DETAILS');
+        if (catalogGate != null) return await catalogGate!.future;
+        return catalog;
       case 'loadWireGuardProfile':
+        if (loadError != null) throw loadError!;
         if (loadGate != null) return await loadGate!.future;
-        return savedProfile;
+        final id = (call.arguments as Map?)?['profileId'] ?? activeProfileId;
+        return profiles[id]?['config'];
       case 'importWireGuardProfile':
         if (privacyTokens.isEmpty) {
           throw PlatformException(code: 'PROFILE_IMPORT_UNAVAILABLE');
@@ -85,10 +115,25 @@ class _AndroidBridge {
       case 'saveWireGuardProfile':
         if (saveGate != null) await saveGate!.future;
         if (saveError != null) throw saveError!;
-        savedProfile = (call.arguments as Map)['config'] as String;
+        final args = call.arguments as Map;
+        final String id = args['createNew'] == true
+            ? '00000000-0000-4000-8000-${(++_nextProfileId).toString().padLeft(12, '0')}'
+            : args['profileId'] as String? ?? activeProfileId ?? _firstProfileId;
+        profiles[id] = {'name': args['name'] as String? ?? 'Мой профиль',
+          'config': args['config'] as String};
+        activeProfileId ??= id;
+        return true;
+      case 'selectWireGuardProfile':
+        if (mutationError != null) throw mutationError!;
+        activeProfileId = (call.arguments as Map)['profileId'] as String;
         return true;
       case 'deleteWireGuardProfile':
-        savedProfile = null;
+        if (mutationError != null) throw mutationError!;
+        final id = (call.arguments as Map?)?['profileId'] ?? activeProfileId;
+        profiles.remove(id);
+        if (id == activeProfileId) {
+          activeProfileId = profiles.isEmpty ? null : profiles.keys.first;
+        }
         return true;
       case 'connectWireGuard':
         if (connectGate != null) await connectGate!.future;
@@ -151,6 +196,24 @@ Future<void> _openRoutes(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _openServers(WidgetTester tester) async {
+  await tester.tap(find.descendant(
+    of: find.byType(NavigationBar), matching: find.text('Серверы'),
+  ));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openProfileEditor(WidgetTester tester) async {
+  if (find.byKey(const Key('wireguard_profiles_card')).evaluate().isEmpty) {
+    await _openServers(tester);
+  }
+  final edit = find.byKey(const Key('edit_wireguard_profile_$_firstProfileId'));
+  final button = edit.evaluate().isEmpty
+      ? find.byKey(const Key('add_wireguard_profile')) : edit;
+  await tester.ensureVisible(button);
+  await tester.tap(button);
+}
+
 Future<void> _showDiagnostics(WidgetTester tester) async {
   await tester.ensureVisible(find.byKey(const Key('tunnel_diagnostics_card')));
   await tester.pumpAndSettle();
@@ -187,6 +250,7 @@ void main() {
       expect(find.text('Сохранить и подключить'), findsOneWidget);
       expect(bridge.named('connectWireGuard'), isEmpty);
 
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
@@ -203,7 +267,7 @@ void main() {
   testWidgets('A stored profile connects after a cold start without opening editor', (tester) async {
     bridge.savedProfile = _profile;
     await _withApp(tester, () async {
-      // Startup reads metadata only; decrypting the profile requires user action.
+      // Startup transfers metadata only; no configuration text crosses the channel.
       expect(bridge.named('loadWireGuardProfile'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
@@ -229,8 +293,10 @@ void main() {
     await _withApp(tester, () async {
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('paste_wireguard_profile')));
       await tester.tap(find.byKey(const Key('paste_wireguard_profile')));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(bridge.named('saveWireGuardProfile'), hasLength(1));
@@ -246,11 +312,13 @@ void main() {
     bridge.savedProfile = _profile;
     bridge.saveError = PlatformException(code: 'INVALID_CONFIG', message: 'SECRET_MUST_NOT_APPEAR');
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('toggle_wireguard_profile_visibility')));
       await tester.tap(find.byKey(const Key('toggle_wireguard_profile_visibility')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('wireguard_profile_field')), '[broken]');
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
@@ -338,6 +406,7 @@ void main() {
 
   for (final profile in <String?>[_profile, null]) {
     testWidgets('Delayed Connect profile lookup cannot open VPN or editor after app switching (${profile == null ? 'missing' : 'stored'})', (tester) async {
+      bridge.savedProfile = _profile;
       bridge.loadGate = Completer<String?>();
       await _withApp(tester, () async {
         await tester.tap(find.byKey(const Key('pushok_connect_button')));
@@ -358,7 +427,7 @@ void main() {
     bridge.savedProfile = _profile;
     bridge.privacyGate = Completer<String>();
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await _openProfileEditor(tester);
       await tester.pump();
       expect(bridge.named('acquire'), hasLength(1));
       expect(bridge.named('loadWireGuardProfile'), isEmpty);
@@ -368,6 +437,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(bridge.named('loadWireGuardProfile'), hasLength(1));
       expect(bridge.privacyTokens, {'protected-editor'});
+      await tester.ensureVisible(find.byKey(const Key('toggle_wireguard_profile_visibility')));
       await tester.tap(find.byKey(const Key('toggle_wireguard_profile_visibility')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('close_wireguard_profile')));
@@ -395,7 +465,7 @@ void main() {
         bridge.invalidPrivacyToken = true;
       }
       await _withApp(tester, () async {
-        await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+        await _openProfileEditor(tester);
         await tester.pumpAndSettle();
         expect(find.byType(WireGuardProfileEditor), findsNothing);
         expect(bridge.named('loadWireGuardProfile'), isEmpty);
@@ -405,7 +475,7 @@ void main() {
         // Failed protection does not leave the editor button busy forever.
         bridge.privacyError = null;
         bridge.invalidPrivacyToken = false;
-        await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+        await _openProfileEditor(tester);
         await tester.pumpAndSettle();
         expect(find.byType(WireGuardProfileEditor), findsOneWidget);
         expect(tester.takeException(), isNull);
@@ -422,7 +492,7 @@ void main() {
         bridge.loadGate = Completer<String?>();
       }
       await _withApp(tester, () async {
-        await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+        await _openProfileEditor(tester);
         await tester.pump();
         tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
         tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -442,7 +512,7 @@ void main() {
   testWidgets('Disposed app releases a late protection acknowledgement without reading the key', (tester) async {
     bridge.privacyGate = Completer<String>();
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await _openProfileEditor(tester);
       await tester.pump();
       await tester.pumpWidget(const SizedBox.shrink());
       bridge.privacyGate!.complete('disposed-lease');
@@ -456,7 +526,7 @@ void main() {
 
   testWidgets('Disposing an open editor releases its protection even without a pop result', (tester) async {
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
       expect(bridge.privacyTokens, isNotEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -605,7 +675,7 @@ void main() {
 
   testWidgets('File import uses the protected editor and requires explicit save', (tester) async {
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('configure_wireguard_profile')));
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
       expect(bridge.privacyTokens, hasLength(1));
       await tester.ensureVisible(find.byKey(const Key('import_wireguard_profile')));
@@ -618,6 +688,7 @@ void main() {
       expect(bridge.savedProfile, isNull);
       expect(bridge.named('saveWireGuardProfile'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
       await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
@@ -648,6 +719,7 @@ void main() {
       expect(field.controller!.text, _profile);
       expect(field.obscureText, isTrue);
       await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(bridge.savedProfile, _profile);
@@ -669,8 +741,10 @@ void main() {
     await _withApp(tester, () async {
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('paste_wireguard_profile')));
       await tester.tap(find.byKey(const Key('paste_wireguard_profile')));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
@@ -681,6 +755,239 @@ void main() {
       expect(bridge.named('connectWireGuard'), isEmpty);
       expect(bridge.privacyTokens, isEmpty);
       expect(find.text('Профиль сохранён. Нажмите «Подключить», когда будете готовы.'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Selecting a named profile changes the next connection without opening its configuration', (tester) async {
+    bridge.savedProfile = _profile;
+    final secondConfig = _profile.replaceAll('vpn.example', 'second.example');
+    bridge.profiles[_secondProfileId] = {'name': 'Запасной', 'config': secondConfig};
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      expect(find.text('Мой профиль'), findsOneWidget);
+      expect(find.text('Запасной'), findsOneWidget);
+      final select = find.byKey(const Key('select_wireguard_profile_$_secondProfileId'));
+      await tester.ensureVisible(select);
+      await tester.tap(select);
+      await tester.pumpAndSettle();
+      expect(bridge.activeProfileId, _secondProfileId);
+      expect(find.byKey(const Key('active_wireguard_profile_$_secondProfileId')), findsOneWidget);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Главная')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      expect((bridge.named('connectWireGuard').single.arguments as Map)['config'], secondConfig);
+      expect((bridge.named('connectWireGuard').single.arguments as Map)['expectedProfileId'], _secondProfileId);
+      await _openServers(tester);
+      expect(tester.widget<OutlinedButton>(find.byKey(const Key('add_wireguard_profile'))).onPressed, isNull);
+      expect(tester.widget<OutlinedButton>(find.byKey(const Key('edit_wireguard_profile_$_firstProfileId'))).onPressed, isNull);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Adding a named imported profile preserves the active profile and requires explicit save', (tester) async {
+    bridge.savedProfile = _profile;
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      await tester.tap(find.byKey(const Key('add_wireguard_profile')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('wireguard_profile_name')), '  Поездка  ');
+      await tester.ensureVisible(find.byKey(const Key('import_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('import_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.profiles, hasLength(1));
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('save_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.profiles, hasLength(2));
+      expect(bridge.activeProfileId, _firstProfileId);
+      final args = bridge.named('saveWireGuardProfile').single.arguments as Map;
+      expect(args['createNew'], isTrue);
+      expect(args['name'], 'Поездка');
+      expect(args.containsKey('profileId'), isFalse);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(find.text('Поездка'), findsOneWidget);
+      expect(bridge.privacyTokens, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Editing an inactive profile addresses its ID and keeps the active selection', (tester) async {
+    bridge.savedProfile = _profile;
+    final secondConfig = _profile.replaceAll('vpn.example', 'second.example');
+    bridge.profiles[_secondProfileId] = {'name': 'Запасной', 'config': secondConfig};
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      final edit = find.byKey(const Key('edit_wireguard_profile_$_secondProfileId'));
+      await tester.ensureVisible(edit);
+      await tester.tap(edit);
+      await tester.pumpAndSettle();
+      expect((bridge.named('loadWireGuardProfile').single.arguments as Map)['profileId'], _secondProfileId);
+      expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field'))).controller!.text, secondConfig);
+      await tester.enterText(find.byKey(const Key('wireguard_profile_name')), 'Рабочий');
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('save_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.profiles[_secondProfileId], {'name': 'Рабочий', 'config': secondConfig});
+      expect(bridge.activeProfileId, _firstProfileId);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect((bridge.named('saveWireGuardProfile').single.arguments as Map)['profileId'], _secondProfileId);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Deleting the active profile confirms its fallback and cancel preserves both profiles', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_secondProfileId] = {'name': 'Запасной', 'config': _profile};
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      final remove = find.byKey(const Key('delete_wireguard_profile_$_firstProfileId'));
+      await tester.ensureVisible(remove);
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('будет выбран «Запасной»'), findsOneWidget);
+      expect(bridge.named('deleteWireGuardProfile'), isEmpty);
+      await tester.tap(find.text('Отмена'));
+      await tester.pumpAndSettle();
+      expect(bridge.profiles, hasLength(2));
+      await tester.ensureVisible(remove);
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_delete_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.profiles.keys.toList(), [_secondProfileId]);
+      expect(bridge.activeProfileId, _secondProfileId);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect((bridge.named('deleteWireGuardProfile').single.arguments as Map)['profileId'], _firstProfileId);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('A delete confirmation from before app switching cannot remove a profile', (tester) async {
+    bridge.savedProfile = _profile;
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      final remove = find.byKey(const Key('delete_wireguard_profile_$_firstProfileId'));
+      await tester.ensureVisible(remove);
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('confirm_delete_wireguard_profile')));
+      await tester.pumpAndSettle();
+      expect(bridge.named('deleteWireGuardProfile'), isEmpty);
+      expect(bridge.savedProfile, _profile);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Unreadable existing profile never opens an empty replacement editor', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.loadError = PlatformException(code: 'PROFILE_LOAD_FAILED', message: 'SECRET_CONFIG');
+    await _withApp(tester, () async {
+      await _openProfileEditor(tester);
+      await tester.pumpAndSettle();
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(bridge.named('saveWireGuardProfile'), isEmpty);
+      expect(bridge.savedProfile, _profile);
+      expect(bridge.privacyTokens, isEmpty);
+      expect(find.textContaining('Не удалось открыть профиль.'), findsOneWidget);
+      expect(find.textContaining('SECRET_CONFIG'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Catalog failure keeps existing names and disables edits until successful refresh', (tester) async {
+    bridge.savedProfile = _profile;
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      bridge.failProfileExists = true;
+      await tester.tap(find.byKey(const Key('refresh_wireguard_profiles')));
+      await tester.pumpAndSettle();
+      expect(find.text('Мой профиль'), findsOneWidget);
+      expect(find.byKey(const Key('wireguard_profiles_error')), findsOneWidget);
+      expect(tester.widget<OutlinedButton>(find.byKey(const Key('add_wireguard_profile'))).onPressed, isNull);
+      expect(tester.widget<OutlinedButton>(find.byKey(const Key('edit_wireguard_profile_$_firstProfileId'))).onPressed, isNull);
+      expect(find.textContaining('PRIVATE_CATALOG_DETAILS'), findsNothing);
+      bridge.failProfileExists = false;
+      await tester.tap(find.byKey(const Key('refresh_wireguard_profiles')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('wireguard_profiles_error')), findsNothing);
+      expect(tester.widget<OutlinedButton>(find.byKey(const Key('edit_wireguard_profile_$_firstProfileId'))).onPressed, isNotNull);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Native rejection of a stale selection keeps the original profile and hides raw errors', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_secondProfileId] = {'name': 'Запасной', 'config': _profile};
+    bridge.mutationError = PlatformException(code: 'VPN_ACTIVE', message: 'SECRET_NATIVE_DETAIL');
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      final select = find.byKey(const Key('select_wireguard_profile_$_secondProfileId'));
+      await tester.ensureVisible(select);
+      await tester.tap(select);
+      await tester.pumpAndSettle();
+      expect(bridge.activeProfileId, _firstProfileId);
+      expect(find.textContaining('Сначала отключите туннель'), findsOneWidget);
+      expect(find.textContaining('SECRET_NATIVE_DETAIL'), findsNothing);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('A manual connection during post-save refresh is never toggled off by Save and Connect', (tester) async {
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('import_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('import_wireguard_profile')));
+      await tester.pumpAndSettle();
+      final pending = Completer<Object?>();
+      bridge.catalogGate = pending;
+      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
+      await tester.tap(find.byKey(const Key('save_wireguard_profile')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pump();
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      bridge.catalogGate = null;
+      pending.complete(bridge.catalog);
+      await tester.pumpAndSettle();
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      expect(find.text('Туннель включён'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('A late pre-background catalog cannot restore an obsolete active profile', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_secondProfileId] = {'name': 'Запасной', 'config': _profile};
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      final previous = bridge.catalog;
+      final pending = Completer<Object?>();
+      bridge.catalogGate = pending;
+      await tester.tap(find.byKey(const Key('refresh_wireguard_profiles')));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      bridge.activeProfileId = _secondProfileId;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      bridge.catalogGate = null;
+      pending.complete(previous);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('active_wireguard_profile_$_firstProfileId')), findsNothing);
+      expect(find.byKey(const Key('active_wireguard_profile_$_secondProfileId')), findsOneWidget);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
       expect(tester.takeException(), isNull);
     });
   });

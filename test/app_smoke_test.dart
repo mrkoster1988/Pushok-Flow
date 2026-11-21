@@ -8,6 +8,9 @@ void main() {
     await tester.pump();
     expect(find.textContaining('Pushok Flow'), findsWidgets);
     expect(find.byType(Scaffold), findsOneWidget);
+    expect(find.text('Умный маршрут'), findsNothing);
+    expect(find.text('Профиль WireGuard'), findsNothing);
+    expect(find.byKey(const Key('configure_wireguard_profile')), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
@@ -25,7 +28,7 @@ void main() {
 
       const screens = {
         'Маршруты': 'Приложения без туннеля',
-        'Серверы': 'WireGuard',
+        'Серверы': 'Профили WireGuard',
         'Pushok ИИ': 'Локальная память результатов',
         'Профиль': 'Pushok ID',
         'Главная': 'Твой интернет. Твои правила.',

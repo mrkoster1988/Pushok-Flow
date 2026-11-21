@@ -1,7 +1,7 @@
 name: pushok_flow
 description: Pushok Flow mobile UI and update foundation
 publish_to: none
-version: 0.27.0+27
+version: 0.28.0+28
 environment:
   sdk: '>=3.13.0 <4.0.0'
   flutter: '>=3.47.0'

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../platform/wireguard_profiles.dart';
 
 /// Edits a local draft and returns it only after the caller saves it successfully.
 class WireGuardProfileEditor extends StatefulWidget {
@@ -11,6 +12,7 @@ class WireGuardProfileEditor extends StatefulWidget {
     super.key,
     required this.initialConfig,
     required this.onSave,
+    this.initialName = 'Мой профиль',
     this.onImport,
     this.onCancelImport,
     this.connectAfterSave = false,
@@ -18,7 +20,8 @@ class WireGuardProfileEditor extends StatefulWidget {
   });
 
   final String initialConfig;
-  final Future<void> Function(String) onSave;
+  final String initialName;
+  final Future<void> Function(String config, String name) onSave;
   final Future<String?> Function()? onImport;
   final Future<void> Function()? onCancelImport;
   final bool connectAfterSave;
@@ -32,7 +35,9 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     with WidgetsBindingObserver {
   static const _maxConfigLength = 65536;
   late final TextEditingController _controller;
+  late final TextEditingController _nameController;
   final FocusNode _focusNode = FocusNode();
+  final FocusNode _nameFocusNode = FocusNode();
   bool _showConfig = false;
   bool _saving = false;
   bool _pasting = false;
@@ -54,6 +59,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialConfig);
+    _nameController = TextEditingController(text: widget.initialName);
     _error = widget.initialError;
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _resumed = lifecycle == null || lifecycle == AppLifecycleState.resumed;
@@ -65,7 +71,9 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     _cancelPendingImport();
     WidgetsBinding.instance.removeObserver(this);
     _focusNode.dispose();
+    _nameFocusNode.dispose();
     _controller.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
@@ -82,8 +90,13 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   void _clearInputSelection() {
     _focusNode.unfocus();
+    _nameFocusNode.unfocus();
     // Clear only input state. The complete multiline draft must remain intact.
     _controller.value = _controller.value.copyWith(
+      selection: const TextSelection.collapsed(offset: -1),
+      composing: TextRange.empty,
+    );
+    _nameController.value = _nameController.value.copyWith(
       selection: const TextSelection.collapsed(offset: -1),
       composing: TextRange.empty,
     );
@@ -209,19 +222,25 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   Future<void> _save() async {
     if (!mounted || _busy || !_canReveal) return;
     final config = _controller.text;
+    final name = _nameController.text.trim();
+    if (!WireGuardProfiles.isValidName(name)) {
+      setState(() => _error = 'Укажите название: от 1 до 64 символов без переносов строк.');
+      return;
+    }
     final validation = _validationError(config);
     if (validation != null) {
       setState(() => _error = validation);
       return;
     }
     _focusNode.unfocus();
+    _nameFocusNode.unfocus();
     setState(() {
       _saving = true;
       _error = null;
       _notice = null;
     });
     try {
-      await widget.onSave(config);
+      await widget.onSave(config, name);
       if (!mounted) return;
       // An explicit completion can pop; PopScope only vetoes user back attempts.
       Navigator.of(context).pop<String>(config);
@@ -235,6 +254,16 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
             'Некорректный профиль WireGuard. Проверьте конфигурацию.',
           'PROFILE_SAVE_FAILED' =>
             'Не удалось сохранить профиль. Проверьте конфигурацию и попробуйте снова.',
+          'PROFILE_NAME_INVALID' =>
+            'Укажите название: от 1 до 64 символов без переносов строк.',
+          'PROFILE_LIMIT_REACHED' =>
+            'Можно сохранить до 20 профилей. Удалите ненужный и попробуйте снова.',
+          'PROFILE_NOT_FOUND' =>
+            'Этот профиль уже недоступен. Закройте редактор и обновите список.',
+          'VPN_ACTIVE' =>
+            'Для изменения профилей сначала отключите туннель.',
+          'PROFILE_STORE_UNAVAILABLE' =>
+            'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.',
           _ => 'Не удалось сохранить профиль. Попробуйте ещё раз.',
         };
       });
@@ -298,6 +327,30 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                   const SizedBox(height: 8),
                   const Text('При переключении приложений профиль скрывается.',
                     style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    key: const Key('wireguard_profile_name'),
+                    controller: _nameController,
+                    focusNode: _nameFocusNode,
+                    enabled: !_busy,
+                    maxLines: 1,
+                    keyboardType: TextInputType.text,
+                    textInputAction: TextInputAction.done,
+                    autofillHints: null,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    enableIMEPersonalizedLearning: false,
+                    smartDashesType: SmartDashesType.disabled,
+                    smartQuotesType: SmartQuotesType.disabled,
+                    onChanged: (_) {
+                      if (_error != null) setState(() => _error = null);
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Название профиля',
+                      helperText: 'До 64 символов, например «Дом» или «Работа».',
+                      helperMaxLines: 2,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   TextField(
                     key: const Key('wireguard_profile_field'),

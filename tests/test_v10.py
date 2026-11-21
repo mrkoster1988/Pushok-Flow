@@ -21,8 +21,8 @@ class SessionSafetyTests(TestCase):
 
     def test_mutually_exclusive_connect_disconnect(self):
         src = ACTIVITY.read_text()
-        self.assertGreaterEqual(src.count('Session.operationInProgress.compareAndSet(false, true)'), 2)
-        self.assertGreaterEqual(src.count('Session.operationInProgress.set(false)'), 2)
+        self.assertGreaterEqual(src.count('Session.operationInProgress.acquire()'), 3)
+        self.assertGreaterEqual(src.count('Session.operationInProgress.release(token)'), 3)
 
     def test_route_changes_blocked_during_transition(self):
         src = ACTIVITY.read_text()

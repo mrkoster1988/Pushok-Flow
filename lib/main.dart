@@ -7,9 +7,11 @@ import 'platform/android_app_routes.dart';
 import 'ai/pushok_ai.dart';
 import 'ai/pushok_ai_memory.dart';
 import 'platform/wireguard_tunnel.dart';
+import 'platform/wireguard_profiles.dart';
 import 'platform/profile_privacy.dart';
 import 'platform/tunnel_diagnostics.dart';
 import 'ui/wireguard_profile_editor.dart';
+import 'ui/wireguard_profiles_card.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/tunnel_diagnostics_card.dart';
 
@@ -45,7 +47,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   bool loadingApps = false;
   String? routeError;
   String? connectionError;
-  bool savedProfile = false;
+  WireGuardProfiles? _profiles;
+  String? _profilesError;
   String? lastErrorCode;
   TunnelDiagnostics _diagnostics = const TunnelDiagnostics.unavailable();
   bool _diagnosticsStale = true;
@@ -58,6 +61,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   bool _savingRoute = false;
   int _statusEpoch = 0;
   int _profileRequestEpoch = 0;
+  int _tunnelIntentEpoch = 0;
   bool _foreground = true;
   Map<String, int> feedback = {};
   String? feedbackMessage;
@@ -66,6 +70,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _diagnostics.transitioning && !_diagnosticsStale;
   bool get _tunnelConfirmed => connected && _diagnostics.isKnown &&
       !_diagnosticsStale && !_nativeBusy && !connecting;
+  bool get _canManageProfiles => _isAndroid && _foreground &&
+      !connected && !connecting && !_nativeBusy && !_profileBusy &&
+      !_profileEditorOpen && !_statusRefreshing && _profiles != null &&
+      _profilesError == null && _diagnostics.isKnown && !_diagnosticsStale;
 
   void _showNotice(String message) {
     if (!mounted) return;
@@ -86,7 +94,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         case 'INVALID_CONFIG':
           return 'Профиль WireGuard некорректен. Откройте его настройки и проверьте данные.';
         case 'PROFILE_LOAD_FAILED':
-          return 'Не удалось открыть сохранённый профиль. Вставьте конфигурацию заново.';
+          return 'Не удалось открыть сохранённый профиль. Откройте «Серверы» и повторите проверку.';
+        case 'PROFILE_CHANGED':
+        case 'PROFILE_NOT_FOUND':
+          return 'Выбранный профиль изменился. Проверьте выбор в «Серверах» и подключитесь снова.';
+        case 'PROFILE_STORE_UNAVAILABLE':
+          return 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.';
         case 'WG_DISCONNECT_FAILED':
           return 'Не удалось отключить VPN. Повторите попытку.';
       }
@@ -98,6 +111,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Future<void> _toggleTunnel({String? profile}) async {
     if (!_isAndroid || !_foreground || connecting || _nativeBusy || _profileBusy || _profileEditorOpen) return;
+    final tunnelIntent = ++_tunnelIntentEpoch;
     final disconnecting = connected;
     final requestEpoch = _profileRequestEpoch;
     var needsProfile = false;
@@ -116,18 +130,25 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
               statistics: TunnelStatistics.inactive());
         });
       } else {
-        // Read the protected profile only after the user's Connect action.
-        final config = profile ?? await WireGuardTunnel.loadProfile();
+        // Only this explicit action transfers a saved configuration into Dart.
+        // Native code verifies this ID and content again under its operation
+        // lease, so a different Activity cannot switch profiles in between.
+        final catalog = await WireGuardTunnel.listProfiles();
         if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
-        if (config == null || config.trim().isEmpty) {
+        final active = catalog.activeProfile;
+        if (active == null) {
           needsProfile = true;
-          setState(() => savedProfile = false);
+          setState(() { _profiles = catalog; _profilesError = null; });
         } else {
-          final ok = await WireGuardTunnel.connect(config);
+          final config = profile ?? await WireGuardTunnel.loadProfile(profileId: active.id);
+          if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
+          if (config == null || config.trim().isEmpty) {
+            throw PlatformException(code: 'PROFILE_NOT_FOUND');
+          }
+          final ok = await WireGuardTunnel.connect(config, expectedProfileId: active.id);
           if (!mounted) return;
           setState(() {
             connected = ok;
-            savedProfile = true;
             _diagnostics = TunnelDiagnostics(isKnown: true, connected: ok);
           });
           if (!ok) {
@@ -150,7 +171,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       }
     }
     if (needsProfile && mounted && _foreground && requestEpoch == _profileRequestEpoch) {
-      await _editProfile(connectAfterSave: true, initialConfig: '');
+      await _editProfile(connectAfterSave: true, tunnelIntent: tunnelIntent);
     }
   }
 
@@ -224,17 +245,24 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshProfileStatus() async {
-    if (!_isAndroid || !mounted || !_foreground || connecting || _statusRefreshing) return;
+    if (!_isAndroid || !mounted || !_foreground || connecting || _statusRefreshing ||
+        _profileBusy || _profileEditorOpen) return;
     setState(() => _statusRefreshing = true);
     final epoch = _statusEpoch;
     try {
       try {
-        final exists = await WireGuardTunnel.savedProfileExists
+        final catalog = await WireGuardTunnel.listProfiles()
             .timeout(const Duration(seconds: 5));
         if (mounted && _foreground && epoch == _statusEpoch) {
-          setState(() => savedProfile = exists);
+          setState(() { _profiles = catalog; _profilesError = null; });
         }
-      } catch (_) { // A profile-store error must not prevent status refresh.
+      } catch (error) { // A profile-store error must not prevent status refresh.
+        if (mounted && _foreground && epoch == _statusEpoch) {
+          setState(() => _profilesError = error is PlatformException &&
+              error.code == 'PROFILE_STORE_UNAVAILABLE'
+                  ? 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.'
+                  : 'Не удалось прочитать сохранённые профили. Повторите проверку.');
+        }
       }
       if (!mounted || !_foreground || epoch != _statusEpoch) return;
       try {
@@ -270,8 +298,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _editProfile({bool connectAfterSave = false, String? initialConfig}) async {
-    if (!_isAndroid || !_foreground || connecting || _nativeBusy || connected || _profileBusy || _profileEditorOpen) return;
+  Future<void> _editProfile({WireGuardProfileSummary? profile,
+      bool connectAfterSave = false, int? tunnelIntent}) async {
+    if (!_canManageProfiles) return;
+    if (profile == null && _profiles!.isFull) {
+      _showNotice('Можно сохранить до 20 профилей. Удалите ненужный профиль.');
+      return;
+    }
+    _statusEpoch++;
     setState(() => _profileBusy = true);
     final requestEpoch = _profileRequestEpoch;
     ProfilePrivacy? protection;
@@ -288,12 +322,23 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         return;
       }
       if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
-      var draft = initialConfig ?? '';
-      String? initialError;
+      var draft = '';
       try {
-        if (initialConfig == null) draft = await WireGuardTunnel.loadProfile() ?? '';
+        if (profile != null) {
+          final stored = await WireGuardTunnel.loadProfile(profileId: profile.id);
+          if (stored == null || stored.trim().isEmpty) {
+            throw PlatformException(code: 'PROFILE_NOT_FOUND');
+          }
+          draft = stored;
+        }
       } catch (error) {
-        initialError = _connectionMessage(error);
+        // Never turn an unreadable existing profile into an empty editable draft.
+        if (mounted && _foreground && requestEpoch == _profileRequestEpoch) {
+          _showNotice(error is PlatformException && error.code == 'PROFILE_STORE_UNAVAILABLE'
+              ? _profileActionMessage(error)
+              : 'Не удалось открыть профиль. Обновите список и попробуйте снова.');
+        }
+        return;
       }
       if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
       if (connected || connecting || _nativeBusy) {
@@ -320,11 +365,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         ),
         builder: (context) => WireGuardProfileEditor(
           initialConfig: draft,
-          initialError: initialError,
+          initialName: profile?.name ?? (_profiles!.profiles.isEmpty
+              ? 'Мой профиль' : 'Профиль ${_profiles!.profiles.length + 1}'),
           connectAfterSave: connectAfterSave,
           onImport: WireGuardTunnel.importProfile,
           onCancelImport: WireGuardTunnel.cancelProfileImport,
-          onSave: (config) async {
+          onSave: (config, name) async {
             if (!mounted || !_foreground) {
               throw PlatformException(code: 'PROFILE_SAVE_INTERRUPTED');
             }
@@ -332,10 +378,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
             // after returning authorizes connect-after-save for that foreground
             // session, while later app switching still invalidates the intent.
             saveIntentEpoch = _profileRequestEpoch;
-            await WireGuardTunnel.saveProfile(config);
+            await WireGuardTunnel.saveProfile(config, profileId: profile?.id,
+                name: name, createNew: profile == null);
             if (mounted) {
               _statusEpoch++;
-              setState(() { savedProfile = true; connectionError = null; });
+              setState(() => connectionError = null);
             }
           },
         ),
@@ -359,7 +406,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           }
         }
       }
-      if (mounted) setState(() { _profileBusy = false; _profileEditorOpen = false; });
+      if (mounted) {
+        _statusEpoch++;
+        setState(() { _profileBusy = false; _profileEditorOpen = false; });
+        await _refreshProfileStatus();
+      }
     }
     if (!mounted || saved == null) return;
     if (connectAfterSave) {
@@ -368,27 +419,94 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         if (_foreground) _showNotice('Профиль сохранён. Нажмите «Подключить», когда будете готовы.');
         return;
       }
+      // The user may act while the post-save catalog refresh is pending.
+      // An older Save-and-Connect intent must never toggle a newer tunnel off.
+      if (tunnelIntent != _tunnelIntentEpoch || connected || connecting) return;
       await _toggleTunnel(profile: saved);
     } else {
       _showNotice('Профиль сохранён на устройстве. Можно подключаться.');
     }
   }
 
-  Future<void> _deleteProfile() async {
-    if (!_isAndroid || connected || connecting || _nativeBusy || _profileBusy || _profileEditorOpen) return;
+  String _profileActionMessage(Object error) {
+    if (error is PlatformException) {
+      if (error.code == 'VPN_ACTIVE' || error.code == 'VPN_BUSY') {
+        return 'Сначала отключите туннель и дождитесь завершения операции.';
+      }
+      if (error.code == 'PROFILE_NOT_FOUND') {
+        return 'Профиль уже недоступен. Обновите список.';
+      }
+      if (error.code == 'PROFILE_STORE_UNAVAILABLE') {
+        return 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.';
+      }
+      if (error.code == 'VPN_STATE_UNAVAILABLE') {
+        return 'Не удалось проверить состояние туннеля. Обновите список и повторите попытку.';
+      }
+    }
+    return 'Не удалось изменить профили. Повторите проверку и попробуйте снова.';
+  }
+
+  Future<void> _selectProfile(WireGuardProfileSummary profile) async {
+    if (!_canManageProfiles || profile.id == _profiles!.activeProfileId) return;
     _statusEpoch++;
     setState(() => _profileBusy = true);
     try {
-      await WireGuardTunnel.deleteProfile();
+      await WireGuardTunnel.selectProfile(profile.id);
       if (mounted) {
         _statusEpoch++;
-        setState(() { savedProfile = false; connectionError = null; });
-        _showNotice('Сохранённый профиль удалён.');
+        setState(() => connectionError = null);
+        _showNotice('Выбран профиль «${profile.name}».');
       }
-    } catch (_) {
-      _showNotice('Не удалось удалить профиль. Повторите попытку.');
+    } catch (error) {
+      _showNotice(_profileActionMessage(error));
     } finally {
-      if (mounted) setState(() => _profileBusy = false);
+      if (mounted) {
+        _statusEpoch++;
+        setState(() => _profileBusy = false);
+        await _refreshProfileStatus();
+      }
+    }
+  }
+
+  Future<void> _deleteProfile(WireGuardProfileSummary profile) async {
+    if (!_canManageProfiles) return;
+    final intentEpoch = _profileRequestEpoch;
+    final remaining = _profiles!.profiles.where((p) => p.id != profile.id).toList();
+    final fallback = profile.id == _profiles!.activeProfileId && remaining.isNotEmpty
+        ? '\n\nДля следующего подключения будет выбран «${remaining.first.name}».'
+        : '';
+    _statusEpoch++;
+    setState(() => _profileBusy = true);
+    try {
+      final confirmed = await showDialog<bool>(context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Удалить профиль?'),
+          content: Text('«${profile.name}» будет удалён с этого устройства.$fallback'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Отмена')),
+            TextButton(key: const Key('confirm_delete_wireguard_profile'),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Удалить')),
+          ],
+        ));
+      // Confirmation from an earlier foreground session cannot delete on return.
+      if (confirmed != true || !mounted || !_foreground ||
+          intentEpoch != _profileRequestEpoch || connected || connecting || _nativeBusy) return;
+      await WireGuardTunnel.deleteProfile(profileId: profile.id);
+      if (mounted) {
+        _statusEpoch++;
+        setState(() => connectionError = null);
+        _showNotice('Профиль удалён.');
+      }
+    } catch (error) {
+      _showNotice(_profileActionMessage(error));
+    } finally {
+      if (mounted) {
+        _statusEpoch++;
+        setState(() => _profileBusy = false);
+        await _refreshProfileStatus();
+      }
     }
   }
 
@@ -427,7 +545,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.27.0'))]),
+      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.28.0'))]),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],
@@ -436,7 +554,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         backgroundColor: PushokFlowApp.bg,
         indicatorColor: PushokFlowApp.panel,
         selectedIndex: tab,
-        onDestinationSelected: (v) => setState(() => tab = v),
+        onDestinationSelected: (v) {
+          setState(() => tab = v);
+          if (v == 2) unawaited(_refreshProfileStatus());
+        },
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Главная'),
@@ -508,12 +629,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         key: const Key('connection_error'), textAlign: TextAlign.center,
         style: const TextStyle(color: PushokPalette.orange))),
     ),
-    if (!connected && !connecting) Center(child: TextButton.icon(
-      key: const Key('configure_wireguard_profile'),
-      onPressed: !_isAndroid || _nativeBusy || _profileBusy || _profileEditorOpen ? null : () => _editProfile(),
-      icon: Icon(savedProfile ? Icons.check_circle_outline : Icons.add_circle_outline, size: 18),
-      label: Text(savedProfile ? 'Профиль сохранён · изменить' : 'Добавить профиль WireGuard'),
-    )),
     if (_isAndroid) ...[
       const SizedBox(height: 14),
       TunnelDiagnosticsCard(
@@ -524,57 +639,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
             ? null : _refreshProfileStatus,
       ),
     ],
-    const SizedBox(height: 14),
-    PushokPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Row(children: [Icon(Icons.shield_outlined, color: PushokPalette.glowCyan),
-        SizedBox(width: 10), Expanded(child: Text('Умный маршрут',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)))]),
-      const SizedBox(height: 7),
-      Text('Приложений напрямую: ${bypassPackages.length}. Изменения действуют при следующем подключении.',
-        style: const TextStyle(color: PushokPalette.muted, fontSize: 13)),
-      Align(alignment: Alignment.centerRight,
-        child: TextButton.icon(onPressed: () => setState(() => tab = 1),
-          icon: const Icon(Icons.arrow_forward_ios, size: 14), label: const Text('Настроить'))),
-    ])),
-    const SizedBox(height: 12),
-    _profileCard(),
     if (lastErrorCode != null) Padding(padding: const EdgeInsets.all(8),
       child: Text('Pushok ИИ · код диагностики: $lastErrorCode',
         style: const TextStyle(color: PushokPalette.muted))),
   ]));
-
-  Widget _profileCard() => PushokPanel(child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Row(children: [
-        Icon(Icons.lock_outline, color: PushokPalette.glowCyan),
-        SizedBox(width: 10),
-        Expanded(child: Text('Профиль WireGuard', style: TextStyle(fontWeight: FontWeight.w700))),
-      ]),
-      const SizedBox(height: 8),
-      Text(_profileBusy ? 'Открываем защищённый профиль…'
-          : savedProfile ? 'Профиль сохранён на устройстве и готов к подключению.'
-          : 'Вставьте конфигурацию от вашего VPN-провайдера. Ключ хранится только на устройстве.',
-        style: const TextStyle(color: PushokPalette.muted, fontSize: 13)),
-      if (connected) const Padding(padding: EdgeInsets.only(top: 8),
-        child: Text('Для изменения профиля отключите VPN.',
-          style: TextStyle(color: PushokPalette.muted, fontSize: 12))),
-      const SizedBox(height: 10),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        OutlinedButton.icon(
-          key: const Key('edit_wireguard_profile'),
-          onPressed: !_isAndroid || connected || connecting || _nativeBusy || _profileBusy || _profileEditorOpen
-              ? null : () => _editProfile(),
-          icon: const Icon(Icons.edit_outlined),
-          label: Text(savedProfile ? 'Изменить профиль' : 'Добавить профиль')),
-        if (savedProfile) OutlinedButton.icon(
-          key: const Key('delete_wireguard_profile'),
-          onPressed: !_isAndroid || connected || connecting || _nativeBusy || _profileBusy || _profileEditorOpen
-              ? null : _deleteProfile,
-          icon: const Icon(Icons.delete_outline), label: const Text('Удалить')),
-      ]),
-    ],
-  ));
 
   Widget routes() => ListView(children: [
     card(const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -598,13 +666,24 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (!_isAndroid) card(const Text('iOS: исключение приложений в обычном VPN недоступно.')),
   ]);
   Widget servers() => ListView(children: [
-    card(const ListTile(leading: Icon(Icons.lock_outline), title: Text('WireGuard'),
-      subtitle: Text('Подключение к серверу из вашего профиля'))),
-    const SizedBox(height: 12),
-    _profileCard(),
-    const SizedBox(height: 12),
-    card(const ListTile(leading: Icon(Icons.layers_outlined), title: Text('VLESS и другие'),
-      subtitle: Text('Следующие этапы'))),
+    WireGuardProfilesCard(
+      catalog: _profiles,
+      loading: _statusRefreshing || _profileBusy,
+      error: !_isAndroid ? 'Профили WireGuard доступны в приложении для Android.'
+          : _profilesError,
+      mutationsEnabled: _canManageProfiles,
+      onRefresh: !_isAndroid || _statusRefreshing || _profileBusy ||
+          _profileEditorOpen || !_foreground ? null : _refreshProfileStatus,
+      onAdd: () => _editProfile(),
+      onEdit: (profile) => _editProfile(profile: profile),
+      onSelect: _selectProfile,
+      onDelete: _deleteProfile,
+    ),
+    if (connected || connecting || _nativeBusy) const Padding(
+      padding: EdgeInsets.only(top: 12),
+      child: Text('Для изменения профилей отключите туннель.',
+          style: TextStyle(color: PushokPalette.muted)),
+    ),
   ]);
   Widget assistant() => ListView(children: [
     card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

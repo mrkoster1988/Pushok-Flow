@@ -10,6 +10,7 @@ import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
 const _config = '[Interface]\nPrivateKey = ui-test-key\n'
     'Address = 10.0.0.2/32\n[Peer]\nPublicKey = ui-test-peer\n';
 const _field = Key('wireguard_profile_field');
+const _name = Key('wireguard_profile_name');
 const _save = Key('save_wireguard_profile');
 const _paste = Key('paste_wireguard_profile');
 const _import = Key('import_wireguard_profile');
@@ -18,8 +19,9 @@ const _visibility = Key('toggle_wireguard_profile_visibility');
 
 Future<void> _openEditor(
   WidgetTester tester, {
-  required Future<void> Function(String) onSave,
+  required Future<void> Function(String, String) onSave,
   String initialConfig = '',
+  String initialName = 'Мой профиль',
   String? initialError,
   bool connectAfterSave = false,
   ValueChanged<String?>? onResult,
@@ -45,6 +47,7 @@ Future<void> _openEditor(
             enableDrag: false,
             builder: (_) => WireGuardProfileEditor(
               initialConfig: initialConfig,
+              initialName: initialName,
               initialError: initialError,
               onSave: onSave,
               onImport: onImport,
@@ -62,13 +65,140 @@ Future<void> _openEditor(
   await tester.pumpAndSettle();
 }
 
+Future<void> _tapEditorKey(WidgetTester tester, Key key) async {
+  final finder = find.byKey(key);
+  await tester.ensureVisible(finder);
+  await tester.tap(finder);
+}
+
 Future<void> _tapSave(WidgetTester tester) async {
   await tester.ensureVisible(find.byKey(_save));
-  await tester.tap(find.byKey(_save));
+  await _tapEditorKey(tester, _save);
   await tester.pump();
 }
 
 void main() {
+  testWidgets('Explicit save trims the name without changing the hidden configuration',
+      (tester) async {
+    String? savedConfig;
+    String? savedName;
+    await _openEditor(tester, initialConfig: _config, initialName: 'Прежнее название',
+      onSave: (config, name) async { savedConfig = config; savedName = name; },
+    );
+    final nameField = tester.widget<TextField>(find.byKey(_name));
+    expect(nameField.controller!.text, 'Прежнее название');
+    expect(nameField.autofillHints, isNull);
+    expect(nameField.enableSuggestions, isFalse);
+    expect(nameField.enableIMEPersonalizedLearning, isFalse);
+    await tester.ensureVisible(find.byKey(_name));
+    await tester.enterText(find.byKey(_name), '  Дом  ');
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(savedName, isNull);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(savedName, 'Дом');
+    expect(savedConfig, _config);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Invalid names are rejected before the save callback and retain the draft',
+      (tester) async {
+    var saves = 0;
+    await _openEditor(tester, initialConfig: _config,
+      onSave: (_, name) async { saves++; },
+    );
+    for (final invalid in ['', '   ', '🐈' * 65, 'Дом\u0000Работа',
+        'Дом\nРабота', 'Дом\u0085Работа', 'Дом\u2028Работа']) {
+      // Controller assignment also covers pasted/platform text that does not
+      // pass through the single-line input formatter.
+      tester.widget<TextField>(find.byKey(_name)).controller!.text = invalid;
+      await _tapSave(tester);
+      await tester.pumpAndSettle();
+      expect(saves, 0);
+      expect(find.text('Укажите название: от 1 до 64 символов без переносов строк.'),
+        findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Unicode names use codepoints and imports preserve the chosen name',
+      (tester) async {
+    String? savedName;
+    await _openEditor(tester, initialName: '🐈' * 64,
+      onImport: () async => _config,
+      onSave: (_, name) async { savedName = name; },
+    );
+    await _tapEditorKey(tester, _import);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, '🐈' * 64);
+    expect(savedName, isNull);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(savedName, '🐈' * 64);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Named profile failures keep both inputs and expose only safe codes',
+      (tester) async {
+    for (final failure in [
+      ('PROFILE_NAME_INVALID', 'Укажите название: от 1 до 64 символов без переносов строк.'),
+      ('PROFILE_LIMIT_REACHED', 'Можно сохранить до 20 профилей. Удалите ненужный и попробуйте снова.'),
+      ('PROFILE_NOT_FOUND', 'Этот профиль уже недоступен. Закройте редактор и обновите список.'),
+      ('VPN_ACTIVE', 'Для изменения профилей сначала отключите туннель.'),
+      ('PROFILE_STORE_UNAVAILABLE',
+        'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.'),
+    ]) {
+      await _openEditor(tester, initialConfig: _config, initialName: 'Дом',
+        onSave: (_, name) async => throw PlatformException(
+          code: failure.$1, message: 'PRIVATE_NATIVE_DETAIL', details: _config),
+      );
+      await _tapSave(tester);
+      await tester.pumpAndSettle();
+      expect(find.text(failure.$2), findsOneWidget);
+      expect(find.textContaining('PRIVATE_NATIVE_DETAIL'), findsNothing);
+      expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Дом');
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('App switching clears name input focus and selection while preserving both drafts',
+      (tester) async {
+    addTearDown(() => tester.binding
+      .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    await _openEditor(tester, initialConfig: _config, initialName: 'Дом',
+      onSave: (_, name) async {},
+    );
+    await tester.ensureVisible(find.byKey(_name));
+    await tester.enterText(find.byKey(_name), 'Работа');
+    await tester.pump();
+    final field = tester.widget<TextField>(find.byKey(_name));
+    field.controller!.value = field.controller!.value.copyWith(
+      selection: const TextSelection(baseOffset: 0, extentOffset: 3),
+      composing: const TextRange(start: 0, end: 3),
+    );
+    expect(field.focusNode!.hasFocus, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(field.focusNode!.hasFocus, isFalse);
+    expect(field.controller!.selection, const TextSelection.collapsed(offset: -1));
+    expect(field.controller!.value.composing, TextRange.empty);
+    expect(field.controller!.text, 'Работа');
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, 'Работа');
+    expect(field.focusNode!.hasFocus, isFalse);
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Masked paste and save preserve multiline config without a keyboard',
       (tester) async {
     var clipboardReads = 0;
@@ -86,16 +216,16 @@ void main() {
     addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
 
     await _openEditor(tester,
-      onSave: (config) async { saved = config; },
+      onSave: (config, name) async { saved = config; },
       onResult: (value) => result = value,
     );
     expect(clipboardReads, 0);
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
     expect(tester.widget<TextField>(find.byKey(_field)).readOnly, isTrue);
-    await tester.tap(find.byKey(_field));
+    await _tapEditorKey(tester, _field);
     await tester.pumpAndSettle();
     expect(tester.testTextInput.isVisible, isFalse);
-    await tester.tap(find.byKey(_paste));
+    await _tapEditorKey(tester, _paste);
     await tester.pumpAndSettle();
 
     final field = tester.widget<TextField>(find.byKey(_field));
@@ -105,11 +235,11 @@ void main() {
     expect(field.readOnly, isTrue);
     expect(field.maxLines, 1);
     expect(field.autofillHints, isNull);
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
     expect(tester.widget<TextField>(find.byKey(_field)).readOnly, isFalse);
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
     expect(tester.widget<TextField>(find.byKey(_field)).readOnly, isTrue);
@@ -131,7 +261,7 @@ void main() {
     String? saved;
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (config) async { saved = config; },
+      onSave: (config, name) async { saved = config; },
     );
 
     for (final transition in const [
@@ -149,7 +279,7 @@ void main() {
         [AppLifecycleState.resumed]),
     ]) {
       final state = transition.$1;
-      await tester.tap(find.byKey(_visibility));
+      await _tapEditorKey(tester, _visibility);
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
       await tester.enterText(find.byKey(_field), draft);
@@ -182,7 +312,7 @@ void main() {
     }
 
     // Returning to the app never reveals automatically; a new tap still works.
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
     await _tapSave(tester);
@@ -209,11 +339,11 @@ void main() {
     String? saved;
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (config) async { saved = config; },
+      onSave: (config, name) async { saved = config; },
     );
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(_paste));
+    await _tapEditorKey(tester, _paste);
     await tester.pump();
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
@@ -246,15 +376,16 @@ void main() {
     String? submitted;
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (config) { submitted = config; return pending.future; },
+      onSave: (config, name) { submitted = config; return pending.future; },
     );
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
     await _tapSave(tester);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
     expect(tester.widget<TextField>(find.byKey(_field)).enabled, isFalse);
+    expect(tester.widget<TextField>(find.byKey(_name)).enabled, isFalse);
     pending.completeError(PlatformException(code: 'PROFILE_SAVE_FAILED',
         message: 'SENSITIVE_SAVE_DETAIL', details: {'privateKey': 'SENSITIVE_SAVE_DETAIL'}));
     await tester.pumpAndSettle();
@@ -268,7 +399,7 @@ void main() {
     expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
     expect(find.textContaining('SENSITIVE_SAVE_DETAIL'), findsNothing);
     expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNotNull);
-    await tester.tap(find.byKey(_close));
+    await _tapEditorKey(tester, _close);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
@@ -285,9 +416,9 @@ void main() {
     addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (_) async {},
+      onSave: (_, name) async {},
     );
-    await tester.tap(find.byKey(_paste));
+    await _tapEditorKey(tester, _paste);
     await tester.pump();
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(const MaterialApp(
@@ -311,7 +442,7 @@ void main() {
       var saves = 0;
       await _openEditor(tester,
         initialConfig: invalid.$2,
-        onSave: (_) async { saves++; },
+        onSave: (_, name) async { saves++; },
       );
       await _tapSave(tester);
       await tester.pumpAndSettle();
@@ -333,7 +464,7 @@ void main() {
       const secret = 'BACKEND_SECRET_MUST_NOT_REACH_UI';
       await _openEditor(tester,
         initialConfig: _config,
-        onSave: (_) async => throw PlatformException(
+        onSave: (_, name) async => throw PlatformException(
           code: failure.$1,
           message: secret,
           details: {'privateKey': secret},
@@ -356,7 +487,7 @@ void main() {
     await _openEditor(tester,
       initialConfig: _config,
       connectAfterSave: true,
-      onSave: (config) async { saved = config; },
+      onSave: (config, name) async { saved = config; },
       onResult: (value) => result = value,
     );
     expect(find.text('Сохранить и подключить'), findsOneWidget);
@@ -375,14 +506,14 @@ void main() {
     String? result;
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (_) {
+      onSave: (_, name) {
         saves++;
         return pending.future;
       },
       onResult: (value) => result = value,
     );
     await _tapSave(tester);
-    await tester.tap(find.byKey(_save));
+    await _tapEditorKey(tester, _save);
     await tester.pump();
     expect(saves, 1);
     expect(tester.widget<TextField>(find.byKey(_field)).enabled, isFalse);
@@ -407,7 +538,7 @@ void main() {
     final pending = Completer<void>();
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (_) => pending.future,
+      onSave: (_, name) => pending.future,
     );
     await _tapSave(tester);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -424,11 +555,11 @@ void main() {
     String? result;
     await _openEditor(tester,
       initialError: recovery,
-      onSave: (_) async { saves++; },
+      onSave: (_, name) async { saves++; },
       onResult: (value) { closed = true; result = value; },
     );
     expect(find.text(recovery), findsOneWidget);
-    await tester.tap(find.byKey(_close));
+    await _tapEditorKey(tester, _close);
     await tester.pumpAndSettle();
     expect(saves, 0);
     expect(closed, isTrue);
@@ -449,7 +580,7 @@ void main() {
     String? result;
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (config) async { saved = config; },
+      onSave: (config, name) async { saved = config; },
       onResult: (value) => result = value,
     );
     await tester.ensureVisible(find.byKey(_save));
@@ -457,7 +588,7 @@ void main() {
     final safeBottom = (tester.view.physicalSize.height - tester.view.padding.bottom)
         / tester.view.devicePixelRatio;
     expect(tester.getRect(find.byKey(_save)).bottom, lessThanOrEqualTo(safeBottom));
-    await tester.tap(find.byKey(_save));
+    await _tapEditorKey(tester, _save);
     await tester.pumpAndSettle();
     expect(saved, _config);
     expect(result, _config);
@@ -476,12 +607,12 @@ void main() {
     String? result;
     await _openEditor(tester,
       initialConfig: _config,
-      onSave: (_) async {},
+      onSave: (_, name) async {},
       onResult: (value) => result = value,
     );
     await tester.ensureVisible(find.byKey(_visibility));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
     expect(tester.takeException(), isNull);
@@ -504,14 +635,14 @@ void main() {
       connectAfterSave: true,
       onImport: () async { reads++; return imported; },
       onCancelImport: () async { cancels++; },
-      onSave: (config) async { saves++; saved = config; },
+      onSave: (config, name) async { saves++; saved = config; },
       onResult: (value) => result = value,
     );
     expect(reads, 0);
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(_import));
-    await tester.tap(find.byKey(_import));
+    await _tapEditorKey(tester, _import);
     await tester.pumpAndSettle();
 
     final field = tester.widget<TextField>(find.byKey(_field));
@@ -541,15 +672,15 @@ void main() {
       initialConfig: _config,
       onImport: () async => null,
       onCancelImport: () async { cancels++; },
-      onSave: (_) async { saves++; },
+      onSave: (_, name) async { saves++; },
     );
-    await tester.tap(find.byKey(_import));
+    await _tapEditorKey(tester, _import);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
     expect(find.byKey(const Key('wireguard_profile_error')), findsNothing);
     expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
     expect(saves, 0);
-    await tester.tap(find.byKey(_close));
+    await _tapEditorKey(tester, _close);
     await tester.pumpAndSettle();
     expect(cancels, 0);
     expect(tester.takeException(), isNull);
@@ -576,9 +707,9 @@ void main() {
         initialConfig: _config,
         onImport: () async => throw PlatformException(code: failure.$1,
           message: secret, details: {'uri': secret, 'privateKey': secret}),
-        onSave: (_) async { saves++; },
+        onSave: (_, name) async { saves++; },
       );
-      await tester.tap(find.byKey(_import));
+      await _tapEditorKey(tester, _import);
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
       expect(find.text(failure.$2), findsOneWidget);
@@ -587,7 +718,7 @@ void main() {
       expect(saves, 0);
       expect(tester.widget<OutlinedButton>(find.byKey(_import)).onPressed, isNotNull);
       await tester.ensureVisible(find.byKey(_close));
-      await tester.tap(find.byKey(_close));
+      await _tapEditorKey(tester, _close);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     }
@@ -603,16 +734,16 @@ void main() {
       await _openEditor(tester,
         initialConfig: _config,
         onImport: () async => invalid,
-        onSave: (_) async { saves++; },
+        onSave: (_, name) async { saves++; },
       );
-      await tester.tap(find.byKey(_import));
+      await _tapEditorKey(tester, _import);
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
       expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
       expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
       expect(saves, 0);
       await tester.ensureVisible(find.byKey(_close));
-      await tester.tap(find.byKey(_close));
+      await _tapEditorKey(tester, _close);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     }
@@ -637,7 +768,7 @@ void main() {
     await _openEditor(tester,
       initialConfig: _config,
       onImport: () { reads++; return pending.future; },
-      onSave: (_) async { saves++; },
+      onSave: (_, name) async { saves++; },
     );
     final queuedImport = tester.widget<OutlinedButton>(find.byKey(_import)).onPressed!;
     final queuedPaste = tester.widget<OutlinedButton>(find.byKey(_paste)).onPressed!;
@@ -660,7 +791,7 @@ void main() {
     expect(tester.widget<IconButton>(find.byKey(_close)).onPressed, isNotNull);
     pending.complete(_config);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(_close));
+    await _tapEditorKey(tester, _close);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
@@ -674,11 +805,11 @@ void main() {
       initialConfig: _config,
       onImport: () => pending.future,
       onCancelImport: () async { cancels++; },
-      onSave: (_) async { saves++; },
+      onSave: (_, name) async { saves++; },
     );
-    await tester.tap(find.byKey(_import));
+    await _tapEditorKey(tester, _import);
     await tester.pump();
-    await tester.tap(find.byKey(_close));
+    await _tapEditorKey(tester, _close);
     await tester.pump(const Duration(milliseconds: 20));
     expect(cancels, 1);
     pending.complete('$_config\n# Late file\n');
@@ -701,9 +832,9 @@ void main() {
         cancels++;
         throw PlatformException(code: 'CANCEL_FAILED', message: 'PRIVATE_CANCEL_DETAIL');
       },
-      onSave: (_) async {},
+      onSave: (_, name) async {},
     );
-    await tester.tap(find.byKey(_import));
+    await _tapEditorKey(tester, _import);
     await tester.pump();
     // Replacing one MaterialApp with another can retain its Navigator/routes.
     // Remove the old tree first so this actually exercises editor disposal.
@@ -730,13 +861,13 @@ void main() {
     await _openEditor(tester,
       initialConfig: _config,
       onImport: () => pending.future,
-      onSave: (_) async { saves++; },
+      onSave: (_, name) async { saves++; },
     );
     final queuedSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
     final queuedImport = tester.widget<OutlinedButton>(find.byKey(_import)).onPressed!;
-    await tester.tap(find.byKey(_visibility));
+    await _tapEditorKey(tester, _visibility);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(_import));
+    await _tapEditorKey(tester, _import);
     await tester.pump();
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
@@ -777,7 +908,7 @@ void main() {
     await _openEditor(tester,
       textScale: 2.2,
       onImport: () async => _config,
-      onSave: (config) async { saved = config; },
+      onSave: (config, name) async { saved = config; },
     );
     expect(tester.takeException(), isNull);
     await tester.ensureVisible(find.byKey(_import));
@@ -785,12 +916,12 @@ void main() {
     final importRect = tester.getRect(find.byKey(_import));
     expect(importRect.left, greaterThanOrEqualTo(0));
     expect(importRect.right, lessThanOrEqualTo(360));
-    await tester.tap(find.byKey(_import));
+    await _tapEditorKey(tester, _import);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(_save));
     await tester.pumpAndSettle();
     expect(tester.getRect(find.byKey(_save)).bottom, lessThanOrEqualTo(592));
-    await tester.tap(find.byKey(_save));
+    await _tapEditorKey(tester, _save);
     await tester.pumpAndSettle();
     expect(saved, _config);
     expect(tester.takeException(), isNull);

@@ -12,14 +12,14 @@ import com.wireguard.config.Config
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val io = Executors.newSingleThreadExecutor()
-    private var pending: Pair<MethodCall, MethodChannel.Result>? = null
+    private class PendingTunnelRequest(val call: MethodCall, val result: MethodChannel.Result, val token: Long)
+    private var pending: PendingTunnelRequest? = null
     // The tunnel must outlive Activity recreation (rotation / process UI rebuild).
     // GoBackend.getState compares the Tunnel object by identity.
     private object Session {
@@ -31,7 +31,7 @@ class MainActivity : FlutterActivity() {
         @Volatile var connected = false
         @Volatile var connectedSinceElapsedMs: Long? = null
         @Volatile var lastErrorCode: String? = null
-        val operationInProgress = AtomicBoolean(false)
+        val operationInProgress = ProfileOperationGate()
     }
     private val tunnel get() = Session.tunnel
     private var backend: GoBackend?
@@ -67,23 +67,42 @@ class MainActivity : FlutterActivity() {
         val item = pending ?: return
         pending = null
         if (resultCode != Activity.RESULT_OK) {
-            item.second.error("VPN_DENIED", "Разрешение VPN не предоставлено", null)
+            Session.operationInProgress.release(item.token)
+            item.result.error("VPN_DENIED", "Разрешение VPN не предоставлено", null)
         } else {
-            startTunnel(item.first, item.second)
+            startTunnel(item.call, item.result, item.token)
         }
     }
 
-    private fun startTunnel(call: MethodCall, result: MethodChannel.Result) {
+    private fun startTunnel(call: MethodCall, result: MethodChannel.Result, token: Long) {
         val raw = call.argument<String>("config")
+        val expectedProfileId = (call.arguments as? Map<*, *>)?.get("expectedProfileId")
         if (raw.isNullOrBlank() || raw.length > 65536) {
+            Session.operationInProgress.release(token)
             result.error("INVALID_CONFIG", "Нужна конфигурация WireGuard", null)
             return
         }
-        if (!Session.operationInProgress.compareAndSet(false, true)) {
-            result.error("VPN_BUSY", "Подключение уже изменяется", null)
+        if (expectedProfileId != null && expectedProfileId !is String) {
+            Session.operationInProgress.release(token)
+            result.error("PROFILE_CHANGED", "Выбранный профиль изменился", null)
             return
         }
+        // The same process-wide token has been held since before VPN approval.
+        // No other Activity may change the selected profile while approval is open.
         io.execute {
+            if (expectedProfileId != null) {
+                try {
+                    // A different Activity may have selected/edited a profile
+                    // between Flutter's earlier load and this connect request.
+                    // Both the ID and exact configuration must still match.
+                    secureStore.validateActive(expectedProfileId as String, raw)
+                } catch (error: Exception) {
+                    Session.operationInProgress.release(token)
+                    runOnUiThread { result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"),
+                        "Не удалось подтвердить выбранный профиль. Повторите подключение.", null) }
+                    return@execute
+                }
+            }
             try {
                 val cleaned = WireGuardRouting.prepare(raw, prefs.getStringSet("flow_bypass_packages", emptySet()).orEmpty())
                 val config = Config.parse(ByteArrayInputStream(cleaned.toByteArray(StandardCharsets.UTF_8)))
@@ -100,7 +119,7 @@ class MainActivity : FlutterActivity() {
                 // Never send raw exceptions: they might include the private key or full configuration.
                 runOnUiThread { result.error("WG_CONNECT_FAILED", "Не удалось установить туннель. Проверьте параметры сервера.", null) }
             } finally {
-                Session.operationInProgress.set(false)
+                Session.operationInProgress.release(token)
             }
         }
     }
@@ -109,6 +128,11 @@ class MainActivity : FlutterActivity() {
         profileImport.dispose()
         appUpdates.dispose()
         profileScreenProtection.dispose()
+        interruptPendingVpnRequest()
+        super.onDestroy()
+    }
+
+    private fun interruptPendingVpnRequest() {
         // Android may recreate the Activity while the VPN permission dialog is open.
         // A MethodChannel.Result owned by the destroyed Activity must not be left pending.
         // Fail closed and let the user retry from the new screen; never start a tunnel
@@ -116,9 +140,9 @@ class MainActivity : FlutterActivity() {
         val request = pending
         pending = null
         if (request != null) {
-            request.second.error("VPN_REQUEST_INTERRUPTED", "Запрос разрешения прерван. Повторите подключение.", null)
+            Session.operationInProgress.release(request.token)
+            request.result.error("VPN_REQUEST_INTERRUPTED", "Запрос разрешения прерван. Повторите подключение.", null)
         }
-        super.onDestroy()
     }
 
     private val channelName = "shop.pushok.flow/app_routes"
@@ -127,7 +151,40 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         profileImport.dispose()
         profileScreenProtection.dispose()
+        interruptPendingVpnRequest()
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    private fun profileErrorCode(error: Exception, fallback: String): String {
+        val code = (error as? ProfileCatalogFailure)?.code
+        return if (code in setOf("PROFILE_NAME_INVALID", "PROFILE_LIMIT_REACHED", "PROFILE_NOT_FOUND",
+                "PROFILE_STORE_UNAVAILABLE", "PROFILE_CHANGED", "INVALID_CONFIG", "VPN_ACTIVE", "VPN_STATE_UNAVAILABLE")) code!! else fallback
+    }
+
+    private fun mutateProfile(result: MethodChannel.Result, fallback: String, action: () -> Unit) {
+        val token = Session.operationInProgress.acquire()
+        if (token == null) {
+            result.error("VPN_BUSY", "Подключение или профиль уже изменяется", null)
+            return
+        }
+        io.execute {
+            val failure = try {
+                // A failed state read is not proof that the tunnel is down.
+                val active = try { backend?.getState(tunnel) == Tunnel.State.UP }
+                    catch (_: Exception) { throw ProfileCatalogFailure("VPN_STATE_UNAVAILABLE") }
+                if (connected || active) throw ProfileCatalogFailure("VPN_ACTIVE")
+                action()
+                null
+            } catch (error: Exception) {
+                profileErrorCode(error, fallback)
+            } finally {
+                Session.operationInProgress.release(token)
+            }
+            runOnUiThread {
+                if (failure == null) result.success(true)
+                else result.error(failure, "Не удалось изменить профиль", null)
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -194,7 +251,24 @@ class MainActivity : FlutterActivity() {
                             nowEpochMs = System.currentTimeMillis())
                         runOnUiThread { result.success(status) }
                     }
-                    "savedProfileExists" -> result.success(secureStore.exists())
+                    "listWireGuardProfiles" -> io.execute {
+                        try {
+                            val metadata = secureStore.metadata()
+                            runOnUiThread { result.success(metadata) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"),
+                                "Не удалось открыть список профилей", null) }
+                        }
+                    }
+                    "savedProfileExists" -> io.execute {
+                        try {
+                            val exists = secureStore.exists()
+                            runOnUiThread { result.success(exists) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"),
+                                "Не удалось проверить сохранённые профили", null) }
+                        }
+                    }
                     "aiFeedbackSummary" -> result.success(decisionMemory.summary())
                     "aiFeedbackClear" -> {
                         try { decisionMemory.clear(); result.success(true) }
@@ -211,41 +285,54 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "saveWireGuardProfile" -> {
-                        val config = call.argument<String>("config")
+                        val arguments = call.arguments as? Map<*, *>
+                        val config = arguments?.get("config") as? String
+                        val profileId = arguments?.get("profileId")
+                        val name = arguments?.get("name")
+                        val createNew = arguments?.get("createNew")
                         if (config.isNullOrBlank() || config.length > 65536) {
                             result.error("INVALID_CONFIG", "Некорректная конфигурация", null)
+                        } else if (name != null && name !is String) {
+                            result.error("PROFILE_NAME_INVALID", "Некорректное имя профиля", null)
+                        } else if ((profileId != null && profileId !is String) ||
+                                   (createNew != null && createNew !is Boolean)) {
+                            result.error("PROFILE_NOT_FOUND", "Не удалось выбрать профиль", null)
+                        } else mutateProfile(result, "PROFILE_SAVE_FAILED") {
+                            try {
+                                // A parse failure must never overwrite a saved configuration.
+                                val parsed = Config.parse(ByteArrayInputStream(config.toByteArray(StandardCharsets.UTF_8)))
+                                if (parsed.peers.isEmpty()) throw IllegalArgumentException()
+                            } catch (_: Exception) {
+                                throw ProfileCatalogFailure("INVALID_CONFIG")
+                            }
+                            secureStore.save(config, profileId as? String, name as? String, createNew == true)
+                        }
+                    }
+                    "loadWireGuardProfile" -> {
+                        val id = (call.arguments as? Map<*, *>)?.get("profileId")
+                        if (id != null && id !is String) {
+                            result.error("PROFILE_NOT_FOUND", "Не удалось выбрать профиль", null)
                         } else io.execute {
                             try {
-                                // Parse before storing; failure must not overwrite the existing profile.
-                                Config.parse(ByteArrayInputStream(config.toByteArray(StandardCharsets.UTF_8)))
-                            } catch (_: Exception) {
-                                // Parser exceptions can contain private profile data.
-                                runOnUiThread { result.error("INVALID_CONFIG", "Проверьте конфигурацию WireGuard", null) }
-                                return@execute
-                            }
-                            try {
-                                secureStore.save(config)
-                                runOnUiThread { result.success(true) }
-                            } catch (_: Exception) {
-                                runOnUiThread { result.error("PROFILE_SAVE_FAILED", "Не удалось сохранить профиль", null) }
+                                val config = secureStore.load(id as? String)
+                                runOnUiThread { result.success(config) }
+                            } catch (error: Exception) {
+                                runOnUiThread { result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"),
+                                    "Не удалось расшифровать профиль", null) }
                             }
                         }
                     }
-                    "loadWireGuardProfile" -> io.execute {
-                        try {
-                            val config = secureStore.load()
-                            runOnUiThread { result.success(config) }
-                        } catch (_: Exception) {
-                            runOnUiThread { result.error("PROFILE_LOAD_FAILED", "Не удалось расшифровать профиль", null) }
-                        }
+                    "deleteWireGuardProfile" -> {
+                        val id = (call.arguments as? Map<*, *>)?.get("profileId")
+                        if (id != null && id !is String) {
+                            result.error("PROFILE_NOT_FOUND", "Не удалось выбрать профиль", null)
+                        } else mutateProfile(result, "PROFILE_DELETE_FAILED") { secureStore.delete(id as? String) }
                     }
-                    "deleteWireGuardProfile" -> io.execute {
-                        try {
-                            secureStore.delete()
-                            runOnUiThread { result.success(true) }
-                        } catch (_: Exception) {
-                            runOnUiThread { result.error("PROFILE_DELETE_FAILED", "Не удалось удалить профиль", null) }
-                        }
+                    "selectWireGuardProfile" -> {
+                        val id = (call.arguments as? Map<*, *>)?.get("profileId") as? String
+                        if (id == null) {
+                            result.error("PROFILE_NOT_FOUND", "Не удалось выбрать профиль", null)
+                        } else mutateProfile(result, "PROFILE_SELECT_FAILED") { secureStore.select(id) }
                     }
                     "connectWireGuard" -> {
                         val config = call.argument<String>("config")
@@ -255,15 +342,25 @@ class MainActivity : FlutterActivity() {
                             // Do not show Android's VPN approval for an unusable profile.
                             result.error("INVALID_CONFIG", "Нужна конфигурация WireGuard", null)
                         } else {
-                            val approval = VpnService.prepare(this)
-                            if (approval != null) {
-                                pending = call to result
-                                startActivityForResult(approval, vpnRequestCode)
-                            } else startTunnel(call, result)
+                            val token = Session.operationInProgress.acquire()
+                            if (token == null) {
+                                result.error("VPN_BUSY", "Подключение уже изменяется", null)
+                            } else try {
+                                val approval = VpnService.prepare(this)
+                                if (approval != null) {
+                                    pending = PendingTunnelRequest(call, result, token)
+                                    startActivityForResult(approval, vpnRequestCode)
+                                } else startTunnel(call, result, token)
+                            } catch (_: Exception) {
+                                pending = null
+                                Session.operationInProgress.release(token)
+                                result.error("VPN_REQUEST_INTERRUPTED", "Не удалось открыть разрешение VPN", null)
+                            }
                         }
                     }
                     "disconnectWireGuard" -> {
-                        if (!Session.operationInProgress.compareAndSet(false, true)) {
+                        val token = Session.operationInProgress.acquire()
+                        if (token == null) {
                             result.error("VPN_BUSY", "Подключение уже изменяется", null)
                         } else io.execute {
                             try {
@@ -274,7 +371,7 @@ class MainActivity : FlutterActivity() {
                             } catch (_: Exception) {
                                 runOnUiThread { result.error("WG_DISCONNECT_FAILED", "Не удалось отключить туннель", null) }
                             } finally {
-                                Session.operationInProgress.set(false)
+                                Session.operationInProgress.release(token)
                             }
                         }
                     }

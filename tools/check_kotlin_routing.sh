@@ -22,3 +22,7 @@ java -jar "$out/profile-protection-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
   native/android/tests/ProfileImportReaderCheck.kt -include-runtime -d "$out/profile-import-tests.jar"
 java -jar "$out/profile-import-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileOperationGate.kt \
+  native/android/tests/ProfileCatalogCheck.kt -include-runtime -d "$out/profile-catalog-tests.jar"
+java -jar "$out/profile-catalog-tests.jar"
