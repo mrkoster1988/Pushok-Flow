@@ -26,3 +26,6 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileOperationGate.kt \
   native/android/tests/ProfileCatalogCheck.kt -include-runtime -d "$out/profile-catalog-tests.jar"
 java -jar "$out/profile-catalog-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.kt \
+  native/android/tests/RouteSettingsCheck.kt -include-runtime -d "$out/route-settings-tests.jar"
+java -jar "$out/route-settings-tests.jar"

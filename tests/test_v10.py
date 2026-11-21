@@ -26,7 +26,12 @@ class SessionSafetyTests(TestCase):
 
     def test_route_changes_blocked_during_transition(self):
         src = ACTIVITY.read_text()
-        self.assertIn('connected || Session.operationInProgress.get() || pending != null', src)
+        routes = src.split('private fun mutateRoutes(', 1)[1].split('override fun configureFlutterEngine', 1)[0]
+        self.assertIn('Session.operationInProgress.acquire()', routes)
+        self.assertIn('backend?.getState(tunnel)', routes)
+        self.assertIn('connected || state != Tunnel.State.DOWN', routes)
+        self.assertLess(routes.index('state != Tunnel.State.DOWN'), routes.index('routeStore.replace(request)'))
+        self.assertIn('Session.operationInProgress.release(token)', routes)
 
     def test_error_does_not_leak_profile_to_ui(self):
         src = ACTIVITY.read_text()

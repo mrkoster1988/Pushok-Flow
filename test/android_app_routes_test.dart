@@ -1,0 +1,117 @@
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pushok_flow/platform/android_app_routes.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('shop.pushok.flow/app_routes');
+  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  late List<MethodCall> calls;
+  Object? response;
+  setUp(() {
+    calls = [];
+    response = null;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return response;
+    });
+  });
+  tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  test('App metadata has stable case-insensitive ordering and cannot be mutated', () async {
+    response = [
+      {'packageName': 'example.zulu', 'label': 'Zulu'},
+      {'packageName': 'example.second', 'label': 'alpha'},
+      {'packageName': 'example.first', 'label': 'Alpha'},
+    ];
+    final apps = await AndroidAppRoutes.installedApps();
+    expect(apps.map((app) => app.packageName),
+      ['example.first', 'example.second', 'example.zulu']);
+    expect(() => apps.clear(), throwsUnsupportedError);
+    expect(calls.single.method, 'installedApps');
+  });
+
+  test('Malformed app responses fail instead of becoming an empty or partial list', () async {
+    for (final invalid in <Object?>[
+      null, {}, ['bad'],
+      [{'packageName': 'example.browser'}],
+      [{'packageName': 'example.browser', 'label': 'Browser', 'unknown': true}],
+      [{'packageName': 'example.browser', 'label': 1}],
+      [{'packageName': 'bad package', 'label': 'Browser'}],
+      [{'packageName': 'example.browser', 'label': ''}],
+      [{'packageName': 'example.browser', 'label': ' Browser '}],
+      [{'packageName': 'example.browser', 'label': 'Hidden\ntext'}],
+      [{'packageName': 'example.browser', 'label': 'Hidden\u2028text'}],
+      [{'packageName': 'example.browser', 'label': 'x' * 1025}],
+      [
+        {'packageName': 'example.browser', 'label': 'One'},
+        {'packageName': 'example.browser', 'label': 'Two'},
+      ],
+    ]) {
+      response = invalid;
+      await expectLater(AndroidAppRoutes.installedApps(), throwsFormatException);
+    }
+    response = List.generate(4097, (i) =>
+      {'packageName': 'example.app$i', 'label': 'App $i'});
+    await expectLater(AndroidAppRoutes.installedApps(), throwsFormatException);
+  });
+
+  test('Parser errors do not attach native payload data', () async {
+    response = [{'packageName': 'example.browser', 'label': 'PRIVATE_LABEL\nDATA'}];
+    try {
+      await AndroidAppRoutes.installedApps();
+      fail('Invalid metadata must be rejected.');
+    } on FormatException catch (error) {
+      expect(error.source, isNull);
+      expect(error.toString(), isNot(contains('PRIVATE_LABEL')));
+    }
+  });
+
+  test('Selections preserve packages missing from app metadata and are immutable', () async {
+    response = ['missing.saved_app', 'example.browser'];
+    final selected = await AndroidAppRoutes.getBypass();
+    expect(selected, {'example.browser', 'missing.saved_app'});
+    expect(() => selected.clear(), throwsUnsupportedError);
+    expect(calls.single.method, 'getBypass');
+  });
+
+  test('Malformed selections are not silently deduplicated, filtered or emptied', () async {
+    for (final invalid in <Object?>[
+      null, {}, [1], ['example.browser', 'example.browser'],
+      ['not-a-package'], ['example.browser\n'],
+      ['example.${'a' * 248}'],
+      List.generate(4097, (i) => 'example.app$i'),
+    ]) {
+      response = invalid;
+      await expectLater(AndroidAppRoutes.getBypass(), throwsFormatException);
+    }
+  });
+
+  test('Conditional writes include sorted expected and requested packages', () async {
+    await AndroidAppRoutes.setBypass({'example.zulu', 'example.alpha'},
+      expectedPackages: {'missing.saved_app', 'example.alpha'});
+    expect(calls.single.method, 'setBypass');
+    expect(calls.single.arguments, {
+      'packages': ['example.alpha', 'example.zulu'],
+      'expectedPackages': ['example.alpha', 'missing.saved_app'],
+    });
+    calls.clear();
+    await AndroidAppRoutes.setBypass({});
+    expect(calls.single.arguments, {'packages': <String>[]});
+  });
+
+  test('Invalid writes or expectations never reach the native channel', () async {
+    await expectLater(AndroidAppRoutes.setBypass({'bad package'}), throwsFormatException);
+    await expectLater(AndroidAppRoutes.setBypass({'example.good'},
+      expectedPackages: {'bad package'}), throwsFormatException);
+    await expectLater(AndroidAppRoutes.setBypass(
+      {for (var i = 0; i < 4097; i++) 'example.app$i'}), throwsFormatException);
+    expect(calls, isEmpty);
+  });
+
+  test('Empty valid responses remain different from failed responses', () async {
+    response = <Object?>[];
+    expect(await AndroidAppRoutes.installedApps(), isEmpty);
+    expect(await AndroidAppRoutes.getBypass(), isEmpty);
+  });
+}

@@ -177,7 +177,7 @@ class BootstrapScriptTests(unittest.TestCase):
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportReader.kt",
-            "ProfileCatalogStore.kt", "ProfileOperationGate.kt",
+            "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "RouteSettingsStore.kt",
         )
         native = self.project / "native/android/app/src/main/kotlin/shop/pushok/flow"
         native.mkdir(parents=True)

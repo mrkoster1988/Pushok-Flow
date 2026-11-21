@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
         @Volatile var connectedSinceElapsedMs: Long? = null
         @Volatile var lastErrorCode: String? = null
         val operationInProgress = ProfileOperationGate()
+        val routeSettingsState = RouteSettingsState()
     }
     private val tunnel get() = Session.tunnel
     private var backend: GoBackend?
@@ -103,8 +104,16 @@ class MainActivity : FlutterActivity() {
                     return@execute
                 }
             }
+            // A route read/latch failure happens before any backend mutation. Preserve
+            // the existing tunnel state rather than reporting a failed reconnect as DOWN.
+            val exclusions = try { routeStore.read() } catch (error: Exception) {
+                Session.operationInProgress.release(token)
+                runOnUiThread { result.error(routeErrorCode(error, "ROUTES_LOAD_FAILED"),
+                    "Не удалось прочитать исключения приложений", null) }
+                return@execute
+            }
             try {
-                val cleaned = WireGuardRouting.prepare(raw, prefs.getStringSet("flow_bypass_packages", emptySet()).orEmpty())
+                val cleaned = WireGuardRouting.prepare(raw, exclusions)
                 val config = Config.parse(ByteArrayInputStream(cleaned.toByteArray(StandardCharsets.UTF_8)))
                 if (backend == null) backend = GoBackend(applicationContext)
                 val state = backend!!.setState(tunnel, Tunnel.State.UP, config)
@@ -147,6 +156,13 @@ class MainActivity : FlutterActivity() {
 
     private val channelName = "shop.pushok.flow/app_routes"
     private val prefs by lazy { getSharedPreferences("pushok_flow_routes", MODE_PRIVATE) }
+    private val routeStore by lazy {
+        RouteSettingsStore(object : RouteSettingsStorage {
+            override fun read(): Set<*> = prefs.getStringSet("flow_bypass_packages", emptySet()).orEmpty()
+            override fun replace(packages: Set<String>): Boolean =
+                prefs.edit().putStringSet("flow_bypass_packages", packages).commit()
+        }, Session.routeSettingsState)
+    }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         profileImport.dispose()
@@ -183,6 +199,39 @@ class MainActivity : FlutterActivity() {
             runOnUiThread {
                 if (failure == null) result.success(true)
                 else result.error(failure, "Не удалось изменить профиль", null)
+            }
+        }
+    }
+
+    private fun routeErrorCode(error: Exception, fallback: String): String {
+        val code = (error as? RouteSettingsFailure)?.code
+        return if (code in setOf("INVALID_PACKAGES", "ROUTES_CHANGED", "ROUTES_LOAD_FAILED",
+                "ROUTES_STORE_UNAVAILABLE", "VPN_ACTIVE", "VPN_STATE_UNAVAILABLE")) code!! else fallback
+    }
+
+    private fun mutateRoutes(result: MethodChannel.Result, request: RouteSettingsRequest) {
+        // Acquired before IO is queued: connect/permission/profile work in any
+        // Activity cannot slip between the state check and committing new routes.
+        val token = Session.operationInProgress.acquire()
+        if (token == null) {
+            result.error("VPN_BUSY", "Подключение или настройки уже изменяются", null)
+            return
+        }
+        io.execute {
+            val failure = try {
+                val state = try { backend?.getState(tunnel) ?: Tunnel.State.DOWN }
+                    catch (_: Exception) { throw RouteSettingsFailure("VPN_STATE_UNAVAILABLE") }
+                if (connected || state != Tunnel.State.DOWN) throw RouteSettingsFailure("VPN_ACTIVE")
+                routeStore.replace(request)
+                null
+            } catch (error: Exception) {
+                routeErrorCode(error, "ROUTES_SAVE_FAILED")
+            } finally {
+                Session.operationInProgress.release(token)
+            }
+            runOnUiThread {
+                if (failure == null) result.success(null)
+                else result.error(failure, "Не удалось изменить исключения приложений", null)
             }
         }
     }
@@ -375,37 +424,40 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
-                    "installedApps" -> {
-                        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-                        @Suppress("DEPRECATION")
-                        val activities = packageManager.queryIntentActivities(intent, 0)
-                        val apps = activities.map { info ->
-                            mapOf(
-                                "packageName" to info.activityInfo.packageName,
-                                "label" to info.loadLabel(packageManager).toString(),
-                            )
-                        }.distinctBy { it["packageName"] }.sortedBy { it["label"] }
-                        result.success(apps)
-                    }
-                    "getBypass" -> result.success(
-                        prefs.getStringSet("flow_bypass_packages", emptySet())!!.sorted()
-                    )
-                    "setBypass" -> {
-                        val values = call.argument<List<String>>("packages")
-                        if (values == null || values.any { !it.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")) }) {
-                            result.error("INVALID_PACKAGES", "Expected Android package IDs", null)
-                        } else {
-                            // Preserve user's choices even if an app is temporarily uninstalled.
-                            if (connected || Session.operationInProgress.get() || pending != null) {
-                                result.error("VPN_ACTIVE", "Отключите туннель перед изменением исключений", null)
-                            } else {
-                                if (prefs.edit().putStringSet("flow_bypass_packages", values.toSet()).commit()) {
-                                    result.success(null)
-                                } else {
-                                    result.error("ROUTES_SAVE_FAILED", "Не удалось сохранить исключения", null)
-                                }
-                            }
+                    "installedApps" -> io.execute {
+                        try {
+                            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                            @Suppress("DEPRECATION")
+                            val activities = packageManager.queryIntentActivities(intent, 0)
+                            val apps = activities.map { info ->
+                                val packageName = info.activityInfo.packageName
+                                check(RouteSettingsStore.isValidPackageName(packageName))
+                                mapOf(
+                                    "packageName" to packageName,
+                                    "label" to RouteAppLabels.normalize(info.loadLabel(packageManager), packageName),
+                                )
+                            }.distinctBy { it["packageName"] }.sortedBy { it["label"] }
+                            check(apps.size <= RouteSettingsStore.MAX_PACKAGES)
+                            runOnUiThread { result.success(apps) }
+                        } catch (_: Exception) {
+                            runOnUiThread { result.error("APPS_LOAD_FAILED", "Не удалось открыть список приложений", null) }
                         }
+                    }
+                    "getBypass" -> io.execute {
+                        try {
+                            val packages = routeStore.read().sorted()
+                            runOnUiThread { result.success(packages) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error(routeErrorCode(error, "ROUTES_LOAD_FAILED"),
+                                "Не удалось прочитать исключения приложений", null) }
+                        }
+                    }
+                    "setBypass" -> {
+                        val request = try { RouteSettingsRequest.parse(call.arguments) }
+                            catch (_: Exception) { null }
+                        if (request == null) {
+                            result.error("INVALID_PACKAGES", "Некорректный список приложений", null)
+                        } else mutateRoutes(result, request)
                     }
                     else -> result.notImplemented()
                 }

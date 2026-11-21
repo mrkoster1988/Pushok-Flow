@@ -4,7 +4,6 @@ import 'design/pushok_theme.dart';
 import 'dart:io' show Platform;
 import 'dart:async' show Timer, unawaited;
 import 'platform/android_app_routes.dart';
-import 'ai/pushok_ai.dart';
 import 'ai/pushok_ai_memory.dart';
 import 'platform/wireguard_tunnel.dart';
 import 'platform/wireguard_profiles.dart';
@@ -14,6 +13,7 @@ import 'ui/wireguard_profile_editor.dart';
 import 'ui/wireguard_profiles_card.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/tunnel_diagnostics_card.dart';
+import 'ui/app_routes_view.dart';
 
 void main() => runApp(const PushokFlowApp());
 
@@ -59,6 +59,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   bool _profileEditorOpen = false;
   bool _statusRefreshing = false;
   bool _savingRoute = false;
+  bool _routeConfirmationOpen = false;
+  bool _routesLoaded = false;
+  bool _routesStale = true;
+  int _routeEpoch = 0;
+  String _routeQuery = '';
+  bool _onlySelectedRoutes = false;
   int _statusEpoch = 0;
   int _profileRequestEpoch = 0;
   int _tunnelIntentEpoch = 0;
@@ -72,8 +78,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       !_diagnosticsStale && !_nativeBusy && !connecting;
   bool get _canManageProfiles => _isAndroid && _foreground &&
       !connected && !connecting && !_nativeBusy && !_profileBusy &&
+      !_savingRoute && !_routeConfirmationOpen &&
       !_profileEditorOpen && !_statusRefreshing && _profiles != null &&
       _profilesError == null && _diagnostics.isKnown && !_diagnosticsStale;
+  bool get _canEditRoutes => _isAndroid && _foreground && _routesLoaded &&
+      !_routesStale && !loadingApps && !_savingRoute && !_routeConfirmationOpen &&
+      routeError == null && !connected && !connecting && !_nativeBusy &&
+      !_profileBusy && !_profileEditorOpen && !_statusRefreshing &&
+      _diagnostics.isKnown && !_diagnosticsStale;
 
   void _showNotice(String message) {
     if (!mounted) return;
@@ -100,6 +112,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'Выбранный профиль изменился. Проверьте выбор в «Серверах» и подключитесь снова.';
         case 'PROFILE_STORE_UNAVAILABLE':
           return 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.';
+        case 'ROUTES_STORE_UNAVAILABLE':
+          return 'Не удалось записать исключения. Перезапустите приложение перед подключением.';
+        case 'ROUTES_LOAD_FAILED':
+          return 'Не удалось прочитать исключения. Проверьте раздел «Маршруты» перед подключением.';
         case 'WG_DISCONNECT_FAILED':
           return 'Не удалось отключить VPN. Повторите попытку.';
       }
@@ -110,7 +126,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTunnel({String? profile}) async {
-    if (!_isAndroid || !_foreground || connecting || _nativeBusy || _profileBusy || _profileEditorOpen) return;
+    if (!_isAndroid || !_foreground || connecting || _nativeBusy || _profileBusy ||
+        _profileEditorOpen || _savingRoute || _routeConfirmationOpen) return;
     final tunnelIntent = ++_tunnelIntentEpoch;
     final disconnecting = connected;
     final requestEpoch = _profileRequestEpoch;
@@ -209,13 +226,19 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _startHealthPolling();
       _refreshProfileStatus();
+      _loadRoutes();
     } else {
       // A request made before losing focus must not open the editor later,
       // even if the user returns before a native response arrives.
       _profileRequestEpoch++;
       // A sample requested before app switching is no longer a fresh reading.
       _statusEpoch++;
-      setState(() => _diagnosticsStale = true);
+      _routeEpoch++;
+      setState(() {
+        _diagnosticsStale = true;
+        _routesStale = true;
+        loadingApps = false;
+      });
       _healthPoll?.cancel();
     }
   }
@@ -246,7 +269,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Future<void> _refreshProfileStatus() async {
     if (!_isAndroid || !mounted || !_foreground || connecting || _statusRefreshing ||
-        _profileBusy || _profileEditorOpen) return;
+        _profileBusy || _profileEditorOpen || _savingRoute) return;
     setState(() => _statusRefreshing = true);
     final epoch = _statusEpoch;
     try {
@@ -511,41 +534,153 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _loadRoutes() async {
-    if (!_isAndroid) return;
-    setState(() { loadingApps = true; routeError = null; });
+    if (!_isAndroid || !mounted || !_foreground || _savingRoute ||
+        _routeConfirmationOpen) return;
+    final epoch = ++_routeEpoch;
+    setState(() {
+      loadingApps = true;
+      _routesStale = true;
+      routeError = null;
+    });
     try {
-      final apps = await AndroidAppRoutes.installedApps();
-      final selected = await AndroidAppRoutes.getBypass();
-      if (mounted) setState(() { installed = apps; bypassPackages = selected; });
-    } catch (_) {
-      if (mounted) setState(() { routeError = 'Список приложений недоступен. Проверьте Android-модуль.'; });
+      final values = await Future.wait<Object>([
+        AndroidAppRoutes.installedApps().timeout(const Duration(seconds: 10)),
+        AndroidAppRoutes.getBypass().timeout(const Duration(seconds: 5)),
+      ], eagerError: true);
+      if (mounted && _foreground && epoch == _routeEpoch && !_savingRoute) {
+        setState(() {
+          installed = values[0] as List<InstalledApp>;
+          bypassPackages = values[1] as Set<String>;
+          _routesLoaded = true;
+          _routesStale = false;
+          routeError = null;
+        });
+      }
+    } catch (error) {
+      if (mounted && _foreground && epoch == _routeEpoch) {
+        setState(() => routeError = _routeErrorMessage(error));
+      }
     } finally {
-      if (mounted) setState(() => loadingApps = false);
+      // An old response must not stop the newer request's loading indicator.
+      if (mounted && epoch == _routeEpoch) setState(() => loadingApps = false);
+    }
+  }
+
+  String _routeErrorMessage(Object error, {bool saving = false}) {
+    if (error is PlatformException) {
+      switch (error.code) {
+        case 'ROUTES_CHANGED':
+          return 'Список исключений изменился. Проверьте обновлённый выбор и повторите действие.';
+        case 'ROUTES_STORE_UNAVAILABLE':
+          return 'Не удалось записать исключения. Перезапустите приложение перед повторной попыткой.';
+        case 'VPN_ACTIVE':
+          return 'Для изменения исключений отключите туннель.';
+        case 'VPN_BUSY':
+          return 'Дождитесь завершения операции с туннелем и повторите действие.';
+        case 'VPN_STATE_UNAVAILABLE':
+          return 'Не удалось уточнить состояние туннеля. Повторите проверку.';
+      }
+    }
+    return saving
+        ? 'Не удалось сохранить исключения. Повторите проверку списка.'
+        : 'Не удалось прочитать приложения и исключения. Повторите проверку.';
+  }
+
+  Future<void> _refreshRoutes() async {
+    await Future.wait([_loadRoutes(), _refreshProfileStatus()]);
+  }
+
+  Future<void> _saveBypass(Set<String> updated, {required Set<String> expected}) async {
+    if (!_canEditRoutes) return;
+    final epoch = ++_routeEpoch;
+    final foregroundEpoch = _profileRequestEpoch;
+    _statusEpoch++;
+    setState(() { _savingRoute = true; _routesStale = true; });
+    try {
+      // Compare with the set the user actually saw. A second Activity must not
+      // have its newer changes overwritten by this whole-set operation.
+      await AndroidAppRoutes.setBypass(updated, expectedPackages: expected);
+      if (mounted && _foreground && epoch == _routeEpoch &&
+          foregroundEpoch == _profileRequestEpoch) {
+        setState(() { bypassPackages = Set.of(updated); routeError = null; });
+      }
+    } catch (error) {
+      if (mounted && _foreground && foregroundEpoch == _profileRequestEpoch) {
+        final message = _routeErrorMessage(error, saving: true);
+        setState(() => routeError = message);
+        _showNotice(message);
+      }
+    } finally {
+      if (mounted) {
+        _statusEpoch++;
+        setState(() => _savingRoute = false);
+        // Re-read even after success: acknowledge only the authoritative native
+        // set. On a failed durable write the native store stays unavailable.
+        await _refreshRoutes();
+      }
     }
   }
 
   Future<void> _setBypass(String packageName, bool value) async {
-    if (connected || connecting || _nativeBusy || _savingRoute) return;
-    final updated = {...bypassPackages};
+    if (!_canEditRoutes) return;
+    final expected = Set<String>.of(bypassPackages);
+    final updated = Set<String>.of(expected);
     if (value) { updated.add(packageName); } else { updated.remove(packageName); }
-    setState(() => _savingRoute = true);
+    await _saveBypass(updated, expected: expected);
+  }
+
+  Future<void> _clearBypass() async {
+    if (!_canEditRoutes || bypassPackages.isEmpty) return;
+    final expected = Set<String>.of(bypassPackages);
+    final intentEpoch = _profileRequestEpoch;
+    var confirmed = false;
+    setState(() => _routeConfirmationOpen = true);
     try {
-      await AndroidAppRoutes.setBypass(updated);
-      if (mounted) setState(() { bypassPackages = updated; routeError = null; });
-    } catch (_) {
-      if (mounted) setState(() => routeError = 'Не удалось сохранить исключение. Отключите туннель и попробуйте ещё раз.');
+      confirmed = await showDialog<bool>(context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Очистить исключения?'),
+          content: Text('Будут удалены все исключения: ${expected.length}. '
+              'Изменение действует при следующем подключении.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Отмена')),
+            TextButton(key: const Key('confirm_clear_route_selections'),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Очистить')),
+          ],
+        )) ?? false;
     } finally {
-      if (mounted) setState(() => _savingRoute = false);
+      if (mounted) setState(() => _routeConfirmationOpen = false);
+    }
+    if (confirmed && mounted && _foreground && intentEpoch == _profileRequestEpoch) {
+      await _saveBypass(<String>{}, expected: expected);
+    } else if (mounted && _foreground && _routesStale) {
+      // Resume may have skipped its refresh while this confirmation was open.
+      await _refreshRoutes();
     }
   }
 
+  String? get _routeDisabledReason {
+    if (_savingRoute) return 'Сохраняем исключения…';
+    if (connected || connecting || _nativeBusy) {
+      return 'Для изменения исключений отключите туннель.';
+    }
+    if (_diagnosticsStale || !_diagnostics.isKnown || _statusRefreshing) {
+      return 'Состояние туннеля уточняется. Повторите проверку, если ожидание затянулось.';
+    }
+    if (_profileBusy || _profileEditorOpen) return 'Завершите работу с профилем.';
+    if (_routesStale && !loadingApps && routeError == null) {
+      return 'Обновите список перед изменением исключений.';
+    }
+    return null;
+  }
 
   Widget card(Widget child) => PushokPanel(child: child);
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.28.0'))]),
+      appBar: AppBar(title: Text('Pushok Flow', style: const TextStyle(fontWeight: FontWeight.w700)), actions: [IconButton(icon: const Icon(Icons.info_outline), tooltip: 'Информация', onPressed: () => showAboutDialog(context: context, applicationName: 'Pushok Flow', applicationVersion: '0.29.0'))]),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
         child: [home(), routes(), servers(), assistant(), profile()][tab],
@@ -556,6 +691,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         selectedIndex: tab,
         onDestinationSelected: (v) {
           setState(() => tab = v);
+          if (v == 1) unawaited(_refreshRoutes());
           if (v == 2) unawaited(_refreshProfileStatus());
         },
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
@@ -595,7 +731,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
         key: const Key('pushok_connect_button'),
         customBorder: const CircleBorder(),
-        onTap: connecting || _nativeBusy || _profileBusy || _profileEditorOpen || !_isAndroid
+        onTap: connecting || _nativeBusy || _profileBusy || _profileEditorOpen ||
+            _savingRoute || _routeConfirmationOpen || !_isAndroid
             ? null : () => _toggleTunnel(),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(_tunnelConfirmed ? Icons.check_circle_outline
@@ -644,27 +781,26 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         style: const TextStyle(color: PushokPalette.muted))),
   ]));
 
-  Widget routes() => ListView(children: [
-    card(const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Приложения без туннеля', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-      SizedBox(height: 8),
-      Text('Настройки действуют при следующем подключении. Перед изменением исключений отключите туннель.',
-        style: TextStyle(color: PushokFlowApp.secondary)),
-    ])),
-    const SizedBox(height: 12),
-    card(Text(PushokAi.routingAdvice(isAndroid: _isAndroid, excluded: bypassPackages.length))),
-    if (loadingApps) const Center(child: CircularProgressIndicator()),
-    if (routeError != null) Padding(padding: const EdgeInsets.all(12), child: Text(routeError!, style: const TextStyle(color: Colors.orangeAccent))),
-    if (_isAndroid && !loadingApps) ...installed.map((app) => Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: card(SwitchListTile.adaptive(
-        contentPadding: EdgeInsets.zero, title: Text(app.label), subtitle: Text(app.packageName),
-        value: bypassPackages.contains(app.packageName),
-        onChanged: connected || connecting || _nativeBusy || _savingRoute ? null : (v) => _setBypass(app.packageName, v),
-      )),
-    )),
-    if (!_isAndroid) card(const Text('iOS: исключение приложений в обычном VPN недоступно.')),
-  ]);
+  Widget routes() => AppRoutesView(
+    apps: installed,
+    selectedPackages: bypassPackages,
+    isAndroid: _isAndroid,
+    loading: loadingApps,
+    saving: _savingRoute,
+    loaded: _routesLoaded,
+    canEdit: _canEditRoutes,
+    query: _routeQuery,
+    onlySelected: _onlySelectedRoutes,
+    error: routeError,
+    disabledReason: _isAndroid ? _routeDisabledReason : null,
+    onQueryChanged: (value) => setState(() => _routeQuery = value),
+    onFilterChanged: (value) => setState(() => _onlySelectedRoutes = value),
+    onToggle: _setBypass,
+    onRefresh: !_isAndroid || !_foreground || loadingApps || _savingRoute ||
+        _routeConfirmationOpen || _profileBusy || _profileEditorOpen
+            ? null : _refreshRoutes,
+    onClear: _canEditRoutes && bypassPackages.isNotEmpty ? _clearBypass : null,
+  );
   Widget servers() => ListView(children: [
     WireGuardProfilesCard(
       catalog: _profiles,

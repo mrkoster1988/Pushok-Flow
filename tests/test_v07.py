@@ -21,7 +21,8 @@ class AndroidPackagingTests(unittest.TestCase):
 
     def test_routing_save_committed_before_acknowledgement(self):
         native = (ROOT / 'native/android/app/src/main/kotlin/shop/pushok/flow/MainActivity.kt').read_text()
-        self.assertIn('putStringSet("flow_bypass_packages", values.toSet()).commit()', native)
+        self.assertIn('putStringSet("flow_bypass_packages", packages).commit()', native)
+        self.assertIn('routeStore.replace(request)', native)
         self.assertIn('ROUTES_SAVE_FAILED', native)
 
     def test_ci_compiles_android_module(self):
