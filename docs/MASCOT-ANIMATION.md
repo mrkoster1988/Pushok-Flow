@@ -15,6 +15,16 @@
 
 Ключевые ограничения использованного промпта: изменить только два глаза до естественно закрытых век; сохранить улыбку, нос, усы, наклон головы, пропорции, шерсть, худи, эмблему, шнурки, лапы и хвост; сохранить масштаб, положение и прозрачный фон; не добавлять предметы, текст или водяной знак. Генератору отдельно сообщалось, что кадр предназначен для моргания и требуется регистрация с исходным изображением.
 
+Режим: встроенный `image_gen`, редактирование существующего изображения с `transparent_background: true`. Полный промпт:
+
+```text
+Use case: precise-object-edit.
+Asset type: closed-eyes animation frame for an existing transparent mobile-app mascot. The supplied image is the edit target, not a style reference.
+Primary request: change ONLY the two eyes of this exact orange kitten so both eyelids are naturally fully closed for a brief calm, happy blink. Use gentle curved closed eyelid lines with the existing orange fur; no visible green iris or pupil in either eye. Keep the existing tiny open smile, nose, eyebrows, whiskers, ears, head angle, and facial proportions unchanged.
+Pixel registration is essential: preserve the original 400 x 422 pixel canvas if possible, the exact subject scale and position, its silhouette and every part outside the two eyes. This frame will crossfade with the source, so there must be no camera movement, recentering, repositioning, zoom, crop, stretch, or pose change.
+Keep the precise original fluffy orange fur texture, markings, lighting, teal hoodie, hoodie shield-and-lock emblem, drawstrings, seated body, paws, curled tail, and all transparent margins unchanged. Keep the background genuinely transparent with alpha, including delicate fur and whisker edges. Preserve existing branding on the hoodie. No new shadow, ground, background, objects, text, frame, or watermark. Do not redraw or reinterpret the whole kitten. Only close its eyelids.
+```
+
 ## Почему используется только область глаз
 
 Генератор сохранил персонажа визуально, но увеличил разрешение и немного изменил геометрию. При alpha ≥128 нормализованная рамка исходника равна `(0.15250, 0.00948, 0.84000, 0.97393)`, нового кадра — `(0.15233, 0.00854, 0.84275, 0.96506)`. При полном переключении кадров нижняя граница лап может перемещаться примерно на 3,7 пикселя при высоте изображения 422 пикселя.
