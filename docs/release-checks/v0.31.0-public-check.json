@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-21T21:43:51.469001+00:00",
+  "release": {
+    "id": 454004025,
+    "tag": "v0.31.0",
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.31.0",
+    "publishedAt": "2026-11-21T21:41:21Z",
+    "draft": false,
+    "prerelease": false
+  },
+  "source": {
+    "commit": "c0678a4920e3cab9724466cca78695374838ba47",
+    "tree": "550b15d42fe20b84ad6df2f550341bdc4caa04a3",
+    "checksRunId": 44951724585,
+    "candidateRunId": 44951724576,
+    "pythonTests": 141,
+    "flutterTests": 161,
+    "kotlinSuites": 7
+  },
+  "publication": {
+    "runId": 44952799313,
+    "releaseAndAssetsPublished": true,
+    "workflowConclusion": "failure",
+    "reason": "Final legacy-channel check still received v0.30.0; independent checks below later received exact v0.31.0 bytes. No assets were replaced and publication was not repeated."
+  },
+  "legacyEndpointCheck": {
+    "expectedVersion": "0.31.0",
+    "expectedSizeBytes": 431,
+    "expectedSha256": "e16fd2cc8e424d6b4923b1b4f66fe39f7bc20db6e3957acbf13a83176bd80b58",
+    "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+    "attempts": [
+      {
+        "attempt": 1,
+        "matches": true,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-21T21:42:19.871610+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/851d4953-b09f-474a-a15b-038e5c2c3c49",
+        "sizeBytes": 431,
+        "sha256": "e16fd2cc8e424d6b4923b1b4f66fe39f7bc20db6e3957acbf13a83176bd80b58",
+        "cacheControl": "",
+        "age": "0",
+        "observedVersion": "0.31.0",
+        "observedBuild": 31
+      }
+    ]
+  },
+  "releaseDiscoveryCheck": {
+    "expectedTag": "v0.31.0",
+    "attempts": [
+      {
+        "attempt": 1,
+        "release": {
+          "requestUrl": "https://api.github.com/repos/mrkoster1988/Pushok-Flow/releases/latest",
+          "requestedAt": "2026-11-21T21:42:31.090347+00:00",
+          "httpStatus": 200,
+          "sizeBytes": 11151,
+          "sha256": "cf61c8c56f4e6aa7745d8f39003401ca5a953be75f4f592f946b414cde7930f8",
+          "age": "",
+          "observedTag": "v0.31.0"
+        },
+        "manifest": {
+          "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.31.0/update.json",
+          "requestedAt": "2026-11-21T21:42:34.542726+00:00",
+          "httpStatus": 200,
+          "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/851d4953-b09f-474a-a15b-038e5c2c3c49",
+          "sizeBytes": 431,
+          "sha256": "e16fd2cc8e424d6b4923b1b4f66fe39f7bc20db6e3957acbf13a83176bd80b58",
+          "cacheControl": "",
+          "age": "8",
+          "observedVersion": "0.31.0",
+          "observedBuild": 31
+        },
+        "matches": true
+      }
+    ]
+  },
+  "publicApkDownload": {
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.31.0/Pushok-Flow-v0.31.0.apk",
+    "httpStatus": 200,
+    "sizeBytes": 62466944,
+    "sha256": "0f8d5f3ac0555ea8d6ee62810e8518f76de11265e5867980044d93eb8cf31116",
+    "matchesLocallySignedApk": true
+  },
+  "limits": [
+    "Point-in-time observations do not prove simultaneous CDN convergence everywhere.",
+    "Physical Android update, retained user data and actual WireGuard routes remain device acceptance tasks.",
+    "The previously observed Play Protect warning remains unresolved."
+  ]
+}
