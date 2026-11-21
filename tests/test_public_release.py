@@ -144,6 +144,69 @@ class PublicDeltaTests(unittest.TestCase):
 
 
 class PublicPublisherTests(unittest.TestCase):
+    class Response(io.BytesIO):
+        headers = {'Cache-Control': 'max-age=60', 'Age': '12'}
+
+        def getcode(self):
+            return 200
+
+        def geturl(self):
+            return 'https://release-assets.githubusercontent.com/github-production-release-asset/test/update.json?secret-signed-query=private'
+
+    def test_public_observation_uses_exact_stable_url_and_excludes_signed_query(self):
+        document, _, _ = fixture()
+        expected = restore.manifest(document['release'])
+        raw = (json.dumps(expected, indent=2)+'\n').encode()
+        observation = {}
+        with mock.patch.object(publish.urllib.request, 'urlopen', return_value=self.Response(raw)) as opened:
+            actual, received = publish.public_manifest(observation)
+        self.assertEqual(actual, expected)
+        self.assertEqual(received, raw)
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url, restore.MANIFEST_URL)
+        self.assertFalse(any(key.lower() == 'authorization' for key in request.headers))
+        self.assertEqual(observation['observedVersion'], '0.27.0')
+        self.assertEqual(observation['sha256'], hashlib.sha256(raw).hexdigest())
+        self.assertNotIn('secret-signed-query', json.dumps(observation))
+
+    def test_public_check_records_stale_version_before_exact_current_success(self):
+        document, _, _ = fixture()
+        expected = (json.dumps(restore.manifest(document['release']), indent=2)+'\n').encode()
+        stale = json.dumps(document['previousManifest']).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'update.json').write_bytes(expected)
+            with mock.patch.object(publish.urllib.request, 'urlopen', side_effect=[self.Response(stale), self.Response(expected)]) as opened, \
+                 mock.patch.object(publish.time, 'sleep') as sleep, mock.patch('builtins.print'):
+                publish.verify_public(document, root, root/'observed')
+            observations = json.loads((root/'observed/public-update-observations.json').read_text())
+            self.assertEqual(opened.call_count, 2)
+            sleep.assert_called_once_with(5)
+            self.assertEqual([x['observedVersion'] for x in observations['attempts']], ['0.24.0', '0.27.0'])
+            self.assertEqual([x['matches'] for x in observations['attempts']], [False, True])
+            self.assertEqual((root/'observed/public-update.json').read_bytes(), expected)
+
+    def test_public_check_bounds_http_failures_and_records_safe_reason(self):
+        document, _, _ = fixture()
+        expected = (json.dumps(restore.manifest(document['release']), indent=2)+'\n').encode()
+        failure = publish.urllib.error.HTTPError(restore.MANIFEST_URL, 403, 'private-untrusted-message', {}, None)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'update.json').write_bytes(expected)
+            with mock.patch.object(publish.urllib.request, 'urlopen', side_effect=failure) as opened, \
+                 mock.patch.object(publish.time, 'sleep') as sleep, mock.patch('builtins.print'), \
+                 mock.patch.object(publish, 'api') as api:
+                with self.assertRaisesRegex(ValueError, 'last HTTP=403'):
+                    publish.verify_public(document, root, root/'observed')
+            recorded = (root/'observed/public-update-observations.json').read_text()
+            attempts = json.loads(recorded)['attempts']
+            self.assertEqual(opened.call_count, 8)
+            self.assertEqual(sleep.call_count, 7)
+            self.assertEqual(len(attempts), 8)
+            self.assertTrue(all(x['httpStatus'] == 403 and x['failure'] == 'HTTP_ERROR' for x in attempts))
+            self.assertNotIn('private-untrusted-message', recorded)
+            api.assert_not_called()
+
     def test_ci_and_artifact_must_match_exact_approved_commit(self):
         document, _, _ = fixture()
         workflow = '.github/workflows/android-candidate.yml'

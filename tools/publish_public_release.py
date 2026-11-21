@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Publish only a tracked, locally signed and CI-verified public APK."""
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import http.client
 import json
@@ -47,14 +48,51 @@ def api(resource, method='GET', payload=None, missing=False):
     return json.loads(raw)
 
 
-def public_manifest():
+def _public_url_for_log(url):
+    # CDN redirects contain signed query strings; preserve only host and path.
+    parsed = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '', ''))
+
+
+def public_manifest(observation=None):
     # Deliberately no token/session. This is the address installed v0.24 uses.
+    if observation is not None:
+        observation.update(requestUrl=MANIFEST_URL,
+            requestedAt=datetime.now(timezone.utc).isoformat())
     request = urllib.request.Request(MANIFEST_URL, headers={
         'Accept': 'application/json', 'User-Agent': 'Pushok-Flow-Public-Check', 'Cache-Control': 'no-cache'})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        raw = response.read(65537)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read(65537)
+            if observation is not None:
+                observation.update(httpStatus=response.getcode(),
+                    finalUrl=_public_url_for_log(response.geturl()),
+                    sizeBytes=len(raw), sha256=hashlib.sha256(raw).hexdigest(),
+                    cacheControl=response.headers.get('Cache-Control', '')[:256],
+                    age=response.headers.get('Age', '')[:64])
+    except urllib.error.HTTPError as error:
+        if observation is not None:
+            observation.update(httpStatus=error.code,
+                finalUrl=_public_url_for_log(error.geturl()), failure='HTTP_ERROR')
+        raise
+    except OSError:
+        if observation is not None:
+            observation['failure'] = 'NETWORK_ERROR'
+        raise
     require(len(raw) <= 65536, 'Public manifest too large')
-    return validate_manifest(json.loads(raw)), raw
+    try:
+        decoded = json.loads(raw)
+        if observation is not None and type(decoded) is dict:
+            seen_version = decoded.get('versionName')
+            seen_build = decoded.get('versionCode')
+            observation['observedVersion'] = seen_version if version(seen_version) else 'invalid'
+            observation['observedBuild'] = seen_build if type(seen_build) is int and 0 <= seen_build <= 2_100_000_000 else None
+        result = validate_manifest(decoded)
+    except (ValueError, TypeError):
+        if observation is not None:
+            observation['failure'] = 'INVALID_MANIFEST'
+        raise
+    return result, raw
 
 
 def require_previous(document):
@@ -211,17 +249,31 @@ def publish(document, dist, diagnostics):
 def verify_public(document, dist, diagnostics):
     expected = (dist/'update.json').read_bytes()
     require(json.loads(expected) == manifest(document['release']), 'Expected manifest differs')
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    observations = {'expectedVersion': document['release']['versionName'],
+        'expectedSizeBytes': len(expected), 'expectedSha256': hashlib.sha256(expected).hexdigest(),
+        'requestUrl': MANIFEST_URL, 'attempts': []}
     for attempt in range(8):
+        observation = {'attempt': attempt+1, 'matches': False}
         try:
-            current, raw = public_manifest()
+            current, raw = public_manifest(observation)
             require(raw == expected and current == manifest(document['release']), 'Public updater endpoint has not reached the new release')
-            diagnostics.mkdir(parents=True, exist_ok=True)
+            observation['matches'] = True
             (diagnostics/'public-update.json').write_bytes(raw)
             print('Public latest/download/update.json exactly matches the verified release, without credentials.')
             return
         except (OSError, ValueError):
+            observation.setdefault('failure', 'MANIFEST_MISMATCH')
             if attempt == 7:
-                raise ValueError('Release publication completed but public updater endpoint is not confirmed; inspect before reporting success') from None
+                raise ValueError('Public updater endpoint is not confirmed; '
+                    f'last HTTP={observation.get("httpStatus", "unavailable")}, '
+                    f'version={observation.get("observedVersion", "unavailable")}; '
+                    'inspect public-update-observations.json before reporting success') from None
+        finally:
+            observations['attempts'].append(observation)
+            (diagnostics/'public-update-observations.json').write_text(json.dumps(observations, indent=2)+'\n')
+            print('Public updater observation: '+json.dumps(observation, ensure_ascii=False))
+        if attempt < 7:
             time.sleep(5)
 
 

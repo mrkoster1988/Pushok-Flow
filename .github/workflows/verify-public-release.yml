@@ -1,0 +1,55 @@
+name: Verify current public Pushok Flow update
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Published version with tracked release staging'
+        type: string
+        required: true
+        default: '0.27.0'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-public-release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'mrkoster1988/Pushok-Flow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RELEASE_VERSION: ${{ inputs.release_version || '0.27.0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Derive the exact expected manifest from tracked release staging
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools')
+          from restore_public_release import manifest, read_staging, require, version
+          requested = os.environ['RELEASE_VERSION']
+          require(version(requested), 'Invalid release version')
+          staging = read_staging(Path('release-staging') / ('v' + requested + '.json'), requested)
+          Path('dist').mkdir()
+          Path('dist/update.json').write_text(json.dumps(manifest(staging['release']), indent=2) + '\n')
+          PY
+      - name: Verify the installed app's exact public updater URL without credentials
+        run: python3 tools/publish_public_release.py verify-public --release-version "$RELEASE_VERSION"
+      - name: Preserve observed public responses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-public-endpoint-verification
+          path: release-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
