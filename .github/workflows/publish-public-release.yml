@@ -1,0 +1,98 @@
+name: Publish verified Pushok Flow update
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Tracked release version, for example 0.27.0'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pushok-flow-android-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'mrkoster1988/Pushok-Flow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.release_version }}
+      RELEASE_CERTIFICATE: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate tracked staging, successful CI and current public channel
+        id: approved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/publish_public_release.py preflight --release-version "$RELEASE_VERSION"
+      - name: Check out the exact tested application source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.approved.outputs.source_sha }}
+          path: verified-source
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download and restore the exact locally signed public APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.approved.outputs.artifact_id }}
+          RELEASE_APK: ${{ steps.approved.outputs.release_apk }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/approved-candidate.zip"
+          python3 tools/restore_public_release.py --staging "release-staging/v$RELEASE_VERSION.json" \
+            --candidate-zip "$RUNNER_TEMP/approved-candidate.zip" --output "dist/$RELEASE_APK"
+      - name: Verify signature, exact package and all update assets
+        env:
+          RELEASE_APK: ${{ steps.approved.outputs.release_apk }}
+        run: |
+          set -euo pipefail
+          flow_tools="$ANDROID_HOME/build-tools/37.0.0"
+          test -x "$flow_tools/apksigner"
+          test -x "$flow_tools/aapt"
+          export PATH="$flow_tools:$PATH"
+          export LD_LIBRARY_PATH="$flow_tools/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          "$flow_tools/zipalign" -c -P 16 4 "dist/$RELEASE_APK"
+          python3 verified-source/tools/verify_release_apk.py "dist/$RELEASE_APK" \
+            --pubspec verified-source/pubspec.yaml --expected-certificate-sha256 "$RELEASE_CERTIFICATE" \
+            --output dist/verified-release.json 2>&1 | tee release-diagnostics/apk-validation.log
+          python3 verified-source/tools/create_update_manifest.py --apk "dist/$RELEASE_APK" \
+            --pubspec verified-source/pubspec.yaml --verified dist/verified-release.json --output dist
+          python3 tools/publish_public_release.py verify-assets --release-version "$RELEASE_VERSION"
+      - name: Preserve verified public files
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-verified-public-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Create a new draft, verify uploaded assets and publish latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/publish_public_release.py publish --release-version "$RELEASE_VERSION"
+      - name: Verify the public updater endpoint without credentials
+        run: python3 tools/publish_public_release.py verify-public --release-version "$RELEASE_VERSION"
+      - name: Preserve publication diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushok-flow-public-release-diagnostics
+          path: release-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Publish only a tracked, locally signed and CI-verified public APK."""
+import argparse
+import hashlib
+import http.client
+import json
+import os
+from pathlib import Path
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+from restore_public_release import (CERTIFICATE, MANIFEST_URL, REPOSITORY,
+    manifest, read_json, read_staging, require, validate_manifest, version)
+
+API_ROOT = f'https://api.github.com/repos/{REPOSITORY}/'
+API_VERSION = '2026-03-10'
+MAX_API_BYTES = 2 * 1024 * 1024
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError('Authenticated GitHub metadata redirected unexpectedly')
+
+
+def api(resource, method='GET', payload=None, missing=False):
+    require(resource and not resource.startswith('/') and '..' not in resource, 'Unexpected API resource')
+    token = os.environ.get('GH_TOKEN')
+    require(bool(token), 'GH_TOKEN is required for release administration')
+    headers = {'Authorization': 'Bearer '+token, 'Accept': 'application/vnd.github+json',
+               'X-GitHub-Api-Version': API_VERSION, 'User-Agent': 'Pushok-Flow-Release'}
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers['Content-Type'] = 'application/json'
+    request = urllib.request.Request(API_ROOT+resource, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
+            raw = response.read(MAX_API_BYTES+1)
+    except urllib.error.HTTPError as error:
+        if missing and error.code == 404:
+            return None
+        raise ValueError(f'GitHub release API failed: HTTP {error.code}') from None
+    require(len(raw) <= MAX_API_BYTES, 'GitHub response too large')
+    return json.loads(raw)
+
+
+def public_manifest():
+    # Deliberately no token/session. This is the address installed v0.24 uses.
+    request = urllib.request.Request(MANIFEST_URL, headers={
+        'Accept': 'application/json', 'User-Agent': 'Pushok-Flow-Public-Check', 'Cache-Control': 'no-cache'})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        raw = response.read(65537)
+    require(len(raw) <= 65536, 'Public manifest too large')
+    return validate_manifest(json.loads(raw)), raw
+
+
+def require_previous(document):
+    latest = api('releases/latest')
+    previous = document['previousManifest']
+    require(latest.get('draft') is False and latest.get('prerelease') is False
+            and latest.get('tag_name') == 'v'+previous['versionName'], 'Published latest changed; review before release')
+    current, _ = public_manifest()
+    require(current == previous, 'Published update manifest changed; review before release')
+    return latest
+
+
+def require_absent(tag):
+    require(api('git/ref/tags/'+tag, missing=True) is None, 'Release tag already exists; never overwrite')
+    require(api('releases/tags/'+tag, missing=True) is None, 'Published release already exists; never overwrite')
+    # Tag lookup excludes drafts. Enumerate authenticated releases to reject them too.
+    for page in range(1, 21):
+        releases = api(f'releases?per_page=100&page={page}')
+        require(type(releases) is list, 'Invalid release listing')
+        require(not any(item.get('tag_name') == tag for item in releases), 'Release or draft already exists; inspect it before retrying')
+        if len(releases) < 100:
+            return
+    raise ValueError('Too many releases to verify absence safely')
+
+
+def validate_run(run, document, workflow):
+    require(run.get('status') == 'completed' and run.get('conclusion') == 'success', 'CI run is not successful')
+    require(run.get('head_sha') == document['sourceCommit'] and run.get('head_branch') == 'main'
+            and run.get('event') == 'push' and run.get('path') == workflow, 'CI run is not the exact approved main build')
+    require(run.get('repository', {}).get('full_name') == REPOSITORY
+            and run.get('head_repository', {}).get('full_name') == REPOSITORY, 'CI run belongs to another repository')
+
+
+def validate_artifact(artifact, document):
+    expected = document['sourceArtifact']
+    require(artifact.get('id') == expected['id'] and artifact.get('name') == expected['name']
+            and artifact.get('expired') is False and artifact.get('size_in_bytes') == expected['zipSizeBytes']
+            and artifact.get('digest') == 'sha256:'+expected['zipSha256'], 'Candidate artifact differs')
+    require(artifact.get('workflow_run', {}).get('id') == document['sourceRunId']
+            and artifact.get('workflow_run', {}).get('head_sha') == document['sourceCommit'], 'Artifact belongs to another source build')
+
+
+def preflight(document, diagnostics):
+    require_absent(document['release']['tag'])
+    latest = require_previous(document)
+    source = api(f'actions/runs/{document["sourceRunId"]}')
+    checks = api(f'actions/runs/{document["sourceChecksRunId"]}')
+    validate_run(source, document, '.github/workflows/android-candidate.yml')
+    validate_run(checks, document, '.github/workflows/source-checks.yml')
+    artifact = api(f'actions/artifacts/{document["sourceArtifact"]["id"]}')
+    validate_artifact(artifact, document)
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    for name, data in [('source-run', source), ('source-checks-run', checks), ('source-artifact', artifact), ('previous-release', latest)]:
+        (diagnostics/(name+'.json')).write_text(json.dumps(data, indent=2)+'\n')
+    output = os.environ.get('GITHUB_OUTPUT')
+    if output:
+        with open(output, 'a', encoding='utf-8') as stream:
+            stream.write(f'source_sha={document["sourceCommit"]}\nartifact_id={document["sourceArtifact"]["id"]}\nrelease_apk={document["release"]["apkName"]}\n')
+    print('Both CI runs, source artifact and previous public update channel confirmed.')
+
+
+def validate_assets(release, document, dist):
+    expected = {document['release']['apkName'], document['release']['apkName']+'.sha256', 'update.json'}
+    assets = release.get('assets', [])
+    require(type(assets) is list and len(assets) == 3 and {a.get('name') for a in assets} == expected, 'Release must contain exactly three expected assets')
+    for asset in assets:
+        local = dist/asset['name']
+        with local.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        require(asset.get('state') == 'uploaded' and asset.get('size') == local.stat().st_size
+                and asset.get('digest') == 'sha256:'+digest, 'Uploaded asset differs from verified bytes')
+
+
+def verify_local_assets(document, dist):
+    expected = manifest(document['release'])
+    require(read_json(dist/'update.json', 65536) == expected, 'Final update manifest differs from approved staging')
+    verification = read_json(dist/'verified-release.json')
+    for field in ('packageName', 'versionName', 'versionCode', 'minSdk', 'sizeBytes', 'sha256', 'certificateSha256'):
+        require(verification.get(field) == expected[field], 'APK verification report differs: '+field)
+    apk = dist/document['release']['apkName']
+    require(apk.stat().st_size == expected['sizeBytes'], 'APK changed after verification')
+    with apk.open('rb') as stream:
+        require(hashlib.file_digest(stream, 'sha256').hexdigest() == expected['sha256'], 'APK changed after verification')
+    checksum = dist/(apk.name+'.sha256')
+    require(checksum.read_text() == expected['sha256']+'  '+apk.name+'\n', 'APK checksum file differs')
+
+
+def upload_asset(url, path):
+    parsed = urllib.parse.urlsplit(url)
+    require(parsed.scheme == 'https' and parsed.netloc == 'uploads.github.com'
+            and parsed.path.startswith(f'/repos/{REPOSITORY}/releases/')
+            and parsed.path.endswith('/assets') and not parsed.fragment, 'Unexpected asset upload destination')
+    token = os.environ.get('GH_TOKEN')
+    require(bool(token), 'GH_TOKEN is required for asset upload')
+    connection = http.client.HTTPSConnection('uploads.github.com', timeout=120)
+    try:
+        connection.putrequest('POST', parsed.path+'?'+parsed.query)
+        for name, value in {'Authorization': 'Bearer '+token, 'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': API_VERSION, 'User-Agent': 'Pushok-Flow-Release',
+                'Content-Type': 'application/octet-stream', 'Content-Length': str(path.stat().st_size)}.items():
+            connection.putheader(name, value)
+        connection.endheaders()
+        with path.open('rb') as stream:
+            while block := stream.read(64 * 1024):
+                connection.send(block)
+        response = connection.getresponse()
+        raw = response.read(MAX_API_BYTES+1)
+        # Redirects are never followed with credentials, including upload failures.
+        require(response.status == 201, f'Asset upload failed: HTTP {response.status}; draft retained')
+        require(len(raw) <= MAX_API_BYTES, 'Asset upload response too large')
+        return json.loads(raw)
+    finally:
+        connection.close()
+
+
+def publish(document, dist, diagnostics):
+    verify_local_assets(document, dist)
+    # Recheck just before the first mutation, including existing drafts and channel races.
+    preflight(document, diagnostics)
+    tag = document['release']['tag']
+    created_tag = api('git/refs', 'POST', {'ref': 'refs/tags/'+tag, 'sha': document['sourceCommit']})
+    require(created_tag.get('object', {}).get('type') == 'commit'
+            and created_tag['object']['sha'] == document['sourceCommit'], 'Created tag differs')
+    release = api('releases', 'POST', {'tag_name': tag, 'target_commitish': document['sourceCommit'],
+        'name': 'Pushok Flow '+document['release']['versionName'], 'body': document['notes'],
+        'draft': True, 'prerelease': False, 'make_latest': 'false', 'generate_release_notes': False})
+    (diagnostics/'release-created.json').write_text(json.dumps(release, indent=2)+'\n')
+    release_id = release.get('id')
+    require(type(release_id) is int and release_id > 0 and release.get('draft') is True
+            and release.get('tag_name') == tag, 'Unexpected created draft')
+    expected_upload = f'https://uploads.github.com/repos/{REPOSITORY}/releases/{release_id}/assets'
+    require(release.get('upload_url') == expected_upload+'{?name,label}', 'Unexpected upload URL')
+    for name in (document['release']['apkName'], document['release']['apkName']+'.sha256', 'update.json'):
+        url = expected_upload+'?name='+urllib.parse.quote(name, safe='')
+        uploaded = upload_asset(url, dist/name)
+        (diagnostics/('uploaded-'+name+'.json')).write_text(json.dumps(uploaded, indent=2)+'\n')
+    # Always address the numeric ID returned by POST; the tag endpoint excludes drafts.
+    draft = api(f'releases/{release_id}')
+    require(draft.get('id') == release_id and draft.get('tag_name') == tag
+            and draft.get('draft') is True and draft.get('prerelease') is False, 'Draft state changed')
+    validate_assets(draft, document, dist)
+    current_tag = api('git/ref/tags/'+tag)
+    require(current_tag.get('object', {}).get('type') == 'commit'
+            and current_tag['object']['sha'] == document['sourceCommit'], 'Release tag changed')
+    require_previous(document)
+    final = api(f'releases/{release_id}', 'PATCH', {'draft': False, 'prerelease': False, 'make_latest': 'true'})
+    require(final.get('id') == release_id and final.get('tag_name') == tag
+            and final.get('draft') is False and final.get('prerelease') is False, 'Publication response differs')
+    validate_assets(final, document, dist)
+    (diagnostics/'release-published.json').write_text(json.dumps(final, indent=2)+'\n')
+    print(f'Published {tag}; release ID {release_id}; three verified assets retained.')
+
+
+def verify_public(document, dist, diagnostics):
+    expected = (dist/'update.json').read_bytes()
+    require(json.loads(expected) == manifest(document['release']), 'Expected manifest differs')
+    for attempt in range(8):
+        try:
+            current, raw = public_manifest()
+            require(raw == expected and current == manifest(document['release']), 'Public updater endpoint has not reached the new release')
+            diagnostics.mkdir(parents=True, exist_ok=True)
+            (diagnostics/'public-update.json').write_bytes(raw)
+            print('Public latest/download/update.json exactly matches the verified release, without credentials.')
+            return
+        except (OSError, ValueError):
+            if attempt == 7:
+                raise ValueError('Release publication completed but public updater endpoint is not confirmed; inspect before reporting success') from None
+            time.sleep(5)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('command', choices=('preflight', 'verify-assets', 'publish', 'verify-public'))
+    parser.add_argument('--release-version', required=True)
+    parser.add_argument('--dist', type=Path, default=Path('dist'))
+    parser.add_argument('--diagnostics', type=Path, default=Path('release-diagnostics'))
+    args = parser.parse_args()
+    try:
+        require(version(args.release_version), 'Invalid release version')
+        staging = Path('release-staging')/('v'+args.release_version+'.json')
+        document = read_staging(staging, args.release_version)
+        if args.command == 'preflight':
+            preflight(document, args.diagnostics)
+        elif args.command == 'verify-assets':
+            verify_local_assets(document, args.dist)
+        elif args.command == 'publish':
+            publish(document, args.dist, args.diagnostics)
+        else:
+            verify_public(document, args.dist, args.diagnostics)
+    except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as error:
+        print(f'Public release stopped: {error}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

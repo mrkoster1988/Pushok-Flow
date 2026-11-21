@@ -479,8 +479,11 @@ void main() {
       onSave: (_) async {},
       onResult: (value) => result = value,
     );
+    await tester.ensureVisible(find.byKey(_visibility));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(_visibility));
     await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isFalse);
     expect(tester.takeException(), isNull);
     await _tapSave(tester);
     await tester.pumpAndSettle();
@@ -702,6 +705,9 @@ void main() {
     );
     await tester.tap(find.byKey(_import));
     await tester.pump();
+    // Replacing one MaterialApp with another can retain its Navigator/routes.
+    // Remove the old tree first so this actually exercises editor disposal.
+    await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(body: Text('Следующий экран')),
     ));
