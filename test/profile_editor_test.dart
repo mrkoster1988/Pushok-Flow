@@ -249,7 +249,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, 1);
     expect(find.byKey(const Key('subscription_editor_error')), findsOneWidget);
-    expect(find.textContaining('PRIVATE'), findsNothing);
+    // Finder.textContaining also inspects masked EditableText controllers.
+    // Check visible messages separately from the required private draft value.
+    expect(find.byWidgetPredicate((widget) => widget is Text &&
+        (widget.data ?? widget.textSpan?.toPlainText() ?? '').contains('PRIVATE')), findsNothing);
+    final hiddenUrl = tester.widget<TextField>(find.byKey(subscriptionUrlField));
+    expect(hiddenUrl.controller!.text, subscriptionUrl);
+    expect(hiddenUrl.obscureText, isTrue);
+    expect(hiddenUrl.readOnly, isTrue);
+    expect(hiddenUrl.enableInteractiveSelection, isFalse);
     expect(tester.widget<FilledButton>(find.byKey(subscriptionSave)).onPressed, isNotNull);
     await _tapEditorKey(tester, subscriptionBack);
     await tester.pumpAndSettle();
