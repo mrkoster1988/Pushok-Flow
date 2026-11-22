@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("android_patch", ROOT / "tools/patch_android_project.py")
 PATCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PATCH)
+MANIFEST_SPEC = importlib.util.spec_from_file_location("android_manifest_check", ROOT / "tools/check_android_manifest.py")
+MANIFEST_CHECK = importlib.util.module_from_spec(MANIFEST_SPEC)
+MANIFEST_SPEC.loader.exec_module(MANIFEST_CHECK)
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 VPN_SERVICE = "com.wireguard.android.backend.GoBackend$VpnService"
 PROCESS_TEXT = """<queries>
@@ -110,7 +113,7 @@ dependencies {
         self.assertEqual(len(manifest.findall("queries/intent")), 1)
         self.assertEqual(len(self.launcher_queries(manifest)), 1)
         self.assertEqual(sorted(p.get(ANDROID + "name") for p in manifest.findall("uses-permission")),
-                         ["android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"])
+                         ["android.permission.CAMERA", "android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"])
 
     def test_update_provider_is_private_and_preserves_other_providers(self):
         self.write_manifest(services='''<provider android:name="shop.pushok.flow.UpdateFileProvider"
@@ -146,6 +149,107 @@ dependencies {
         self.patch()
         self.assertEqual((self.gradle.read_bytes(), self.manifest.read_bytes()), initial)
 
+    def test_private_scanner_and_optional_camera_are_merged_idempotently(self):
+        self.write_manifest(services='''<activity android:name=".WireGuardQrActivity" android:exported="true"
+            android:screenOrientation="landscape"><intent-filter /></activity>
+            <activity android:name="shop.pushok.flow.WireGuardQrActivity" />
+            <activity android:name="example.OtherActivity" android:exported="false" />''',
+            permissions='''<uses-feature android:name="android.hardware.camera" android:required="true" />
+            <uses-feature android:name="android.hardware.camera" android:required="false" />''')
+        manifest = self.patch()
+        scanners = [item for item in manifest.findall('application/activity')
+                    if item.get(ANDROID + 'name') == PATCH.QR_ACTIVITY]
+        self.assertEqual(len(scanners), 1)
+        scanner = scanners[0]
+        self.assertEqual(scanner.get(ANDROID + 'exported'), 'false')
+        self.assertEqual(scanner.get(ANDROID + 'excludeFromRecents'), 'true')
+        self.assertEqual(scanner.get(ANDROID + 'launchMode'), 'standard')
+        self.assertIsNone(scanner.get(ANDROID + 'screenOrientation'))
+        self.assertIsNone(scanner.find('intent-filter'))
+        self.assertTrue(any(item.get(ANDROID + 'name') == 'example.OtherActivity'
+                            for item in manifest.findall('application/activity')))
+        features = manifest.findall('uses-feature')
+        self.assertEqual(len(features), 5)
+        self.assertTrue(all(item.get(ANDROID + 'required') == 'false' for item in features))
+        MANIFEST_CHECK.validate(self.manifest)
+        initial = self.manifest.read_bytes()
+        self.patch()
+        self.assertEqual(self.manifest.read_bytes(), initial)
+
+    def test_default_library_scanner_is_removed_and_dependencies_are_pinned(self):
+        self.write_manifest(services='''<activity android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:exported="true"><intent-filter /></activity>''')
+        manifest = self.patch()
+        generic = [item for item in manifest.findall('application/activity')
+                   if item.get(ANDROID + 'name') == 'com.journeyapps.barcodescanner.CaptureActivity']
+        self.assertEqual(len(generic), 1)
+        self.assertEqual(generic[0].get('{http://schemas.android.com/tools}node'), 'remove')
+        self.assertIsNone(generic[0].get(ANDROID + 'exported'))
+        self.assertEqual(list(generic[0]), [])
+        self.patch()
+        gradle = self.gradle.read_text()
+        for dependency in ('com.journeyapps:zxing-android-embedded:4.3.0', 'com.google.zxing:core:3.5.4'):
+            self.assertEqual(gradle.count(f'implementation("{dependency}")'), 1)
+        MANIFEST_CHECK.validate(self.manifest)
+
+    def test_source_gate_rejects_missing_or_exposed_scanner(self):
+        for mode in ('missing', 'exported', 'intent-filter', 'alias', 'duplicate'):
+            with self.subTest(mode=mode):
+                self.write_manifest()
+                manifest = self.patch()
+                app = manifest.find('application')
+                scanner = next(item for item in app.findall('activity')
+                               if item.get(ANDROID + 'name') == PATCH.QR_ACTIVITY)
+                if mode == 'missing':
+                    app.remove(scanner)
+                elif mode == 'exported':
+                    scanner.set(ANDROID + 'exported', 'true')
+                elif mode == 'intent-filter':
+                    ET.SubElement(scanner, 'intent-filter')
+                elif mode == 'alias':
+                    ET.SubElement(app, 'activity-alias', {ANDROID + 'targetActivity': '.WireGuardQrActivity'})
+                else:
+                    ET.SubElement(app, 'activity', {ANDROID + 'name': '.WireGuardQrActivity', ANDROID + 'exported': 'false'})
+                ET.ElementTree(manifest).write(self.manifest)
+                with self.assertRaisesRegex(ValueError, 'QR scanner'):
+                    MANIFEST_CHECK.validate(self.manifest)
+
+    def test_source_gate_rejects_required_camera_and_missing_permission(self):
+        for mode in ('camera', 'autofocus', 'extra-feature', 'permission'):
+            with self.subTest(mode=mode):
+                self.write_manifest()
+                manifest = self.patch()
+                if mode == 'permission':
+                    permission = next(item for item in manifest.findall('uses-permission')
+                                      if item.get(ANDROID + 'name') == 'android.permission.CAMERA')
+                    manifest.remove(permission)
+                elif mode == 'extra-feature':
+                    ET.SubElement(manifest, 'uses-feature', {ANDROID + 'name': 'android.hardware.camera.level.full'})
+                else:
+                    feature = next(item for item in manifest.findall('uses-feature')
+                                   if item.get(ANDROID + 'name') == 'android.hardware.camera' +
+                                   ('.autofocus' if mode == 'autofocus' else ''))
+                    feature.set(ANDROID + 'required', 'true')
+                ET.ElementTree(manifest).write(self.manifest)
+                with self.assertRaises(ValueError):
+                    MANIFEST_CHECK.validate(self.manifest)
+
+    def test_source_gate_rejects_media_permissions_and_generic_scanner(self):
+        for permission in sorted(MANIFEST_CHECK.MEDIA_PERMISSIONS):
+            with self.subTest(permission=permission):
+                self.write_manifest(permissions=f'<uses-permission android:name="{permission}" />')
+                self.patch()
+                with self.assertRaisesRegex(ValueError, 'broad media'):
+                    MANIFEST_CHECK.validate(self.manifest)
+        self.write_manifest()
+        manifest = self.patch()
+        generic = next(item for item in manifest.findall('application/activity')
+                       if item.get(ANDROID + 'name') == MANIFEST_CHECK.GENERIC_SCANNER)
+        generic.attrib.pop('{http://schemas.android.com/tools}node')
+        ET.ElementTree(manifest).write(self.manifest)
+        with self.assertRaisesRegex(ValueError, 'generic scanner'):
+            MANIFEST_CHECK.validate(self.manifest)
+
 
 class BootstrapScriptTests(unittest.TestCase):
     def setUp(self):
@@ -176,7 +280,8 @@ class BootstrapScriptTests(unittest.TestCase):
             "MainActivity.kt", "WireGuardRouting.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
-            "WireGuardProfileImport.kt", "ProfileImportReader.kt",
+            "WireGuardProfileImport.kt", "ProfileImportReader.kt", "ProfileQrDecoder.kt",
+            "ProfileQrImageReader.kt", "ProfileQrSession.kt", "WireGuardQrActivity.kt",
             "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "RouteSettingsStore.kt", "RouteAppAvailability.kt",
             "RouteRecommendationPolicy.kt", "RouteRecommendationStore.kt", "RecommendationAutomation.kt", "RouteRecommendations.kt",
         )

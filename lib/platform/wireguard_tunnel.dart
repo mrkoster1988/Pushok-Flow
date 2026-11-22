@@ -47,6 +47,14 @@ class WireGuardTunnel {
   static Future<String?> importProfile() =>
       _channel.invokeMethod<String>('importWireGuardProfile');
 
+  /// Scans a QR locally into a protected draft; does not save or connect.
+  static Future<String?> scanProfileQr() =>
+      _channel.invokeMethod<String>('scanWireGuardProfileQr');
+
+  /// Reads a QR from one explicitly selected image without opening the camera.
+  static Future<String?> importProfileQrImage() =>
+      _channel.invokeMethod<String>('importWireGuardProfileQrImage');
+
   static Future<void> cancelProfileImport() async {
     await _channel.invokeMethod('cancelWireGuardProfileImport');
   }

@@ -23,7 +23,7 @@ class V09Tests(TestCase):
     def test_valid_apk_badging(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d)/'test.apk'; p.write_bytes(b'PK')
-            good = ["package: name='shop.pushok.flow'", "uses-permission: name='android.permission.INTERNET'", 'E: service (line=24)\n  A: android:name(0x01010003)="com.wireguard.android.backend.GoBackend$VpnService"\n  A: android:exported(0x01010010)=(type 0x12)0x0\n  A: android:permission="android.permission.BIND_VPN_SERVICE"']
+            good = ["package: name='shop.pushok.flow' versionCode='9'", "uses-permission: name='android.permission.INTERNET'", 'E: service (line=24)\n  A: android:name(0x01010003)="com.wireguard.android.backend.GoBackend$VpnService"\n  A: android:exported(0x01010010)=(type 0x12)0x0\n  A: android:permission="android.permission.BIND_VPN_SERVICE"']
             with mock.patch.object(mod, 'find_aapt', return_value='aapt'), mock.patch.object(mod.subprocess, 'run', side_effect=[subprocess.CompletedProcess([],0,x,'') for x in good]):
                 mod.check_apk(p)
     def test_rejects_wrong_package(self):

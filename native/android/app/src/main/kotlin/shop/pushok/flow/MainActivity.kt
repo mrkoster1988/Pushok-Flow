@@ -273,6 +273,8 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "importWireGuardProfile" -> profileImport.open(result)
+                    "scanWireGuardProfileQr" -> profileImport.open(result, WireGuardProfileImport.Source.CAMERA)
+                    "importWireGuardProfileQrImage" -> profileImport.open(result, WireGuardProfileImport.Source.QR_IMAGE)
                     "cancelWireGuardProfileImport" -> {
                         profileImport.cancel()
                         result.success(true)

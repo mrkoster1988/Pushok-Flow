@@ -14,6 +14,9 @@ const _name = Key('wireguard_profile_name');
 const _save = Key('save_wireguard_profile');
 const _paste = Key('paste_wireguard_profile');
 const _import = Key('import_wireguard_profile');
+const _scanQr = Key('scan_wireguard_profile_qr');
+const _qrImage = Key('import_wireguard_profile_qr_image');
+const _info = Key('info_wireguard_profile');
 const _close = Key('close_wireguard_profile');
 const _visibility = Key('toggle_wireguard_profile_visibility');
 
@@ -26,6 +29,8 @@ Future<void> _openEditor(
   bool connectAfterSave = false,
   ValueChanged<String?>? onResult,
   Future<String?> Function()? onImport,
+  Future<String?> Function()? onScanQr,
+  Future<String?> Function()? onImportQrImage,
   Future<void> Function()? onCancelImport,
   double textScale = 1,
 }) async {
@@ -51,6 +56,8 @@ Future<void> _openEditor(
               initialError: initialError,
               onSave: onSave,
               onImport: onImport,
+              onScanQr: onScanQr,
+              onImportQrImage: onImportQrImage,
               onCancelImport: onCancelImport,
               connectAfterSave: connectAfterSave,
             ),
@@ -68,6 +75,7 @@ Future<void> _openEditor(
 Future<void> _tapEditorKey(WidgetTester tester, Key key) async {
   final finder = find.byKey(key);
   await tester.ensureVisible(finder);
+  await tester.pump();
   await tester.tap(finder);
 }
 
@@ -904,6 +912,248 @@ void main() {
     await _tapSave(tester);
     await tester.pumpAndSettle();
     expect(saves, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final source in [('camera', _scanQr), ('image', _qrImage)]) {
+    testWidgets('${source.$1} QR replaces only the masked draft and preserves its name',
+        (tester) async {
+      const imported = '$_config\n# QR draft\r\n';
+      var cameraReads = 0;
+      var imageReads = 0;
+      var saves = 0;
+      String? saved;
+      await _openEditor(tester, initialConfig: _config, initialName: 'Мой сервер',
+        onScanQr: () async { cameraReads++; return imported; },
+        onImportQrImage: () async { imageReads++; return imported; },
+        onSave: (config, name) async { saves++; saved = config; },
+      );
+      await _tapEditorKey(tester, _visibility);
+      await tester.pumpAndSettle();
+      await _tapEditorKey(tester, source.$2);
+      await tester.pumpAndSettle();
+      final field = tester.widget<TextField>(find.byKey(_field));
+      expect(cameraReads, source.$1 == 'camera' ? 1 : 0);
+      expect(imageReads, source.$1 == 'image' ? 1 : 0);
+      expect(field.controller!.text, imported);
+      expect(field.obscureText, isTrue);
+      expect(field.readOnly, isTrue);
+      expect(field.controller!.selection, const TextSelection.collapsed(offset: -1));
+      expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Мой сервер');
+      expect(find.text('QR-код прочитан. Сохраните профиль.'), findsOneWidget);
+      expect(saves, 0);
+      await _tapSave(tester);
+      await tester.pumpAndSettle();
+      expect(saves, 1);
+      expect(saved, imported);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('Cancelling either QR source preserves both existing inputs without saving',
+      (tester) async {
+    for (final key in [_scanQr, _qrImage]) {
+      var saves = 0;
+      await _openEditor(tester, initialConfig: _config, initialName: 'Дом',
+        onScanQr: () async => null,
+        onImportQrImage: () async => null,
+        onSave: (_, name) async { saves++; },
+      );
+      await _tapEditorKey(tester, key);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+      expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Дом');
+      expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
+      expect(find.byKey(const Key('wireguard_profile_error')), findsNothing);
+      expect(saves, 0);
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('QR permission and decoding failures keep the draft and expose no native data',
+      (tester) async {
+    for (final failure in [
+      ('PROFILE_QR_CAMERA_DENIED', 'Для сканирования нужен доступ к камере.'),
+      ('PROFILE_QR_UNAVAILABLE', 'Сканирование QR недоступно.'),
+      ('PROFILE_QR_NOT_FOUND', 'На изображении не найден QR-код.'),
+      ('PROFILE_QR_MULTIPLE', 'На изображении несколько QR-кодов.'),
+      ('PROFILE_QR_IMAGE_TOO_LARGE', 'Изображение слишком большое.'),
+      ('PROFILE_IMPORT_INVALID', 'В QR-коде нет полного профиля WireGuard.'),
+      ('UNKNOWN_QR_ERROR', 'Не удалось прочитать QR-код.'),
+    ]) {
+      var saves = 0;
+      await _openEditor(tester, initialConfig: _config, initialName: 'Дом',
+        onScanQr: () async => throw PlatformException(code: failure.$1,
+          message: 'PRIVATE_QR_CONTENT', details: {'payload': 'PRIVATE_QR_CONTENT'}),
+        onSave: (_, name) async { saves++; },
+      );
+      await _tapEditorKey(tester, _scanQr);
+      await tester.pumpAndSettle();
+      expect(find.textContaining(failure.$2), findsOneWidget);
+      expect(find.textContaining('PRIVATE_QR_CONTENT'), findsNothing);
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Дом');
+      expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+      expect(tester.widget<OutlinedButton>(find.byKey(_scanQr)).onPressed, isNotNull);
+      expect(saves, 0);
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('A pending QR scan blocks every competing import and stale callbacks',
+      (tester) async {
+    final pending = Completer<String?>();
+    var cameraReads = 0;
+    var imageReads = 0;
+    var fileReads = 0;
+    var saves = 0;
+    await _openEditor(tester, initialConfig: _config,
+      onScanQr: () { cameraReads++; return pending.future; },
+      onImportQrImage: () async { imageReads++; return _config; },
+      onImport: () async { fileReads++; return _config; },
+      onSave: (_, name) async { saves++; },
+    );
+    final camera = tester.widget<OutlinedButton>(find.byKey(_scanQr)).onPressed!;
+    final image = tester.widget<OutlinedButton>(find.byKey(_qrImage)).onPressed!;
+    final file = tester.widget<OutlinedButton>(find.byKey(_import)).onPressed!;
+    final save = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+    camera();
+    camera();
+    image();
+    file();
+    save();
+    await tester.pump();
+    expect(cameraReads, 1);
+    expect(imageReads, 0);
+    expect(fileReads, 0);
+    expect(saves, 0);
+    for (final key in [_paste, _import, _scanQr, _qrImage]) {
+      expect(tester.widget<OutlinedButton>(find.byKey(key)).onPressed, isNull);
+    }
+    expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNull);
+    expect(tester.widget<IconButton>(find.byKey(_info)).onPressed, isNull);
+    pending.complete(_config);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Closing a pending QR scan cancels once and cannot replace a newer editor draft',
+      (tester) async {
+    final pending = Completer<String?>();
+    var cancels = 0;
+    var saves = 0;
+    await _openEditor(tester, initialConfig: _config,
+      onScanQr: () => pending.future,
+      onCancelImport: () async { cancels++; },
+      onSave: (_, name) async { saves++; },
+    );
+    await _tapEditorKey(tester, _scanQr);
+    await tester.pump();
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(cancels, 1);
+    const newer = '$_config\n# Another editor\n';
+    await _openEditor(tester, initialConfig: newer,
+      onSave: (_, name) async { saves++; },
+    );
+    pending.complete('$_config\n# Late QR\n');
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, newer);
+    expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
+    expect(saves, 0);
+    expect(cancels, 1);
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('QR result before resume stays hidden and cannot run an earlier save callback',
+      (tester) async {
+    final pending = Completer<String?>();
+    const imported = '$_config\n# QR before resume\n';
+    var saves = 0;
+    addTearDown(() => tester.binding
+      .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    await _openEditor(tester, initialConfig: _config,
+      onScanQr: () => pending.future,
+      onSave: (_, name) async { saves++; },
+    );
+    final queuedSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+    await _tapEditorKey(tester, _scanQr);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    pending.complete(imported);
+    await tester.pumpAndSettle();
+    queuedSave();
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, imported);
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNull);
+    expect(saves, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saves, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('QR actions and guidance remain usable on a compact phone with large text',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 48);
+    tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 48);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    var cameraReads = 0;
+    var imageReads = 0;
+    String? saved;
+    await _openEditor(tester, textScale: 2.2,
+      onImport: () async => _config,
+      onScanQr: () async { cameraReads++; return _config; },
+      onImportQrImage: () async { imageReads++; return _config; },
+      onSave: (config, name) async { saved = config; },
+    );
+    for (final key in [_scanQr, _qrImage]) {
+      await tester.ensureVisible(find.byKey(key));
+      await tester.pumpAndSettle();
+      final rect = tester.getRect(find.byKey(key));
+      expect(rect.left, greaterThanOrEqualTo(0));
+      expect(rect.right, lessThanOrEqualTo(360));
+      expect(find.byKey(key).hitTestable(), findsOneWidget);
+      await _tapEditorKey(tester, key);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+    expect(cameraReads, 1);
+    expect(imageReads, 1);
+    expect(saved, isNull);
+    await _tapEditorKey(tester, _info);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('В WGDashboard'), findsOneWidget);
+    expect(find.textContaining('QR из фото'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('Понятно'));
+    await tester.pump();
+    await tester.tap(find.text('Понятно'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(_save));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byKey(_save)).bottom, lessThanOrEqualTo(592));
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saved, _config);
     expect(tester.takeException(), isNull);
   });
 

@@ -15,7 +15,13 @@ spec.loader.exec_module(module)
 
 
 def manifest(service='', backup='false'):
-    return (f'<manifest xmlns:android="{ANDROID}"><application android:allowBackup="{backup}">'
+    return (f'<manifest xmlns:android="{ANDROID}" xmlns:tools="http://schemas.android.com/tools">'
+            '<uses-permission android:name="android.permission.CAMERA" />'
+            '<uses-feature android:name="android.hardware.camera" android:required="false" />'
+            '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />'
+            f'<application android:allowBackup="{backup}">'
+            '<activity android:name="shop.pushok.flow.WireGuardQrActivity" android:exported="false" />'
+            '<activity android:name="com.journeyapps.barcodescanner.CaptureActivity" tools:node="remove" />'
             f'{service}</application></manifest>')
 
 

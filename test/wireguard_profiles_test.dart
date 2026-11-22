@@ -156,4 +156,34 @@ void main() {
     expect(calls.last.arguments, {'profileId': _secondId});
     expect(calls.where((call) => call.method == 'connectWireGuard'), isEmpty);
   });
+
+  test('QR bridge uses explicit camera and image actions and preserves cancellation', () async {
+    const channel = MethodChannel('shop.pushok.flow/app_routes');
+    final calls = <MethodCall>[];
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var cancelled = false;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'scanWireGuardProfileQr') {
+        return cancelled ? null : 'CAMERA_CONFIG_FIXTURE';
+      }
+      if (call.method == 'importWireGuardProfileQrImage') {
+        return cancelled ? null : 'IMAGE_CONFIG_FIXTURE';
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    expect(await WireGuardTunnel.scanProfileQr(), 'CAMERA_CONFIG_FIXTURE');
+    expect(await WireGuardTunnel.importProfileQrImage(), 'IMAGE_CONFIG_FIXTURE');
+    cancelled = true;
+    expect(await WireGuardTunnel.scanProfileQr(), isNull);
+    expect(await WireGuardTunnel.importProfileQrImage(), isNull);
+    await WireGuardTunnel.cancelProfileImport();
+    expect(calls.map((call) => call.method), [
+      'scanWireGuardProfileQr', 'importWireGuardProfileQrImage',
+      'scanWireGuardProfileQr', 'importWireGuardProfileQrImage',
+      'cancelWireGuardProfileImport',
+    ]);
+    expect(calls.every((call) => call.arguments == null), isTrue);
+  });
 }

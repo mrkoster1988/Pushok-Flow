@@ -6,6 +6,8 @@ import 'package:material_ui/material_ui.dart';
 import '../design/pushok_theme.dart';
 import '../platform/wireguard_profiles.dart';
 
+enum _ProfileImportSource { file, cameraQr, imageQr }
+
 /// Edits a local draft and returns it only after the caller saves it successfully.
 class WireGuardProfileEditor extends StatefulWidget {
   const WireGuardProfileEditor({
@@ -14,6 +16,8 @@ class WireGuardProfileEditor extends StatefulWidget {
     required this.onSave,
     this.initialName = 'Мой профиль',
     this.onImport,
+    this.onScanQr,
+    this.onImportQrImage,
     this.onCancelImport,
     this.connectAfterSave = false,
     this.initialError,
@@ -23,6 +27,8 @@ class WireGuardProfileEditor extends StatefulWidget {
   final String initialName;
   final Future<void> Function(String config, String name) onSave;
   final Future<String?> Function()? onImport;
+  final Future<String?> Function()? onScanQr;
+  final Future<String?> Function()? onImportQrImage;
   final Future<void> Function()? onCancelImport;
   final bool connectAfterSave;
   final String? initialError;
@@ -43,6 +49,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   bool _saving = false;
   bool _pasting = false;
   bool _importing = false;
+  _ProfileImportSource? _importSource;
   bool _importCancelSent = false;
   int _importEpoch = 0;
   bool _resumed = true;
@@ -180,13 +187,18 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     }
   }
 
-  Future<void> _import() async {
-    final read = widget.onImport;
+  Future<void> _import(_ProfileImportSource source) async {
+    final read = switch (source) {
+      _ProfileImportSource.file => widget.onImport,
+      _ProfileImportSource.cameraQr => widget.onScanQr,
+      _ProfileImportSource.imageQr => widget.onImportQrImage,
+    };
     if (!mounted || _busy || !_canReveal || read == null) return;
     final epoch = ++_importEpoch;
     _clearInputSelection();
     setState(() {
       _importing = true;
+      _importSource = source;
       _importCancelSent = false;
       _showConfig = false;
       _error = null;
@@ -201,36 +213,87 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         return;
       }
       // Android may deliver the result before onResume. Only replace the masked
-      // draft; never reveal, save, or connect as a consequence of selecting a file.
+      // draft; never reveal, save, or connect after selecting a file or scanning a QR.
       _controller.value = TextEditingValue(text: config,
           selection: const TextSelection.collapsed(offset: -1));
       setState(() {
         _showConfig = false;
-        _notice = 'Файл прочитан. Сохраните профиль.';
+        _notice = source == _ProfileImportSource.file
+            ? 'Файл прочитан. Сохраните профиль.'
+            : 'QR-код прочитан. Сохраните профиль.';
       });
     } on PlatformException catch (error) {
       if (!mounted || epoch != _importEpoch) return;
-      setState(() => _error = switch (error.code) {
-        'PROFILE_IMPORT_TOO_LARGE' =>
-          'Файл слишком большой: максимум 65 536 байт.',
-        'PROFILE_IMPORT_INVALID' =>
-          'Нужен полный текстовый профиль WireGuard .conf с разделами [Interface] и [Peer].',
-        'PROFILE_IMPORT_BUSY' =>
-          'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.',
-        'PROFILE_IMPORT_INTERRUPTED' =>
-          'Импорт прерван. Выберите файл ещё раз.',
-        'PROFILE_IMPORT_UNAVAILABLE' =>
-          'Не удалось открыть выбор файла. Вставьте конфигурацию вручную.',
-        _ => 'Не удалось прочитать файл. Выберите его заново или вставьте конфигурацию.',
-      });
+      setState(() => _error = _importError(error.code, source));
     } catch (_) {
       if (mounted && epoch == _importEpoch) {
-        setState(() => _error =
-            'Не удалось прочитать файл. Выберите его заново или вставьте конфигурацию.');
+        setState(() => _error = _importError(null, source));
       }
     } finally {
-      if (mounted && epoch == _importEpoch) setState(() => _importing = false);
+      if (mounted && epoch == _importEpoch) {
+        setState(() { _importing = false; _importSource = null; });
+      }
     }
+  }
+
+  String _importError(String? code, _ProfileImportSource source) {
+    final file = source == _ProfileImportSource.file;
+    return switch (code) {
+        'PROFILE_IMPORT_TOO_LARGE' =>
+          file ? 'Файл слишком большой: максимум 65 536 байт.'
+              : 'Профиль слишком большой: максимум 65 536 байт.',
+        'PROFILE_IMPORT_INVALID' => file
+            ? 'Нужен полный текстовый профиль WireGuard .conf с разделами [Interface] и [Peer].'
+            : 'В QR-коде нет полного профиля WireGuard. Нужны разделы [Interface] и [Peer].',
+        'PROFILE_IMPORT_BUSY' => file
+            ? 'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.'
+            : 'Импорт профиля уже открыт. Завершите его и попробуйте ещё раз.',
+        'PROFILE_IMPORT_INTERRUPTED' => file
+            ? 'Импорт прерван. Выберите файл ещё раз.'
+            : 'Импорт прерван. Сканируйте QR-код или выберите фото ещё раз.',
+        'PROFILE_IMPORT_UNAVAILABLE' => file
+            ? 'Не удалось открыть выбор файла. Вставьте конфигурацию вручную.'
+            : 'Импорт QR сейчас недоступен. Выберите файл .conf или вставьте конфигурацию.',
+        'PROFILE_QR_CAMERA_DENIED' =>
+          'Для сканирования нужен доступ к камере. Можно выбрать фото с QR-кодом.',
+        'PROFILE_QR_UNAVAILABLE' =>
+          'Сканирование QR недоступно. Выберите фото с QR-кодом или файл .conf.',
+        'PROFILE_QR_NOT_FOUND' =>
+          'На изображении не найден QR-код. Выберите другое фото.',
+        'PROFILE_QR_MULTIPLE' =>
+          'На изображении несколько QR-кодов. Выберите фото с одним кодом профиля.',
+        'PROFILE_QR_IMAGE_TOO_LARGE' =>
+          'Изображение слишком большое. Выберите уменьшенную копию или файл .conf.',
+        _ => file
+            ? 'Не удалось прочитать файл. Выберите его заново или вставьте конфигурацию.'
+            : 'Не удалось прочитать QR-код. Повторите сканирование или выберите файл .conf.',
+      };
+  }
+
+  void _showImportHelp() {
+    if (!mounted || _busy || !_canReveal) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Как добавить профиль'),
+        scrollable: true,
+        content: const Text(
+          'В WGDashboard откройте нужного клиента (Peer) и его обычный QR-код WireGuard. '
+          'Если код открыт на другом устройстве, нажмите «Сканировать QR». '
+          'Если он сохранён на этом телефоне, нажмите «QR из фото» и выберите изображение.\n\n'
+          'Нужен полный профиль WireGuard с разделами [Interface] и [Peer]. '
+          'QR со ссылкой и профили Amnezia сейчас не поддерживаются. '
+          'Также можно выбрать файл .conf или вставить его полный текст.\n\n'
+          'Распознавание выполняется на устройстве. Профиль сначала появляется '
+          'как скрытый черновик: проверьте название и нажмите «Сохранить профиль» '
+          'или «Сохранить и подключить». При переключении приложений текст скрывается.',
+        ),
+        actions: [TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Понятно'),
+        )],
+      ),
+    );
   }
 
   Future<void> _save() async {
@@ -326,6 +389,12 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     const Expanded(child: Text('Профиль WireGuard',
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
                     IconButton(
+                      key: const Key('info_wireguard_profile'),
+                      tooltip: 'Как добавить профиль',
+                      onPressed: _busy || !_canReveal ? null : _showImportHelp,
+                      icon: const Icon(Icons.info_outline),
+                    ),
+                    IconButton(
                       key: const Key('close_wireguard_profile'),
                       tooltip: 'Закрыть',
                       onPressed: _saving || _pasting
@@ -334,8 +403,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     ),
                   ]),
                   const SizedBox(height: 8),
-                  const Text('Выберите файл .conf или вставьте полный текст профиля от вашего VPN-провайдера '
-                    'с разделами [Interface] и [Peer]. '
+                  const Text('Добавьте профиль WireGuard из QR-кода, файла .conf или буфера обмена. '
                     'Профиль сохраняется только на этом устройстве.',
                     style: TextStyle(color: PushokPalette.muted)),
                   const SizedBox(height: 8),
@@ -422,12 +490,33 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     ),
                     if (widget.onImport != null) OutlinedButton.icon(
                       key: const Key('import_wireguard_profile'),
-                      onPressed: _busy || !_canReveal ? null : _import,
-                      icon: _importing
+                      onPressed: _busy || !_canReveal
+                          ? null : () => _import(_ProfileImportSource.file),
+                      icon: _importing && _importSource == _ProfileImportSource.file
                           ? const SizedBox(width: 18, height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.file_open_outlined),
                       label: const Text('Из файла .conf'),
+                    ),
+                    if (widget.onScanQr != null) OutlinedButton.icon(
+                      key: const Key('scan_wireguard_profile_qr'),
+                      onPressed: _busy || !_canReveal
+                          ? null : () => _import(_ProfileImportSource.cameraQr),
+                      icon: _importing && _importSource == _ProfileImportSource.cameraQr
+                          ? const SizedBox(width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.qr_code_scanner),
+                      label: const Text('Сканировать QR'),
+                    ),
+                    if (widget.onImportQrImage != null) OutlinedButton.icon(
+                      key: const Key('import_wireguard_profile_qr_image'),
+                      onPressed: _busy || !_canReveal
+                          ? null : () => _import(_ProfileImportSource.imageQr),
+                      icon: _importing && _importSource == _ProfileImportSource.imageQr
+                          ? const SizedBox(width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.image_outlined),
+                      label: const Text('QR из фото'),
                     ),
                     ],
                   ),

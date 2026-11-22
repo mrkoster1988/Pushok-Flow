@@ -17,12 +17,15 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Imports one explicitly chosen document into an already-protected editor draft. */
+/** Imports a chosen file or offline QR code into an already-protected editor draft. */
 class WireGuardProfileImport(
     private val activity: Activity,
     private val isProtected: () -> Boolean,
 ) {
+    enum class Source { FILE, CAMERA, QR_IMAGE }
+
     companion object {
+        internal val qrSessions = ProfileQrSession()
         private const val FIRST_REQUEST_CODE = 0x5000
         private const val LAST_REQUEST_CODE = 0x7FFF
         private const val READ_TIMEOUT_MS = 20_000L
@@ -38,7 +41,7 @@ class WireGuardProfileImport(
         }
     }
 
-    private class Request(val code: Int, var result: MethodChannel.Result?) {
+    private class Request(val code: Int, val source: Source, var result: MethodChannel.Result?) {
         val cancelled = AtomicBoolean(false)
         val signal = CancellationSignal()
         var timeout: Runnable? = null
@@ -70,7 +73,7 @@ class WireGuardProfileImport(
     private var pending: Request? = null
     private var disposed = false
 
-    fun open(result: MethodChannel.Result) {
+    fun open(result: MethodChannel.Result, source: Source = Source.FILE) {
         if (disposed || activity.isDestroyed || activity.isFinishing || !isProtected()) {
             error(result, "PROFILE_IMPORT_UNAVAILABLE")
             return
@@ -84,13 +87,20 @@ class WireGuardProfileImport(
             error(result, "PROFILE_IMPORT_UNAVAILABLE")
             return
         }
-        val request = Request(code, result)
+        if (source == Source.CAMERA && !qrSessions.begin(code)) {
+            error(result, "PROFILE_IMPORT_BUSY")
+            return
+        }
+        val request = Request(code, source, result)
         pending = request
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        val intent = if (source == Source.CAMERA) {
+            Intent(activity, WireGuardQrActivity::class.java)
+                .putExtra(WireGuardQrActivity.EXTRA_REQUEST_CODE, code)
+        } else Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             // .conf has inconsistent MIME types across Android document providers.
             // The bounded reader and WireGuard parser decide whether content is valid.
-            type = "*/*"
+            type = if (source == Source.QR_IMAGE) "image/*" else "*/*"
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
         }
@@ -109,18 +119,40 @@ class WireGuardProfileImport(
         val request = pending ?: return true
         if (request.code != requestCode) return true
         if (request.readStarted) return true
+        if (!isProtected() || disposed ||
+            (request.source == Source.CAMERA && !qrSessions.isActive(request.code))) {
+            finish(request, code = "PROFILE_IMPORT_INTERRUPTED")
+            return true
+        }
+        var cameraText: String? = null
+        val uri = try {
+            if (request.source == Source.CAMERA) {
+                val cameraError = data?.getStringExtra(WireGuardQrActivity.EXTRA_ERROR)
+                if (cameraError != null) {
+                    val safe = cameraError.takeIf { it in setOf("PROFILE_QR_CAMERA_DENIED",
+                        "PROFILE_QR_UNAVAILABLE", "PROFILE_IMPORT_INVALID") } ?: "PROFILE_IMPORT_INVALID"
+                    finish(request, code = safe)
+                    return true
+                }
+                cameraText = data?.getStringExtra(WireGuardQrActivity.EXTRA_TEXT)
+                null
+            } else data?.data
+        } catch (_: Exception) {
+            finish(request, code = "PROFILE_IMPORT_INVALID")
+            return true
+        }
         if (resultCode != Activity.RESULT_OK) {
             finish(request)
             return true
         }
-        val uri = data?.data
-        if (uri == null || uri.scheme != ContentResolver.SCHEME_CONTENT ||
+        if (request.source == Source.CAMERA) {
+            if (cameraText == null || cameraText.length > ProfileImportReader.MAX_BYTES) {
+                finish(request, code = "PROFILE_IMPORT_INVALID")
+                return true
+            }
+        } else if (uri == null || uri.scheme != ContentResolver.SCHEME_CONTENT ||
             data?.clipData?.itemCount?.let { it > 1 } == true) {
             finish(request, code = "PROFILE_IMPORT_INVALID")
-            return true
-        }
-        if (!isProtected() || disposed) {
-            finish(request, code = "PROFILE_IMPORT_INTERRUPTED")
             return true
         }
         if (!reading.compareAndSet(false, true)) {
@@ -142,12 +174,17 @@ class WireGuardProfileImport(
             var failure: String? = null
             try {
                 if (request.cancelled.get()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
-                val descriptor = documentResolver.openAssetFileDescriptor(uri, "r", request.signal)
-                    ?: throw ProfileImportReader.Failure("PROFILE_IMPORT_FAILED")
-                if (!request.attach(descriptor)) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
-                val input = descriptor.createInputStream()
-                if (!request.attach(input)) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
-                val draft = ProfileImportReader.read(input) { request.cancelled.get() }
+                val draft = if (request.source == Source.CAMERA) {
+                    ProfileQrDecoder.normalizePayload(cameraText) { request.cancelled.get() }
+                } else {
+                    val descriptor = documentResolver.openAssetFileDescriptor(uri!!, "r", request.signal)
+                        ?: throw ProfileImportReader.Failure("PROFILE_IMPORT_FAILED")
+                    if (!request.attach(descriptor)) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
+                    val input = descriptor.createInputStream()
+                    if (!request.attach(input)) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
+                    if (request.source == Source.QR_IMAGE) ProfileQrImageReader.read(input) { request.cancelled.get() }
+                    else ProfileImportReader.read(input) { request.cancelled.get() }
+                }
                 // Parse before crossing the channel. The editor still requires explicit Save.
                 // No filename, URI, raw parser error, or parsed peer/key object is returned.
                 val parsed = Config.parse(ByteArrayInputStream(draft.toByteArray(StandardCharsets.UTF_8)))
@@ -195,6 +232,7 @@ class WireGuardProfileImport(
     private fun finish(request: Request, value: String? = null, code: String? = null) {
         if (pending !== request) return
         pending = null
+        if (request.source == Source.CAMERA) qrSessions.end(request.code)
         request.timeout?.let { handler.removeCallbacks(it) }
         request.timeout = null
         val result = request.result ?: return
@@ -217,6 +255,11 @@ class WireGuardProfileImport(
             "PROFILE_IMPORT_INVALID" -> "Нужен полный профиль WireGuard в формате UTF-8"
             "PROFILE_IMPORT_INTERRUPTED" -> "Импорт профиля прерван"
             "PROFILE_IMPORT_UNAVAILABLE" -> "Импорт профиля сейчас недоступен"
+            "PROFILE_QR_CAMERA_DENIED" -> "Доступ к камере не разрешён"
+            "PROFILE_QR_UNAVAILABLE" -> "Не удалось открыть камеру"
+            "PROFILE_QR_NOT_FOUND" -> "QR-код не найден на изображении"
+            "PROFILE_QR_MULTIPLE" -> "Выберите изображение с одним QR-кодом"
+            "PROFILE_QR_IMAGE_TOO_LARGE" -> "Изображение слишком большое для чтения QR-кода"
             else -> "Не удалось прочитать файл профиля"
         }
         result.error(code, message, null)

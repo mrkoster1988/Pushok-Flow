@@ -7,12 +7,15 @@ ANDROID_URI = "http://schemas.android.com/apk/res/android"
 ANDROID = "{" + ANDROID_URI + "}"
 VPN_SERVICE = "com.wireguard.android.backend.GoBackend$VpnService"
 UPDATE_PROVIDER = "shop.pushok.flow.UpdateFileProvider"
+QR_ACTIVITY = "shop.pushok.flow.WireGuardQrActivity"
+TOOLS_URI = "http://schemas.android.com/tools"
 
 
 def patch_manifest(path: Path) -> None:
     # Preserve namespace prefixes and Flutter's explanatory comments when writing XML.
     for _, (prefix, uri) in ET.iterparse(path, events=("start-ns",)):
         ET.register_namespace(prefix, uri)
+    ET.register_namespace("tools", TOOLS_URI)
     parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
     tree = ET.parse(path, parser=parser)
     manifest = tree.getroot()
@@ -27,11 +30,51 @@ def patch_manifest(path: Path) -> None:
             app.remove(service)
 
     # VPN/update downloads and Android's user-confirmed package installer.
-    for permission_name in ("android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"):
+    for permission_name in ("android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
+                            "android.permission.CAMERA"):
         if not any(permission.get(ANDROID + "name") == permission_name
                    for permission in manifest.findall("uses-permission")):
             permission = ET.Element("uses-permission", {ANDROID + "name": permission_name})
             manifest.insert(list(manifest).index(app), permission)
+
+    # Scanning is optional: importing a file/image and the rest of the app also work without a camera.
+    for feature_name in ("android.hardware.camera", "android.hardware.camera.any",
+                         "android.hardware.camera.front", "android.hardware.camera.autofocus",
+                         "android.hardware.camera.flash"):
+        features = [item for item in manifest.findall("uses-feature")
+                    if item.get(ANDROID + "name") == feature_name]
+        feature = features[0] if features else ET.Element("uses-feature")
+        if not features:
+            manifest.insert(list(manifest).index(app), feature)
+        for duplicate in features[1:]:
+            manifest.remove(duplicate)
+        feature.set(ANDROID + "name", feature_name)
+        feature.set(ANDROID + "required", "false")
+
+    scanners = [item for item in app.findall("activity")
+                if item.get(ANDROID + "name") in (QR_ACTIVITY, ".WireGuardQrActivity", "WireGuardQrActivity")]
+    scanner = scanners[0] if scanners else ET.SubElement(app, "activity")
+    for duplicate in scanners[1:]:
+        app.remove(duplicate)
+    scanner.set(ANDROID + "name", QR_ACTIVITY)
+    scanner.set(ANDROID + "exported", "false")
+    scanner.set(ANDROID + "excludeFromRecents", "true")
+    scanner.set(ANDROID + "launchMode", "standard")
+    scanner.set(ANDROID + "configChanges", "orientation|screenSize|keyboardHidden")
+    scanner.set(ANDROID + "theme", "@android:style/Theme.Material.NoActionBar")
+    scanner.attrib.pop(ANDROID + "screenOrientation", None)
+    for intent_filter in scanner.findall("intent-filter"):
+        scanner.remove(intent_filter)
+
+    # The SDK's generic scanner is unused. Only the protected editor-owned Activity may scan.
+    generic_name = "com.journeyapps.barcodescanner.CaptureActivity"
+    generics = [item for item in app.findall("activity") if item.get(ANDROID + "name") == generic_name]
+    generic = generics[0] if generics else ET.SubElement(app, "activity")
+    for duplicate in generics[1:]:
+        app.remove(duplicate)
+    generic.clear()
+    generic.set(ANDROID + "name", generic_name)
+    generic.set("{" + TOOLS_URI + "}node", "remove")
 
     providers = [provider for provider in app.findall("provider")
                  if provider.get(ANDROID + "name") == UPDATE_PROVIDER]
@@ -79,7 +122,9 @@ def patch_project(root: Path) -> None:
         raise SystemExit("Run flutter create first")
     s = gradle.read_text(encoding="utf-8")
     for dep in ('implementation("com.wireguard.android:tunnel:1.0.20260102")',
-                'implementation("androidx.core:core:1.17.0")'):
+                'implementation("androidx.core:core:1.17.0")',
+                'implementation("com.journeyapps:zxing-android-embedded:4.3.0")',
+                'implementation("com.google.zxing:core:3.5.4")'):
         if dep not in s:
             if re.search(r"dependencies\s*\{", s):
                 s = re.sub(r"dependencies\s*\{", lambda m: m.group(0) + "\n    " + dep, s, count=1)

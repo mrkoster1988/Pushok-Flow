@@ -547,12 +547,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
               ? 'Мой профиль' : 'Профиль ${_profiles!.profiles.length + 1}'),
           connectAfterSave: connectAfterSave,
           onImport: WireGuardTunnel.importProfile,
+          onScanQr: WireGuardTunnel.scanProfileQr,
+          onImportQrImage: WireGuardTunnel.importProfileQrImage,
           onCancelImport: WireGuardTunnel.cancelProfileImport,
           onSave: (config, name) async {
             if (!mounted || !_foreground) {
               throw PlatformException(code: 'PROFILE_SAVE_INTERRUPTED');
             }
-            // Choosing a file leaves the app temporarily. A new explicit Save
+            // A file picker or QR scanner leaves the editor temporarily. A new explicit Save
             // after returning authorizes connect-after-save for that foreground
             // session, while later app switching still invalidates the intent.
             saveIntentEpoch = _profileRequestEpoch;
@@ -860,7 +862,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.34.0',
+            version: '0.35.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,

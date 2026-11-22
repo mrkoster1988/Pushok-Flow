@@ -112,6 +112,8 @@ class _AndroidBridge {
         final id = (call.arguments as Map?)?['profileId'] ?? activeProfileId;
         return profiles[id]?['config'];
       case 'importWireGuardProfile':
+      case 'scanWireGuardProfileQr':
+      case 'importWireGuardProfileQrImage':
         if (privacyTokens.isEmpty) {
           throw PlatformException(code: 'PROFILE_IMPORT_UNAVAILABLE');
         }
@@ -937,6 +939,87 @@ void main() {
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(bridge.savedProfile, _profile);
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      expect(bridge.privacyTokens, isEmpty);
+      expect(find.text('Туннель включён'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  for (final source in [
+    ('camera', 'scan_wireguard_profile_qr', 'scanWireGuardProfileQr'),
+    ('image', 'import_wireguard_profile_qr_image', 'importWireGuardProfileQrImage'),
+  ]) {
+    testWidgets('${source.$1} QR import uses a protected draft and requires explicit save',
+        (tester) async {
+      await _withApp(tester, () async {
+        await _openProfileEditor(tester);
+        await tester.pumpAndSettle();
+        expect(bridge.privacyTokens, hasLength(1));
+        final action = find.byKey(Key(source.$2));
+        await tester.ensureVisible(action);
+        await tester.pump();
+        await tester.tap(action);
+        await tester.pumpAndSettle();
+        expect(bridge.named(source.$3), hasLength(1));
+        expect(bridge.named('importWireGuardProfile'), isEmpty);
+        expect(bridge.named(source.$1 == 'camera'
+            ? 'importWireGuardProfileQrImage' : 'scanWireGuardProfileQr'), isEmpty);
+        final field = tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')));
+        expect(field.controller!.text, _profile);
+        expect(field.obscureText, isTrue);
+        expect(field.readOnly, isTrue);
+        expect(bridge.savedProfile, isNull);
+        expect(bridge.named('saveWireGuardProfile'), isEmpty);
+        expect(bridge.named('connectWireGuard'), isEmpty);
+        final save = find.byKey(const Key('save_wireguard_profile'));
+        await tester.ensureVisible(save);
+        await tester.pump();
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(bridge.savedProfile, _profile);
+        expect(bridge.named('saveWireGuardProfile'), hasLength(1));
+        expect(bridge.named('connectWireGuard'), isEmpty);
+        expect(bridge.privacyTokens, isEmpty);
+        expect(tester.takeException(), isNull);
+      });
+    });
+  }
+
+  testWidgets('Camera return before resume needs a fresh explicit save and connect', (tester) async {
+    final pendingImport = Completer<String?>();
+    bridge.importGate = pendingImport;
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      expect(bridge.privacyTokens, hasLength(1));
+      final scan = find.byKey(const Key('scan_wireguard_profile_qr'));
+      await tester.ensureVisible(scan);
+      await tester.pump();
+      await tester.tap(scan);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      pendingImport.complete(_profile);
+      await tester.pump();
+      expect(bridge.named('scanWireGuardProfileQr'), hasLength(1));
+      expect(bridge.named('cancelWireGuardProfileImport'), isEmpty);
+      expect(bridge.named('saveWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      final field = tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')));
+      expect(field.controller!.text, _profile);
+      expect(field.obscureText, isTrue);
+      final save = find.byKey(const Key('save_wireguard_profile'));
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')))
+          .obscureText, isTrue);
+      await tester.ensureVisible(save);
+      await tester.pump();
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(bridge.savedProfile, _profile);
+      expect(bridge.named('saveWireGuardProfile'), hasLength(1));
       expect(bridge.named('connectWireGuard'), hasLength(1));
       expect(bridge.privacyTokens, isEmpty);
       expect(find.text('Туннель включён'), findsOneWidget);

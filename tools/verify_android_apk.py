@@ -9,6 +9,18 @@ import shutil
 import re
 
 
+QR_IMPORT_VERSION_CODE = 35
+QR_ACTIVITY = 'shop.pushok.flow.WireGuardQrActivity'
+STORAGE_PERMISSIONS = {
+    'android.permission.READ_EXTERNAL_STORAGE',
+    'android.permission.WRITE_EXTERNAL_STORAGE',
+    'android.permission.MANAGE_EXTERNAL_STORAGE',
+    'android.permission.READ_MEDIA_IMAGES',
+    'android.permission.READ_MEDIA_VIDEO',
+    'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+}
+
+
 def find_aapt() -> str:
     existing = shutil.which('aapt')
     if existing:
@@ -21,15 +33,94 @@ def find_aapt() -> str:
     raise FileNotFoundError('Android SDK build-tools aapt missing')
 
 
+def element_attributes(tree: str, tag: str) -> list[str]:
+    """Read each element's own attributes, never a nested element's attributes."""
+    result = []
+    current = None
+    for line in tree.splitlines():
+        element = re.match(r'^\s*E: ([\w-]+)(?:\s|$)', line)
+        if element:
+            current = [] if element[1] == tag else None
+            if current is not None:
+                result.append(current)
+        elif current is not None and re.match(r'^\s*A: ', line):
+            current.append(line)
+    return ['\n'.join(attributes) for attributes in result]
+
+
+def attribute_value(attributes: str, name: str) -> str | None:
+    matches = re.findall(
+        rf'^\s*A: android:{re.escape(name)}(?:\([^)]*\))?=(.*)$',
+        attributes, re.MULTILINE)
+    return matches[0] if len(matches) == 1 else None
+
+
+def string_attribute(attributes: str, name: str) -> str | None:
+    value = attribute_value(attributes, name)
+    match = re.match(r'^"([^"]*)"(?:\s|$)', value or '')
+    return match[1] if match else None
+
+
+def is_false_attribute(attributes: str, name: str) -> bool:
+    value = attribute_value(attributes, name)
+    return bool(re.match(r'^\(type 0x12\)0x0\b', value or ''))
+
+
+def check_qr_import_manifest(tree: str, permissions: set[str]) -> None:
+    if 'android.permission.CAMERA' not in permissions:
+        raise ValueError('CAMERA permission not declared for QR import')
+    if permissions & STORAGE_PERMISSIONS:
+        raise ValueError('QR image import must not request broad storage or gallery permissions')
+
+    # aapt may print a relative component name before/after manifest merging.
+    scanner_names = {QR_ACTIVITY, '.WireGuardQrActivity', 'WireGuardQrActivity'}
+    activities = element_attributes(tree, 'activity')
+    if any(string_attribute(attributes, 'name') == 'com.journeyapps.barcodescanner.CaptureActivity'
+           for attributes in activities):
+        raise ValueError('Bundled default QR scanner must be removed from merged manifest')
+    scanners = [attributes for attributes in activities
+                if string_attribute(attributes, 'name') in scanner_names]
+    if len(scanners) != 1:
+        raise ValueError('Expected exactly one app-owned WireGuard QR scanner activity')
+    if not is_false_attribute(scanners[0], 'exported'):
+        raise ValueError('WireGuard QR scanner must be explicitly exported=false')
+
+    # An exported alias would expose the same otherwise private scanner.
+    for alias in element_attributes(tree, 'activity-alias'):
+        if (string_attribute(alias, 'targetActivity') in scanner_names
+                and not is_false_attribute(alias, 'exported')):
+            raise ValueError('WireGuard QR scanner alias must be explicitly exported=false')
+
+    camera_features = []
+    for attributes in element_attributes(tree, 'uses-feature'):
+        name = string_attribute(attributes, 'name')
+        if name == 'android.hardware.camera' or (name or '').startswith('android.hardware.camera.'):
+            if not is_false_attribute(attributes, 'required'):
+                raise ValueError('Camera hardware features must be explicitly required=false')
+            camera_features.append(name)
+    # CAMERA implies both features unless the manifest explicitly makes them optional.
+    for name in ('android.hardware.camera', 'android.hardware.camera.autofocus'):
+        if camera_features.count(name) != 1:
+            raise ValueError(f'Expected one optional camera hardware feature: {name}')
+
+
 def check_apk(path: Path, aapt: str | None = None) -> None:
     if not path.is_file() or path.stat().st_size == 0:
         raise ValueError('Missing/empty APK')
     aapt = aapt or find_aapt()
     result = subprocess.run([aapt, 'dump', 'badging', str(path)], capture_output=True, text=True, check=True)
-    if "package: name='shop.pushok.flow'" not in result.stdout:
+    package = re.findall(r"^package:\s+name='([^']+)'([^\r\n]*)$", result.stdout, re.MULTILINE)
+    if len(package) != 1 or package[0][0] != 'shop.pushok.flow':
         raise ValueError('Unexpected package identifier')
+    version_codes = re.findall(r"\bversionCode='([^']*)'", package[0][1])
+    if len(version_codes) != 1 or not re.fullmatch(r'[1-9][0-9]*', version_codes[0]):
+        raise ValueError('APK versionCode missing or invalid')
+    version_code = int(version_codes[0])
     permissions = subprocess.run([aapt, 'dump', 'permissions', str(path)], capture_output=True, text=True, check=True)
-    if 'android.permission.INTERNET' not in permissions.stdout:
+    declared_permissions = set(re.findall(
+        r"^uses-permission(?:-sdk-[\w]+)?:\s+name=['\"]([^'\"]+)['\"]",
+        permissions.stdout, re.MULTILINE))
+    if 'android.permission.INTERNET' not in declared_permissions:
         raise ValueError('INTERNET permission not declared in APK')
     manifest = subprocess.run([aapt, 'dump', 'xmltree', str(path), 'AndroidManifest.xml'], capture_output=True, text=True, check=True)
     NAME = 'com.wireguard.android.backend.GoBackend$VpnService'
@@ -58,6 +149,9 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
         raise ValueError('WireGuard service must require BIND_VPN_SERVICE on its own declaration')
     if not re.search(r'android:exported\([^)]*\)=\(type 0x12\)0x0\b', service):
         raise ValueError('WireGuard service not explicitly exported=false; inspect merged manifest')
+    if version_code >= QR_IMPORT_VERSION_CODE:
+        check_qr_import_manifest(manifest.stdout, declared_permissions)
+        print('APK private QR scanner, camera permission and optional hardware checks passed')
     print('APK package, INTERNET and WireGuard VPN service checks passed')
 
 
