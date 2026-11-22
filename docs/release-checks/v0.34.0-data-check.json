@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "apkSourceCommit": "3b124a098334c4f83cd4ca6385a1eb3780145555",
+  "dataOnlyCommit": "de5857b6f50efd9028b8e7cbeb06f68d921d3fbb",
+  "appVersion": "0.34.0+34",
+  "apkReleaseUnchangedAtDataPublication": "v0.33.0",
+  "dataSourceChecks": {
+    "runId": 44987716092,
+    "conclusion": "success",
+    "pythonTests": 158,
+    "flutterTests": 186
+  },
+  "workflowRunsForDataCommit": [
+    {
+      "id": 44987716092,
+      "name": "Source contract checks",
+      "conclusion": "success"
+    }
+  ],
+  "androidCandidateRunForDataCommit": null,
+  "firstDataPublication": {
+    "url": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+    "requestedAt": "2026-11-22T04:58:33.866527+00:00",
+    "httpStatus": 200,
+    "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+    "sizeBytes": 950,
+    "sha256": "c7360aa599f1fc68ef3bb9b15fa6e324232f8d8755626ddb7a91a84c1e8fcba7",
+    "rulesVersion": 1,
+    "packages": [
+      "com.vkontakte.android",
+      "com.wildberries.ru",
+      "ru.oneme.app",
+      "ru.ozon.app.android"
+    ],
+    "payloadSha256": "f0fc4fe199598922c9a6f4134d8efb469a6cfc40b28447fa4c4f18ccb36b3c2c",
+    "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047"
+  },
+  "secondDataPublication": [
+    {
+      "url": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+      "requestedAt": "2026-11-22T05:04:09.563211+00:00",
+      "httpStatus": 200,
+      "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+      "sizeBytes": 966,
+      "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+      "rulesVersion": 2,
+      "packages": [
+        "com.vk.im",
+        "com.vkontakte.android",
+        "com.wildberries.ru",
+        "ru.oneme.app",
+        "ru.ozon.app.android"
+      ],
+      "payloadSha256": "dee49ef08b6defdeb03eefdd49b0fee03c15abf2ca4727813656dab3e32031a2",
+      "matchesExpected": true,
+      "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047"
+    }
+  ],
+  "limitations": [
+    "Physical Android installation and runtime fetch remain to be accepted on a device.",
+    "Anonymous public observations do not prove simultaneous propagation to all CDN nodes.",
+    "This channel updates package recommendations only; executable code remains an APK update."
+  ]
+}
