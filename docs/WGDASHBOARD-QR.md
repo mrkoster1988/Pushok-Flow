@@ -1,6 +1,6 @@
 # Профиль WireGuard из QR WGDashboard
 
-Функция добавлена в исходники Pushok Flow `0.35.0+35`. [Статус выпуска и проверок](RELEASE-v0.35.0.md).
+Функция доступна в [опубликованном Pushok Flow v0.35.0](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.35.0), сборка 35. [Результаты проверок и границы приёмки](RELEASE-v0.35.0.md).
 
 ## Какой QR подходит
 
