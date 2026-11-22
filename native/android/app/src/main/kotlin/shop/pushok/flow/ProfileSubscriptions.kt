@@ -164,7 +164,9 @@ class ProfileSubscriptions(
         // The toggle is explicit and local. Persist OFF even if opening a system screen pauses Flow.
         if (disposed.get()) { failure(result, "SUBSCRIPTION_INTERRUPTED"); return }
         if (!value) {
-            enabled = false
+            // Serialize OFF with the final guarded catalogue commit: an already started
+            // atomic replacement finishes first; a later automatic commit sees OFF.
+            synchronized(lifecycleLock) { enabled = false }
             if (automatic) downloader.cancel()
         }
         pendingResults.add(result)
