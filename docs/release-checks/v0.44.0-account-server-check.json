@@ -1,0 +1,234 @@
+{
+  "recordedAtUtc": "2026-11-22T22:06:07.326114+00:00",
+  "status": "source_published_production_integration_not_ready",
+  "serverRelease": {
+    "recordedAtUtc": "2026-11-22T22:02:50.406Z",
+    "repository": "mrkoster1988/mtproxy-pushok",
+    "version": "1.121",
+    "branch": "release/stable",
+    "previousSha": "d6f508b5352e86a1d4ba0537cd9c0d583190537b",
+    "publishedSha": "0ac83e5832731b456bf8039552098fc956951f7d",
+    "nonForcedFastForward": true,
+    "verifiedAncestorLocally": true,
+    "sourceCi": {
+      "runId": 45074717182,
+      "url": "https://github.com/mrkoster1988/mtproxy-pushok/actions/runs/45074717182",
+      "headSha": "0ac83e5832731b456bf8039552098fc956951f7d",
+      "headBranch": "main",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "createdAtUtc": "2026-11-22T21:54:48Z",
+      "updatedAtUtc": "2026-11-22T22:01:50Z",
+      "jobs": [
+        {
+          "id": 137369282625,
+          "name": "test",
+          "status": "completed",
+          "conclusion": "success",
+          "headSha": "0ac83e5832731b456bf8039552098fc956951f7d"
+        },
+        {
+          "id": 137369282770,
+          "name": "cabinet-preview",
+          "status": "completed",
+          "conclusion": "success",
+          "headSha": "0ac83e5832731b456bf8039552098fc956951f7d"
+        },
+        {
+          "id": 137369282809,
+          "name": "rust-core",
+          "status": "completed",
+          "conclusion": "success",
+          "headSha": "0ac83e5832731b456bf8039552098fc956951f7d"
+        },
+        {
+          "id": 137369993117,
+          "name": "compose-smoke",
+          "status": "completed",
+          "conclusion": "success",
+          "headSha": "0ac83e5832731b456bf8039552098fc956951f7d"
+        }
+      ]
+    },
+    "productionDeploymentVerified": false
+  },
+  "observations": [
+    {
+      "capturedAtUtc": "2026-11-22T21:52:30.719327+00:00",
+      "label": "baseline",
+      "publicReadinessChecksPassed": false,
+      "footerVersions": [
+        "1.120"
+      ],
+      "requests": {
+        "/": {
+          "url": "https://pushok.shop/",
+          "method": "GET",
+          "status": 200,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T21:52:24.911281+00:00"
+        },
+        "/api/v1/flow/capabilities": {
+          "url": "https://pushok.shop/api/v1/flow/capabilities",
+          "method": "GET",
+          "status": 404,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T21:52:24.911963+00:00"
+        },
+        "/api/v1/public-config": {
+          "url": "https://pushok.shop/api/v1/public-config",
+          "method": "GET",
+          "status": 200,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T21:52:24.912368+00:00"
+        },
+        "/api/v1/flow/me": {
+          "url": "https://pushok.shop/api/v1/flow/me",
+          "method": "GET",
+          "status": 404,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T21:52:24.912808+00:00"
+        }
+      },
+      "checks": {
+        "root_http_200": true,
+        "expected_footer_version": false,
+        "flow_capabilities_v1": false,
+        "flow_capabilities_no_store": false,
+        "flow_unauthenticated_me_401": false,
+        "flow_unauthenticated_me_no_store": false,
+        "existing_telegram_bot": true,
+        "root_no_referrer": false
+      },
+      "rawEvidenceSha256": "f9e7fec0d4cd747f173ce9076af7f0d3f738921a9a2704f3859c8a0da2848dfa"
+    },
+    {
+      "capturedAtUtc": "2026-11-22T22:03:03.993131+00:00",
+      "label": "poststable-1",
+      "publicReadinessChecksPassed": false,
+      "footerVersions": [
+        "1.120"
+      ],
+      "requests": {
+        "/": {
+          "url": "https://pushok.shop/",
+          "method": "GET",
+          "status": 200,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:02:57.649020+00:00"
+        },
+        "/api/v1/flow/capabilities": {
+          "url": "https://pushok.shop/api/v1/flow/capabilities",
+          "method": "GET",
+          "status": 404,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:02:57.649903+00:00"
+        },
+        "/api/v1/public-config": {
+          "url": "https://pushok.shop/api/v1/public-config",
+          "method": "GET",
+          "status": 200,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:02:57.650401+00:00"
+        },
+        "/api/v1/flow/me": {
+          "url": "https://pushok.shop/api/v1/flow/me",
+          "method": "GET",
+          "status": 404,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:02:57.650839+00:00"
+        }
+      },
+      "checks": {
+        "root_http_200": true,
+        "expected_footer_version": false,
+        "flow_capabilities_v1": false,
+        "flow_capabilities_no_store": false,
+        "flow_unauthenticated_me_401": false,
+        "flow_unauthenticated_me_no_store": false,
+        "existing_telegram_bot": true,
+        "root_no_referrer": false
+      },
+      "rawEvidenceSha256": "23262c5ae0eb90cc15b7cf2b29d507240299bf0ee279a0d6ef4543f1b9e1cc34"
+    },
+    {
+      "capturedAtUtc": "2026-11-22T22:04:42.865294+00:00",
+      "label": "poststable-2",
+      "publicReadinessChecksPassed": false,
+      "footerVersions": [
+        "1.120"
+      ],
+      "requests": {
+        "/": {
+          "url": "https://pushok.shop/",
+          "method": "GET",
+          "status": 200,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:04:38.995070+00:00"
+        },
+        "/api/v1/flow/capabilities": {
+          "url": "https://pushok.shop/api/v1/flow/capabilities",
+          "method": "GET",
+          "status": 404,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:04:38.995895+00:00"
+        },
+        "/api/v1/public-config": {
+          "url": "https://pushok.shop/api/v1/public-config",
+          "method": "GET",
+          "status": 200,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:04:38.996352+00:00"
+        },
+        "/api/v1/flow/me": {
+          "url": "https://pushok.shop/api/v1/flow/me",
+          "method": "GET",
+          "status": 404,
+          "authorizationSent": false,
+          "cookiesSent": false,
+          "observedAtUtc": "2026-11-22T22:04:38.996829+00:00"
+        }
+      },
+      "checks": {
+        "root_http_200": true,
+        "expected_footer_version": false,
+        "flow_capabilities_v1": false,
+        "flow_capabilities_no_store": false,
+        "flow_unauthenticated_me_401": false,
+        "flow_unauthenticated_me_no_store": false,
+        "existing_telegram_bot": true,
+        "root_no_referrer": false
+      },
+      "rawEvidenceSha256": "08c1d18cb61d3af0315f23953aa5ffeeddd9f7a517b9b40c799f88b398eca1c0"
+    }
+  ],
+  "browserLoginObservation": {
+    "recorded_at_utc": "2026-11-22T21:53:21.222914+00:00",
+    "url": "https://pushok.shop/",
+    "guest": true,
+    "footer_version": "1.120",
+    "visible_text": "Bot domain invalid",
+    "login_attempted": false
+  },
+  "productionDeploymentVerified": false,
+  "physicalAccountAcceptanceVerified": false,
+  "limits": [
+    "The tested server source is published to release/stable; this does not prove installation on pushok.shop.",
+    "The last public observation still showed v1.120 and missing Flow API endpoints.",
+    "The guest web Telegram widget displayed Bot domain invalid; the cause and the host auto-update setting were not established.",
+    "No administrator session, server credentials, device request, approval or real account token was used."
+  ],
+  "nextStep": "Apply the tested v1.121 using the existing authorized MTProxy administrator update flow, then recheck capabilities, unauthenticated me rejection, and explicit account consent on Android."
+}
