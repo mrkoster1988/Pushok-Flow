@@ -59,6 +59,30 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
   native/android/tests/ProfileQrImportCheck.kt -classpath "$core" -include-runtime -d "$out/qr-import-tests.jar"
 java -cp "$out/qr-import-tests.jar:$core" shop.pushok.flow.ProfileQrImportCheckKt
+embedded_aar="$out/zxing-android-embedded.aar"
+embedded_core="$out/zxing-android-embedded.jar"
+if [[ -n "${FLOW_ZXING_EMBEDDED_AAR:-}" ]]; then
+  cp "$FLOW_ZXING_EMBEDDED_AAR" "$embedded_aar"
+else
+  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
+    https://repo.maven.apache.org/maven2/com/journeyapps/zxing-android-embedded/4.3.0/zxing-android-embedded-4.3.0.aar \
+    -o "$embedded_aar"
+fi
+python3 - "$embedded_aar" "$embedded_core" <<'EMBEDDED_CHECK'
+import hashlib
+from pathlib import Path
+import sys
+import zipfile
+archive = Path(sys.argv[1])
+if hashlib.sha256(archive.read_bytes()).hexdigest() != '4ab03353127c34e55cbb80fbc9a34031decbcfb1ec5e8f991944d2d494621a33':
+    raise SystemExit('Pinned JourneyApps ZXing embedded 4.3.0 checksum mismatch')
+with zipfile.ZipFile(archive) as bundle:
+    Path(sys.argv[2]).write_bytes(bundle.read('classes.jar'))
+EMBEDDED_CHECK
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrCameraDecoder.kt \
+  native/android/tests/ProfileQrCameraCheck.kt -classpath "$core:$embedded_core" \
+  -include-runtime -d "$out/qr-camera-tests.jar"
+java -cp "$out/qr-camera-tests.jar:$core:$embedded_core" shop.pushok.flow.ProfileQrCameraCheckKt
 subscription_core=(
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt
