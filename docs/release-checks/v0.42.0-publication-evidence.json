@@ -1,0 +1,22 @@
+{
+  "runId": 45065025175,
+  "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45065025175",
+  "status": "completed",
+  "conclusion": "success",
+  "headSha": "b93788cd180a164bf6998cd5f738e144f5de9f06",
+  "tagTarget": "55314b7206eac628de5cb0ff2ce81bf4aefe6fc7",
+  "sourceCommit": "55314b7206eac628de5cb0ff2ce81bf4aefe6fc7",
+  "workflowPath": ".github/workflows/publish-public-release.yml",
+  "runAttempt": 1,
+  "createdAtUtc": "2026-11-22T20:11:38Z",
+  "updatedAtUtc": "2026-11-22T20:12:36Z",
+  "release": {
+    "id": 454718957,
+    "tag_name": "v0.42.0",
+    "html_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.42.0",
+    "target_commitish": "55314b7206eac628de5cb0ff2ce81bf4aefe6fc7",
+    "published_at": "2026-11-22T20:12:07Z",
+    "draft": false,
+    "prerelease": false
+  }
+}
