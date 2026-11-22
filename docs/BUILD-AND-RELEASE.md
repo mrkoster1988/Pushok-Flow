@@ -1,6 +1,16 @@
 # Pushok Flow: сборка, подпись и проверка Android
 
-## Опубликованный v0.33.0 — 22.11.2026
+## Опубликованный v0.34.0 — 22.11.2026
+
+[Выпуск](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.34.0) опубликован в 08:11:22 МСК, release ID `454218318`; точный источник APK — `3b124a098334c4f83cd4ca6385a1eb3780145555`. Успешны [Source checks 44987493443](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44987493443), [Android candidate 44987493433](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44987493433) и [публикация 44988272777](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44988272777): 158 Python, 186 Flutter, десять Kotlin-наборов, анализатор и полная Android-сборка.
+
+Точный кандидат подписан прежним постоянным ключом. APK — 62 581 632 байта, SHA-256 `ad7705bba1976d9f695adc90e9a01c63381a4fc032fc84a906a8e7feca36e11b`. Подтверждены подписи v2/v3, пакет, версия `0.34.0+34`, minSDK 24, отсутствие debug-флага и выравнивание. Публикация восстановила те же байты без повторной сборки и проверила все три assets.
+
+Общий манифест в CI совпал на третьей попытке, затем прошёл API → манифест конкретной версии. В 08:12 МСК оба пути проверены независимо без авторизации; публичный APK полностью скачан и совпал с подписанным. [Отчёт](RELEASE-v0.34.0.md) · [Публичные наблюдения](release-checks/v0.34.0-public-check.json).
+
+Новый канал рекомендаций отделён от APK. Коммит `de5857b6f50efd9028b8e7cbeb06f68d921d3fbb` выпустил список №2 с VK Мессенджером и прошёл [Source checks 44987716092](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44987716092), не запуская Android-кандидат. Подписанные данные проверены по публичному адресу; код и версия приложения не менялись. [Процедура без выпуска APK](NO-APK-UPDATES.md).
+
+## Предыдущий опубликованный v0.33.0 — 22.11.2026
 
 [Release](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.33.0), точный источник APK `c38e1fe932eb1286e70c231ef8bcc603a15e0beb`, версия `0.33.0+33`. Успешны [Source checks 44985191762](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44985191762), [Android candidate 44985191807](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44985191807) и [публикация 44985728979](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44985728979). Проверки: 143 Python, 175 Flutter, девять Kotlin-наборов, анализатор и полная release-сборка Android.
 
