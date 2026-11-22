@@ -39,10 +39,21 @@ IPv6 и маршрутами `0.0.0.0/0`, `::/0`. Исключения пере�
 
 JSON содержит единственный TUN inbound и единственный VLESS outbound. Прямого
 fallback нет. Поддерживается RAW/TCP с TLS или REALITY, с необязательным Vision.
+Начиная с 0.37.0, добавлены WebSocket и gRPC поверх TLS без Vision. В `wsSettings`
+передаются путь и отдельный `host`; в `grpcSettings` — непустой `serviceName`,
+необязательный `authority` и `multiMode` для `mode=multi` (`gun` используется по
+умолчанию). Чужие поля транспорта и неподдерживаемые режимы отклоняются при импорте.
 Сертификат TLS проверяет ядро; параметры отключения проверки запрещены импортом.
 DNS приложений (`1.1.1.1`, `1.0.0.1`) проходит через TUN и VLESS. Разрешение имени
 самого сервера выполняет защищённый bootstrap-резолвер: DNS текущей физической
 сети, резервный адрес — `1.1.1.1:53`.
+
+Пустой экспортируемый 3x-ui список ALPN трактуется как отсутствие переопределения.
+Для WebSocket явно принимаются `http/1.1` и `h2,http/1.1`, для gRPC — `h2` и
+`h2,http/1.1`. Иные непустые списки отклоняются, чтобы выбранный транспорт не
+получал несовместимую конфигурацию или молчаливую замену списка ядром. Для RAW/TCP
+сохраняется прежняя проверка ALPN. Исходная ссылка в зашифрованном каталоге не
+переписывается, дополнительные разрешения и новая версия libXray не требуются.
 
 TCP/UDP сокеты ядра и bootstrap DNS вызывают `VpnService.protect`.
 Контроллеры регистрируются один раз на процесс: Xray добавляет их в общий список,
@@ -60,7 +71,8 @@ TCP/UDP сокеты ядра и bootstrap DNS вызывают `VpnService.prot
 
 ## Проверки и границы
 
-- JVM: разбор ссылок, JSON TLS/REALITY, отсутствующий прямой fallback, границы
+- JVM: разбор ссылок RAW/TCP, WebSocket и gRPC, JSON TLS/REALITY, параметры пути,
+  Host/authority, ALPN, обычный и multi-режим gRPC, отсутствующий прямой fallback, границы
   срока операции, параллельная отмена, устаревшее поколение, неизвестное состояние
   до подтверждённого завершения native.
 - Python: manifest isolation, разрешения foreground-сервиса, размеры/хеши,
@@ -68,6 +80,9 @@ TCP/UDP сокеты ядра и bootstrap DNS вызывают `VpnService.prot
 - Официальный Linux libXray той же версии: `testXray` на сгенерированном JSON
   TLS/REALITY с Vision и без него; ошибочный протокол отклоняется. `testXray` не
   устанавливает TUN и не проверяет доступность сервера.
+- Для 0.37.0 тем же официальным ядром дополнительно приняты восемь точных
+  конфигураций WebSocket/gRPC с разными полями и ALPN; три отрицательных контроля
+  отклонены. [Наблюдения и хеши исходников](development-checks/vless-transports-core-config.json).
 
 Состояние «Туннель включён» подтверждает локальный TUN/ядро. Оно не означает
 успешное удалённое рукопожатие. Живой профиль, DNS, IPv4/IPv6, исключения,
@@ -82,3 +97,6 @@ TCP/UDP сокеты ядра и bootstrap DNS вызывают `VpnService.prot
 - https://github.com/XTLS/Xray-core/blob/676eaf66f8f05d4d558ee7a74b4736623d3feeb9/transport/internet/system_dialer.go
 - https://developer.android.com/develop/connectivity/vpn
 - https://developer.android.com/develop/background-work/services/fgs/service-types
+- https://xtls.github.io/en/config/transports/websocket.html
+- https://xtls.github.io/en/config/transports/grpc.html
+- https://github.com/XTLS/Xray-core/discussions/716

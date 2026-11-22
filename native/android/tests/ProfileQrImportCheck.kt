@@ -75,8 +75,14 @@ private fun decoderChecks() {
     rejected("PROFILE_QR_IMAGE_TOO_LARGE") { ProfileQrDecoder.decodePixels(2, 2, IntArray(3)) }
     val vless = "vless://11111111-2222-4333-8444-555555555555@example.invalid:443?security=tls#Synthetic"
     check(ProfileQrDecoder.decodePixels(size, size, qr(vless)) == vless)
+    val websocket = vless.replace("security=tls",
+        "security=tls&type=ws&path=%2Fflow%252Fsocket%3Ftoken%3Da%2Bb&host=cdn.example.invalid")
+    check(ProfileQrDecoder.decodePixels(size, size, qr(websocket)) == websocket)
+    val grpc = vless.replace("security=tls",
+        "security=tls&type=grpc&serviceName=flow-service&authority=grpc.example.invalid&mode=multi")
+    check(ProfileQrDecoder.decodePixels(size, size, qr(grpc)) == grpc)
     rejected("UNSUPPORTED_TRANSPORT") {
-        ProfileQrDecoder.decodePixels(size, size, qr(vless.replace("security=tls", "security=tls&type=ws")))
+        ProfileQrDecoder.decodePixels(size, size, qr(vless.replace("security=tls", "security=tls&type=xhttp")))
     }
     rejected("UNSUPPORTED_SECURITY") {
         ProfileQrDecoder.decodePixels(size, size, qr(vless.replace("security=tls", "security=none")))
@@ -197,5 +203,5 @@ fun main() {
     payloadChecks()
     imageBoundsChecks()
     ownerSessionChecks()
-    println("ProfileQrImport executable checks passed (ZXing 3.5.4, WG/VLESS payload/bounds/cancellation/session)")
+    println("ProfileQrImport executable checks passed (ZXing 3.5.4, WG/VLESS RAW/WS/gRPC payload/bounds/cancellation/session)")
 }

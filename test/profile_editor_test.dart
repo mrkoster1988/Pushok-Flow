@@ -12,6 +12,10 @@ const _config = '[Interface]\nPrivateKey = ui-test-key\n'
 // Reserved example domain and synthetic UUID: never a usable connection.
 const _vless = 'vless://00000000-0000-4000-8000-000000000001@example.invalid:443'
     '?type=tcp&security=tls&sni=example.invalid&flow=xtls-rprx-vision#UI%20fixture';
+const _vlessWs = 'vless://00000000-0000-4000-8000-000000000001@example.invalid:443'
+    '?type=ws&security=tls&sni=example.invalid&host=example.invalid&path=%2Fflow%3Fx%3Da%252Fb#WS';
+const _vlessGrpc = 'vless://00000000-0000-4000-8000-000000000001@example.invalid:443'
+    '?type=grpc&security=tls&sni=example.invalid&serviceName=FlowService#GRPC';
 const _field = Key('wireguard_profile_field');
 const _name = Key('wireguard_profile_name');
 const _save = Key('save_wireguard_profile');
@@ -123,20 +127,24 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  for (final source in [('file', _import), ('camera', _scanQr), ('image', _qrImage)]) {
+  for (final source in [
+    ('file TCP', _import, _vless),
+    ('camera WebSocket', _scanQr, _vlessWs),
+    ('image gRPC', _qrImage, _vlessGrpc),
+  ]) {
     testWidgets('VLESS ${source.$1} import preserves the name and requires explicit save',
         (tester) async {
       String? saved;
       await _openEditor(tester, initialConfig: _config, initialName: 'Мой сервер',
-        onImport: () async => _vless,
-        onScanQr: () async => _vless,
-        onImportQrImage: () async => _vless,
+        onImport: () async => source.$3,
+        onScanQr: () async => source.$3,
+        onImportQrImage: () async => source.$3,
         onSave: (config, _) async { saved = config; },
       );
       await _tapEditorKey(tester, source.$2);
       await tester.pumpAndSettle();
       final field = tester.widget<TextField>(find.byKey(_field));
-      expect(field.controller!.text, _vless);
+      expect(field.controller!.text, source.$3);
       expect(field.obscureText, isTrue);
       expect(field.readOnly, isTrue);
       expect(field.controller!.selection, const TextSelection.collapsed(offset: -1));
@@ -144,7 +152,7 @@ void main() {
       expect(saved, isNull);
       await _tapSave(tester);
       await tester.pumpAndSettle();
-      expect(saved, _vless);
+      expect(saved, source.$3);
       expect(tester.takeException(), isNull);
     });
   }
@@ -573,9 +581,9 @@ void main() {
     ('UNSUPPORTED_PROFILE',
       'Этот формат пока не поддерживается. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.'),
     ('UNSUPPORTED_TRANSPORT',
-      'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY.'),
+      'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY либо WebSocket или gRPC с TLS.'),
     ('UNSUPPORTED_SECURITY',
-      'Для VLESS нужны TLS с проверкой сертификата или REALITY. Проверьте настройки клиента в 3x-ui.'),
+      'Для VLESS нужен TLS с проверкой сертификата или REALITY. REALITY доступен только с TCP (Raw).'),
     ('UNSUPPORTED_PROFILE_OPTION',
       'В ссылке VLESS есть параметры, которые пока не поддерживаются. Проверьте варианты подключения в подсказке ⓘ.'),
     ('PROFILE_SAVE_FAILED',
@@ -1087,7 +1095,7 @@ void main() {
       ('INVALID_VLESS_CONFIG', 'Некорректная ссылка VLESS.'),
       ('UNSUPPORTED_PROFILE', 'Этот формат пока не поддерживается.'),
       ('UNSUPPORTED_TRANSPORT', 'Этот вариант VLESS пока не поддерживается.'),
-      ('UNSUPPORTED_SECURITY', 'Для VLESS нужны TLS с проверкой сертификата или REALITY.'),
+      ('UNSUPPORTED_SECURITY', 'Для VLESS нужен TLS с проверкой сертификата или REALITY.'),
       ('UNSUPPORTED_PROFILE_OPTION', 'В ссылке VLESS есть параметры, которые пока не поддерживаются.'),
       ('UNKNOWN_QR_ERROR', 'Не удалось прочитать QR-код.'),
     ]) {
@@ -1251,6 +1259,7 @@ void main() {
     expect(find.textContaining('QR WireGuard из WGDashboard'), findsOneWidget);
     expect(find.textContaining('В 3x-ui'), findsOneWidget);
     expect(find.textContaining('TCP (Raw) с TLS или REALITY'), findsOneWidget);
+    expect(find.textContaining('WebSocket и gRPC поддерживаются только с TLS, без Vision.'), findsOneWidget);
     expect(find.textContaining('QR из фото'), findsWidgets);
     expect(tester.takeException(), isNull);
     await tester.ensureVisible(find.text('Понятно'));

@@ -11,13 +11,34 @@ object XrayConfig {
     val DNS = listOf("1.1.1.1", "1.0.0.1")
 
     fun build(profile: VlessProfile.Parsed, tunFd: Int = 0): String {
+        if (profile.transport != "raw" && (profile.security != "tls" || !profile.flow.isNullOrEmpty())) {
+            throw ProfileFormatFailure("UNSUPPORTED_TRANSPORT")
+        }
         val user = JSONObject().put("id", profile.uuid).put("encryption", "none")
         profile.flow?.takeIf { it.isNotEmpty() }?.let { user.put("flow", it) }
         val server = JSONObject().put("address", profile.host).put("port", profile.port)
             .put("users", JSONArray().put(user))
         val security = JSONObject().put("serverName", profile.serverName)
         security.put("fingerprint", profile.fingerprint)
-        val stream = JSONObject().put("network", "raw").put("security", profile.security)
+        val stream = JSONObject().put("network", profile.transport).put("security", profile.security)
+        when (profile.transport) {
+            "raw" -> Unit
+            "ws" -> {
+                val websocket = JSONObject().put("path", profile.wsPath ?: "/")
+                // Current Xray uses top-level host; headers.Host is a deprecated alias.
+                profile.wsHost?.let { websocket.put("host", it) }
+                stream.put("wsSettings", websocket)
+            }
+            "grpc" -> {
+                val serviceName = profile.grpcServiceName?.takeIf { it.isNotEmpty() }
+                    ?: throw ProfileFormatFailure("INVALID_VLESS_CONFIG")
+                val grpc = JSONObject().put("serviceName", serviceName)
+                    .put("multiMode", profile.grpcMultiMode)
+                profile.grpcAuthority?.let { grpc.put("authority", it) }
+                stream.put("grpcSettings", grpc)
+            }
+            else -> throw ProfileFormatFailure("UNSUPPORTED_TRANSPORT")
+        }
         if (profile.security == "reality") {
             // Current Xray names the server's public key "password"; 3x-ui exports it as pbk.
             security.put("password", profile.realityPublicKey)

@@ -165,9 +165,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         case 'UNSUPPORTED_PROFILE':
           return 'Этот формат пока не поддерживается. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.';
         case 'UNSUPPORTED_TRANSPORT':
-          return 'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY.';
+          return 'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY либо WebSocket или gRPC с TLS.';
         case 'UNSUPPORTED_SECURITY':
-          return 'Для VLESS нужны TLS с проверкой сертификата или REALITY. Проверьте настройки клиента в 3x-ui.';
+          return 'Для VLESS нужен TLS с проверкой сертификата или REALITY. REALITY доступен только с TCP (Raw).';
         case 'UNSUPPORTED_PROFILE_OPTION':
           return 'В ссылке VLESS есть параметры, которые пока не поддерживаются. Откройте подсказку ⓘ в редакторе профиля.';
         case 'PROFILE_LOAD_FAILED':
@@ -916,7 +916,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.36.0',
+            version: '0.37.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,

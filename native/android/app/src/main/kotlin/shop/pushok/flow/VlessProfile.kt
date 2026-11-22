@@ -9,8 +9,8 @@ import java.util.Collections
 import java.util.Locale
 
 /**
- * The deliberately bounded first 3x-ui subset: one VLESS RAW/TCP client using TLS
- * or REALITY, optionally with Vision. There is no subscription fetch or JSON import.
+ * A bounded 3x-ui subset: one VLESS RAW/TCP client using TLS or REALITY (optional
+ * Vision), or WebSocket/gRPC using TLS. No subscription fetch or JSON import.
  *
  * Field semantics: https://github.com/XTLS/Xray-core/discussions/716
  * Current 3x-ui export: https://github.com/MHSanaei/3x-ui/blob/main/internal/sub/service.go
@@ -29,13 +29,21 @@ object VlessProfile {
         val realityShortId: String?,
         val spiderX: String?,
         val alpn: List<String>,
+        val transport: String,
+        val wsPath: String?,
+        val wsHost: String?,
+        val grpcServiceName: String?,
+        val grpcAuthority: String?,
+        val grpcMultiMode: Boolean,
     ) {
         override fun toString() = "VlessProfile.Parsed(<redacted>)"
     }
 
     private val uuidPattern = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-    private val knownFields = setOf("type", "encryption", "security", "flow", "sni", "fp", "alpn",
-        "pbk", "sid", "spx", "headerType", "allowInsecure", "support-x25519mlkem768")
+    private val commonFields = setOf("type", "encryption", "security", "flow", "sni", "fp", "alpn",
+        "pbk", "sid", "spx", "allowInsecure", "support-x25519mlkem768")
+    private val transportFields = mapOf("raw" to setOf("headerType"),
+        "ws" to setOf("path", "host"), "grpc" to setOf("serviceName", "authority", "mode"))
     private val tlsFingerprints = setOf("chrome", "firefox", "safari", "ios", "android", "edge",
         "360", "qq", "random", "randomized")
     // Current REALITY documentation only guarantees MLKEM on these fingerprints.
@@ -85,19 +93,30 @@ object VlessProfile {
         // Fragments are a label, never native config, a URL to load, or an implicit profile name.
         uri.rawFragment?.let { if (decode(it).any(::unsafeCharacter)) invalid() }
         val fields = parseQuery(uri.rawQuery)
-        if ((fields["type"] ?: "tcp") !in setOf("tcp", "raw")) {
+        val transport = when (fields["type"] ?: "tcp") {
+            "tcp", "raw" -> "raw"
+            "ws" -> "ws"
+            "grpc" -> "grpc"
+            else -> fail("UNSUPPORTED_TRANSPORT")
+        }
+        if (transport == "raw" && (fields["headerType"] ?: "none") != "none") {
             fail("UNSUPPORTED_TRANSPORT")
         }
-        if ((fields["headerType"] ?: "none") != "none") fail("UNSUPPORTED_TRANSPORT")
-        if (fields.keys.any { it !in knownFields }) fail("UNSUPPORTED_PROFILE_OPTION")
+        if (fields.keys.any { it !in commonFields && it !in transportFields.getValue(transport) }) {
+            fail("UNSUPPORTED_PROFILE_OPTION")
+        }
         if ((fields["encryption"] ?: "none") != "none") fail("UNSUPPORTED_SECURITY")
         val security = fields["security"]
-        if (security !in setOf("tls", "reality")) fail("UNSUPPORTED_SECURITY")
+        if (security !in setOf("tls", "reality") || (security == "reality" && transport != "raw")) {
+            fail("UNSUPPORTED_SECURITY")
+        }
         if (fields["allowInsecure"]?.let { it !in setOf("0", "false") } == true) {
             fail("UNSUPPORTED_SECURITY")
         }
         val flow = fields["flow"]?.takeIf { it.isNotEmpty() }
-        if (flow != null && flow != "xtls-rprx-vision") fail("UNSUPPORTED_PROFILE_OPTION")
+        if (flow != null && (flow != "xtls-rprx-vision" || transport != "raw")) {
+            fail("UNSUPPORTED_PROFILE_OPTION")
+        }
         val serverName = fields["sni"]?.let(::normalizeHost) ?: host
         val fingerprint = fields["fp"] ?: if (security == "tls") "chrome" else invalid()
         if (fingerprint !in if (security == "reality") realityFingerprints else tlsFingerprints) {
@@ -105,12 +124,32 @@ object VlessProfile {
         }
         val alpn = fields["alpn"]?.let { value ->
             if (security != "tls") fail("UNSUPPORTED_PROFILE_OPTION")
+            // 3x-ui's QR exporter writes alpn= for an empty configured list.
+            // The official libXray importer treats that as the core's default.
+            if (value.isEmpty()) return@let emptyList()
             val protocols = value.split(',')
             if (protocols.size > 8 || protocols.size != protocols.distinct().size ||
                 protocols.any { item -> item.isEmpty() || item.length > 255 ||
                     item.any { it.code !in 33..126 } }) invalid()
             Collections.unmodifiableList(protocols.toList())
         } ?: emptyList()
+        // The pinned core rewrites other WS lists during its uTLS handshake.
+        // Reject incompatible requests rather than pretending their ALPN survives.
+        if (transport == "ws" && alpn !in listOf(emptyList(), listOf("http/1.1"), listOf("h2", "http/1.1"))) {
+            fail("UNSUPPORTED_PROFILE_OPTION")
+        }
+        if (transport == "grpc" && alpn !in listOf(emptyList(), listOf("h2"), listOf("h2", "http/1.1"))) {
+            fail("UNSUPPORTED_PROFILE_OPTION")
+        }
+        val wsPath = if (transport == "ws") validateWsPath(fields["path"]) else null
+        val wsHost = if (transport == "ws") normalizeAuthority(fields["host"]) else null
+        val grpcServiceName = if (transport == "grpc") validateGrpcServiceName(fields["serviceName"]) else null
+        val grpcAuthority = if (transport == "grpc") normalizeAuthority(fields["authority"]) else null
+        val grpcMultiMode = if (transport == "grpc") when (fields["mode"] ?: "gun") {
+            "gun" -> false
+            "multi" -> true
+            else -> fail("UNSUPPORTED_PROFILE_OPTION")
+        } else false
         var publicKey: String? = null
         var shortId: String? = null
         var spiderX: String? = null
@@ -132,7 +171,8 @@ object VlessProfile {
             fail("UNSUPPORTED_PROFILE_OPTION")
         }
         return Parsed(uuid.lowercase(Locale.ROOT), host, port, security!!, serverName,
-            fingerprint, flow, publicKey, shortId, spiderX, alpn)
+            fingerprint, flow, publicKey, shortId, spiderX, alpn, transport,
+            wsPath, wsHost, grpcServiceName, grpcAuthority, grpcMultiMode)
     }
 
     private fun parseQuery(query: String?): Map<String, String> {
@@ -144,15 +184,19 @@ object VlessProfile {
             val equal = pair.indexOf('=')
             if (equal <= 0) invalid()
             val key = decode(pair.substring(0, equal))
-            val value = decode(pair.substring(equal + 1))
+            // New transport fields follow 3x-ui's URLSearchParams/url.Values
+            // serialization: a space is '+', a literal '+' is '%2B'. Legacy RAW
+            // fields keep the existing importer semantics across app upgrades.
+            val value = decode(pair.substring(equal + 1), plusAsSpace = key in
+                setOf("path", "host", "serviceName", "authority"))
             if (!Regex("^[A-Za-z][A-Za-z0-9-]{0,63}$").matches(key) ||
                 value.any(::unsafeCharacter) || result.put(key, value) != null) invalid()
         }
         return result
     }
 
-    /** decodeURIComponent semantics: '+' is literal and malformed UTF-8 fails closed. */
-    private fun decode(raw: String): String {
+    /** Decode percent escapes exactly once; malformed UTF-8 always fails closed. */
+    private fun decode(raw: String, plusAsSpace: Boolean = false): String {
         val source = raw.toByteArray(StandardCharsets.UTF_8)
         val output = ByteArray(source.size)
         var input = 0
@@ -165,12 +209,76 @@ object VlessProfile {
                     val b = source[input + 2].toInt().toChar().digitToIntOrNull(16) ?: invalid()
                     output[count++] = ((a shl 4) or b).toByte()
                     input += 3
-                } else output[count++] = source[input++]
+                } else {
+                    val next = source[input++]
+                    output[count++] = if (plusAsSpace && next == '+'.code.toByte()) ' '.code.toByte() else next
+                }
             }
             return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
                 .decode(ByteBuffer.wrap(output, 0, count)).toString()
         } finally { source.fill(0); output.fill(0) }
+    }
+
+    /** HTTP Host/:authority is one host with an optional port, never a URL or a list. */
+    private fun normalizeAuthority(value: String?): String? {
+        if (value.isNullOrEmpty()) return null
+        if (value.length > 320 || value.any { unsafeCharacter(it) || it.isWhitespace() }) invalid()
+        val host: String
+        val port: String?
+        if (value.startsWith('[')) {
+            val end = value.indexOf(']')
+            if (end <= 1 || !validIpv6(value.substring(1, end))) invalid()
+            host = "[${normalizeHost(value.substring(1, end))}]"
+            port = if (end == value.lastIndex) null else {
+                if (value.getOrNull(end + 1) != ':') invalid()
+                value.substring(end + 2)
+            }
+        } else {
+            if (value.count { it == ':' } > 1) invalid()
+            host = normalizeHost(value.substringBefore(':'))
+            port = if (':' in value) value.substringAfter(':') else null
+        }
+        if (port != null && (!Regex("^[0-9]{1,5}$").matches(port) ||
+                port.toIntOrNull()?.let { it in 1..65535 } != true)) invalid()
+        return host + if (port == null) "" else ":$port"
+    }
+
+    private fun validateWsPath(value: String?): String {
+        val path = value?.takeIf { it.isNotEmpty() } ?: "/"
+        if (path.length > 4096 || !path.startsWith('/') ||
+            path.any { unsafeCharacter(it) || it.isWhitespace() } || '\\' in path) invalid()
+        // Parsing here only validates syntax. Do not use decoded URI.path or
+        // rebuild the URI: an escaped slash/query token must survive unchanged.
+        val parsed = URI("https://profile.invalid$path")
+        if (parsed.rawAuthority != "profile.invalid" || parsed.rawFragment != null) invalid()
+        var earlyDataSeen = false
+        parsed.rawQuery?.split('&')?.forEach { part ->
+            if (';' in part) invalid() // Go's url.Values would discard this query component.
+            val key = decode(part.substringBefore('='), plusAsSpace = true)
+            if (key == "ed") {
+                if (earlyDataSeen || '=' !in part) invalid()
+                earlyDataSeen = true
+                val amount = decode(part.substringAfter('='), plusAsSpace = true)
+                if (!Regex("^[0-9]{1,4}$").matches(amount) || amount.toInt() > 8192) invalid()
+            }
+        }
+        return path
+    }
+
+    private fun validateGrpcServiceName(value: String?): String {
+        val name = value ?: invalid()
+        if (name.isEmpty() || name.length > 1024 || name.any(::unsafeCharacter)) invalid()
+        // The current core supports a custom path beginning with '/', where the
+        // final component is the stream name. Keep its escaping and punctuation.
+        if (name.startsWith('/')) {
+            if (name.count { it == '/' } < 2 || name.endsWith('/')) invalid()
+            val streamNames = name.substringAfterLast('/').split('|')
+            // Xray only reads the first two names (Tun and TunMulti). Do not
+            // accept an ignored third name or an empty selected stream name.
+            if (streamNames.size > 2 || streamNames.any { it.isEmpty() }) invalid()
+        }
+        return name
     }
 
     private fun normalizeHost(raw: String): String {

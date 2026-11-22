@@ -43,11 +43,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   static const _unsupportedProfile =
       'Этот формат пока не поддерживается. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.';
   static const _unsupportedTransport =
-      'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY.';
+      'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY либо WebSocket или gRPC с TLS.';
   static const _invalidVless =
       'Некорректная ссылка VLESS. Скопируйте полную ссылку клиента из 3x-ui.';
   static const _unsupportedSecurity =
-      'Для VLESS нужны TLS с проверкой сертификата или REALITY. Проверьте настройки клиента в 3x-ui.';
+      'Для VLESS нужен TLS с проверкой сертификата или REALITY. REALITY доступен только с TCP (Raw).';
   static const _unsupportedOption =
       'В ссылке VLESS есть параметры, которые пока не поддерживаются. Проверьте варианты подключения в подсказке ⓘ.';
   late final TextEditingController _controller;
@@ -303,8 +303,9 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         content: const Text(
           'В 3x-ui откройте нужного клиента и скопируйте его полную ссылку VLESS '
           'или откройте QR-код. Поддерживаются TCP (Raw) с TLS или REALITY, '
-          'включая XTLS Vision. Другие протоколы, транспорты и ссылки подписки '
-          'пока не поддерживаются.\n\n'
+          'включая XTLS Vision. WebSocket и gRPC поддерживаются только с TLS, без Vision. '
+          'Проверка сертификата TLS обязательна. REALITY доступен только с TCP (Raw). '
+          'Другие протоколы, транспорты и ссылки подписки пока не поддерживаются.\n\n'
           'Если код открыт на другом устройстве, нажмите «Сканировать QR». '
           'Если он сохранён на этом телефоне, нажмите «QR из фото» и выберите изображение. '
           'Ссылку можно вставить кнопкой «Вставить» или импортировать из текстового файла.\n\n'

@@ -48,5 +48,63 @@ fun main() {
     check(realitySettings.getString("fingerprint") == "chrome")
     check(!realitySettings.has("allowInsecure") && !realitySettings.has("show"))
     check(reality.getJSONObject("env").getString("xray.tun.fd") == "91")
-    println("Xray generated TLS/REALITY config, identity, TUN ownership, strict TLS and no-direct-fallback checks passed")
+
+    fun transported(query: String): JSONObject {
+        val config = JSONObject(XrayConfig.build(VlessProfile.parse(prefix + query), 97))
+        check(config.getJSONObject("env").getString("xray.tun.fd") == "97")
+        check(config.getJSONObject("log").getString("loglevel") == "none")
+        check(config.getJSONObject("log").getString("access") == "none")
+        check(config.getJSONObject("log").getString("error") == "none")
+        check(config.getJSONArray("inbounds").length() == 1)
+        check(config.getJSONArray("inbounds").getJSONObject(0).getString("protocol") == "tun")
+        check(config.getJSONArray("outbounds").length() == 1)
+        val selected = config.getJSONArray("outbounds").getJSONObject(0)
+        check(selected.getString("protocol") == "vless")
+        check(!selected.has("mux")) // gRPC has its own transport multiplexing.
+        check(!config.has("routing") && !config.has("api"))
+        val account = selected.getJSONObject("settings").getJSONArray("vnext").getJSONObject(0)
+            .getJSONArray("users").getJSONObject(0)
+        check(!account.has("flow")) // This release keeps Vision on RAW/TCP only.
+        val transport = selected.getJSONObject("streamSettings")
+        check(transport.getString("security") == "tls")
+        check(!transport.has("realitySettings"))
+        return transport
+    }
+
+    val websocket = transported("?type=ws&security=tls&sni=front.example&host=cdn.example%3A8443&" +
+        "path=%2Fflow%3Fx%3D1%26y%3D2&alpn=http%2F1.1")
+    check(websocket.getString("network") == "ws")
+    check(websocket.getJSONObject("wsSettings").getString("path") == "/flow?x=1&y=2")
+    check(websocket.getJSONObject("wsSettings").getString("host") == "cdn.example:8443")
+    check(!websocket.getJSONObject("wsSettings").has("headers"))
+    check(!websocket.has("grpcSettings"))
+    check(websocket.getJSONObject("tlsSettings").getString("serverName") == "front.example")
+    check(websocket.getJSONObject("tlsSettings").getJSONArray("alpn").toString() == "[\"http/1.1\"]")
+
+    val websocketDefaults = transported("?type=ws&security=tls&path=&host=")
+    check(websocketDefaults.getJSONObject("wsSettings").getString("path") == "/")
+    check(!websocketDefaults.getJSONObject("wsSettings").has("host"))
+    check(!websocketDefaults.getJSONObject("tlsSettings").has("alpn")) // Core selects HTTP/1.1.
+    val websocketAlpn = transported("?type=ws&security=tls&alpn=h2%2Chttp%2F1.1")
+    check(websocketAlpn.getJSONObject("tlsSettings").getJSONArray("alpn").toString() == "[\"h2\",\"http/1.1\"]")
+
+    val grpc = transported("?type=grpc&security=tls&sni=front.example&serviceName=flow%2Bservice&" +
+        "authority=grpc.example%3A8443&mode=multi&alpn=h2%2Chttp%2F1.1")
+    check(grpc.getString("network") == "grpc")
+    check(grpc.getJSONObject("grpcSettings").getString("serviceName") == "flow+service")
+    check(grpc.getJSONObject("grpcSettings").getString("authority") == "grpc.example:8443")
+    check(grpc.getJSONObject("grpcSettings").getBoolean("multiMode"))
+    check(!grpc.has("wsSettings"))
+    check(grpc.getJSONObject("tlsSettings").getString("serverName") == "front.example")
+    check(grpc.getJSONObject("tlsSettings").getJSONArray("alpn").toString() == "[\"h2\",\"http/1.1\"]")
+
+    val grpcDefaults = transported("?type=grpc&security=tls&serviceName=flow&authority=")
+    check(!grpcDefaults.getJSONObject("grpcSettings").getBoolean("multiMode"))
+    check(!grpcDefaults.getJSONObject("grpcSettings").has("authority"))
+    check(!grpcDefaults.getJSONObject("tlsSettings").has("alpn")) // Core starts with h2.
+    val grpcCustomPath = transported("?type=grpc&security=tls&serviceName=%2Fcustom%2FTun&mode=gun&alpn=h2")
+    check(grpcCustomPath.getJSONObject("grpcSettings").getString("serviceName") == "/custom/Tun")
+    check(!grpcCustomPath.getJSONObject("grpcSettings").getBoolean("multiMode"))
+    check(grpcCustomPath.getJSONObject("tlsSettings").getJSONArray("alpn").toString() == "[\"h2\"]")
+    println("Xray RAW/TLS/REALITY, WebSocket/gRPC TLS, transport fields, ALPN, TUN and no-direct-fallback checks passed")
 }

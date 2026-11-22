@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "checked_at_utc": "2026-11-22T12:08:44.708448+00:00",
+  "baseline_commit": "24f28322d041be75c12a0ecbdc3c2142c30d72b3",
+  "upstream_version": "26.11.9",
+  "core_source_commit": "676eaf66f8f05d4d558ee7a74b4736623d3feeb9",
+  "wrapper_source_commit": "5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3",
+  "upstream_linux_archive_sha256": "c9ef50234579c8bd7120e50428494c15bc760a45b87c6d60538636ecf7aa12c3",
+  "upstream_linux_library_sha256": "cb7b949fe682459b5d8d0239b444a8483bea97c09184b148136ec50e6245bcb3",
+  "source_files_sha256": {
+    "native/android/app/src/main/kotlin/shop/pushok/flow/XrayConfig.kt": "18883fcd37ba5fe927a958dc4c8e8b120cd343131c354ea176b2513a725a3f80",
+    "native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt": "36b44e65c1c79981591a52be61b46f3a8191f032247306f38383fe06992e9582",
+    "native/android/tests/XrayConfigCheck.kt": "4a02c8e24af7494b4212a68349f6358107b6d21f2b573b4d37f1b0c454ae9dfb"
+  },
+  "checks": [
+    {
+      "case": "websocket_3xui_empty_fields",
+      "transport": "ws",
+      "security": "tls",
+      "configuration_sha256": "6914d4d6c44a50b71110bc65873f74cf1e462cb176c6fe63371aa3ade45873a4",
+      "tls_alpn": null,
+      "multi_mode": null,
+      "success": true
+    },
+    {
+      "case": "websocket_host_port_and_query",
+      "transport": "ws",
+      "security": "tls",
+      "configuration_sha256": "70be0dfb7fd1c61fefcbbf7059bc812a1db817f68c86f4c88e1f319388c67b30",
+      "tls_alpn": [
+        "http/1.1"
+      ],
+      "multi_mode": null,
+      "success": true
+    },
+    {
+      "case": "websocket_explicit_mixed_alpn",
+      "transport": "ws",
+      "security": "tls",
+      "configuration_sha256": "5363cb0364e0cb02479d8955b7295b4b575bb7cebc8a870cc8d086bbbe471522",
+      "tls_alpn": [
+        "h2",
+        "http/1.1"
+      ],
+      "multi_mode": null,
+      "success": true
+    },
+    {
+      "case": "websocket_percent_encoded_path",
+      "transport": "ws",
+      "security": "tls",
+      "configuration_sha256": "764ac0c4d1a0398ed44a295a12489e6fc16320b5e77101b23b7301ccb4d9b1fc",
+      "tls_alpn": null,
+      "multi_mode": null,
+      "success": true
+    },
+    {
+      "case": "grpc_default_mode",
+      "transport": "grpc",
+      "security": "tls",
+      "configuration_sha256": "db24adc37fb5012c8882443af8221aa2a3b1e0a5780f91e2f7834fc7f66955fa",
+      "tls_alpn": null,
+      "multi_mode": false,
+      "success": true
+    },
+    {
+      "case": "grpc_explicit_gun_h2",
+      "transport": "grpc",
+      "security": "tls",
+      "configuration_sha256": "4069226b73e8b21fc93dee4a283fa31386afc5cc76f982c36c6bef628e50417b",
+      "tls_alpn": [
+        "h2"
+      ],
+      "multi_mode": false,
+      "success": true
+    },
+    {
+      "case": "grpc_multi_authority_port",
+      "transport": "grpc",
+      "security": "tls",
+      "configuration_sha256": "b706f37b0f2022dcc44cc047283f3d1805b3fa12733668a962ec5a1d589575ca",
+      "tls_alpn": [
+        "h2",
+        "http/1.1"
+      ],
+      "multi_mode": true,
+      "success": true
+    },
+    {
+      "case": "grpc_custom_service_path",
+      "transport": "grpc",
+      "security": "tls",
+      "configuration_sha256": "3bab1cc83754cf2fd4c3364c9919c91751a7d5bb786d30582065fb5fe983d752",
+      "tls_alpn": null,
+      "multi_mode": true,
+      "success": true
+    }
+  ],
+  "negative_controls": [
+    {
+      "case": "unknown_outbound_protocol",
+      "rejected": true
+    },
+    {
+      "case": "websocket_path_wrong_type",
+      "rejected": true
+    },
+    {
+      "case": "grpc_multi_mode_wrong_type",
+      "rejected": true
+    }
+  ],
+  "core_running_after_tests": false,
+  "network_connections_started": false,
+  "scope": "Construct and close generated configurations with the official Linux libXray; no TUN start, no server connection, no Android device acceptance test."
+}
