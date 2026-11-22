@@ -115,9 +115,16 @@ Future<void> _nav(WidgetTester tester, String label) async {
 
 Future<void> _reveal(WidgetTester tester, Finder finder) async {
   if (finder.evaluate().isEmpty) {
-    await tester.scrollUntilVisible(finder, 180,
-      scrollable: find.descendant(of: find.byKey(const Key('routes_list')),
-        matching: find.byType(Scrollable)).first);
+    final scrollable = find.descendant(of: find.byKey(const Key('routes_list')),
+      matching: find.byType(Scrollable)).first;
+    // A lazy header may have been disposed after inspecting a lower route.
+    // Start at the top before searching down, so either direction is reachable.
+    final position = tester.state<ScrollableState>(scrollable).position;
+    position.jumpTo(position.minScrollExtent);
+    await tester.pump();
+    if (finder.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(finder, 180, scrollable: scrollable);
+    }
   }
   await tester.ensureVisible(finder);
   await tester.pump();
