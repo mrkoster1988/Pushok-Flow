@@ -1,0 +1,76 @@
+{
+  "recordedAtUtc": "2026-11-22T15:42:59.830411+00:00",
+  "scope": "Synthetic offline image-import regression; not a diagnosis of the user recording or physical camera verification.",
+  "syntheticPayloadsOnly": true,
+  "networkConnectionsStarted": false,
+  "baselineSourceCommit": "0f85c861b1fd2192decfcbfbefaba046706629f4",
+  "pinnedDecoder": {
+    "name": "ZXing core",
+    "version": "3.5.4",
+    "sha256": "71de5d89341b5fcf5dd89da7f44e84d825d0e084cdf3ec77c9abe26b0f0ceb13"
+  },
+  "beforeSourceSha256": "83fcc77cc5d95def19cefbfd28177019691a11b964faf8011593fb158929c623",
+  "afterSourceSha256": "704aa62401a437b7ef6eea32accdc718025cf8032d6795895e8a5b52fe334ddd",
+  "executableRegressionSuite": {
+    "path": "native/android/tests/ProfileQrImportCheck.kt",
+    "sha256": "b8a589b29b50a24e03a61887f9efc44f2a64139f263aef23f716a9aa177a2fea",
+    "result": "passed",
+    "covers": [
+      "WireGuard/VLESS RAW/WebSocket/gRPC payload validation",
+      "transparent and translucent ARGB composition",
+      "normal and inverted polarity",
+      "same or different payloads at multiple physical locations",
+      "multiple polarities counted before payload validation",
+      "Structured Append complete groups, inverted/mixed groups and incomplete segment",
+      "invisible RGB cannot supply QR contents",
+      "image byte/pixel bounds, cancellation and owner session"
+    ]
+  },
+  "cases": [
+    {
+      "name": "opaque_single",
+      "before": "ACCEPTED_SYNTHETIC_PROFILE",
+      "after": "ACCEPTED_SYNTHETIC_PROFILE"
+    },
+    {
+      "name": "transparent_background",
+      "before": "PROFILE_QR_NOT_FOUND",
+      "after": "ACCEPTED_SYNTHETIC_PROFILE"
+    },
+    {
+      "name": "translucent_foreground",
+      "before": "PROFILE_QR_NOT_FOUND",
+      "after": "ACCEPTED_SYNTHETIC_PROFILE"
+    },
+    {
+      "name": "inverted_single",
+      "before": "PROFILE_QR_NOT_FOUND",
+      "after": "ACCEPTED_SYNTHETIC_PROFILE"
+    },
+    {
+      "name": "mixed_polarity_two_payloads",
+      "before": "ACCEPTED_SYNTHETIC_PROFILE",
+      "after": "PROFILE_QR_MULTIPLE"
+    },
+    {
+      "name": "same_payload_two_locations",
+      "before": "PROFILE_QR_MULTIPLE",
+      "after": "PROFILE_QR_MULTIPLE"
+    },
+    {
+      "name": "same_payload_mixed_polarity",
+      "before": "ACCEPTED_SYNTHETIC_PROFILE",
+      "after": "PROFILE_QR_MULTIPLE"
+    },
+    {
+      "name": "fully_invisible_hidden_rgb",
+      "before": "ACCEPTED_SYNTHETIC_PROFILE",
+      "after": "PROFILE_QR_NOT_FOUND"
+    },
+    {
+      "name": "structured_append_two_physical_symbols",
+      "before": "ACCEPTED_SYNTHETIC_PROFILE",
+      "after": "PROFILE_QR_MULTIPLE"
+    }
+  ]
+}

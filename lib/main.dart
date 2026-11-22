@@ -918,7 +918,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.37.0',
+            version: '0.38.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,

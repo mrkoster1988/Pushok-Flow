@@ -26,6 +26,24 @@ const _qrImage = Key('import_wireguard_profile_qr_image');
 const _info = Key('info_wireguard_profile');
 const _close = Key('close_wireguard_profile');
 const _visibility = Key('toggle_wireguard_profile_visibility');
+const _copyImportError = Key('copy_profile_import_error');
+const _copyImportNotice = Key('profile_import_copy_notice');
+
+void _captureClipboardWrites(List<String> writes,
+    {Future<void> Function()? onWrite, String? pasteText}) {
+  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+    if (call.method == 'Clipboard.setData') {
+      writes.add((call.arguments as Map)['text'] as String);
+      await onWrite?.call();
+    }
+    if (call.method == 'Clipboard.getData' && pasteText != null) {
+      return {'text': pasteText};
+    }
+    return null;
+  });
+  addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+}
 
 Future<void> _openEditor(
   WidgetTester tester, {
@@ -1089,7 +1107,8 @@ void main() {
       ('PROFILE_QR_CAMERA_DENIED', 'Для сканирования нужен доступ к камере.'),
       ('PROFILE_QR_UNAVAILABLE', 'Сканирование QR недоступно.'),
       ('PROFILE_QR_NOT_FOUND', 'На изображении не найден QR-код.'),
-      ('PROFILE_QR_MULTIPLE', 'На изображении несколько QR-кодов.'),
+      ('PROFILE_QR_MULTIPLE',
+        'Выберите изображение с одним полным QR-кодом профиля. Несколько или составные QR-коды не поддерживаются.'),
       ('PROFILE_QR_IMAGE_TOO_LARGE', 'Изображение слишком большое.'),
       ('PROFILE_IMPORT_INVALID', 'В QR-коде нет поддерживаемого профиля.'),
       ('INVALID_VLESS_CONFIG', 'Некорректная ссылка VLESS.'),
@@ -1118,6 +1137,348 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     }
+  });
+
+  for (final source in [
+    ('file', _import, 'PROFILE_IMPORT_INVALID', 'Файл'),
+    ('camera', _scanQr, 'PROFILE_QR_CAMERA_DENIED', 'Камера QR'),
+    ('image', _qrImage, 'PROFILE_QR_NOT_FOUND', 'QR из фото'),
+  ]) {
+    final kind = source.$1;
+    testWidgets('$kind error copies fixed diagnostics only after an explicit tap',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final writes = <String>[];
+      _captureClipboardWrites(writes);
+      final code = source.$3;
+      final label = source.$4;
+      Future<String?> fail() async => throw PlatformException(code: code,
+          message: 'PRIVATE_NATIVE_MESSAGE',
+          details: {'address': 'PRIVATE_SERVER', 'privateKey': 'PRIVATE_KEY'});
+      await _openEditor(tester, textScale: 2.2,
+        initialConfig: _vless, initialName: 'PRIVATE_PROFILE_NAME',
+        onImport: fail, onScanQr: fail, onImportQrImage: fail,
+        onSave: (_, _) async {},
+      );
+      expect(find.byKey(_copyImportError), findsNothing);
+      expect(writes, isEmpty);
+      await _tapEditorKey(tester, source.$2);
+      await tester.pumpAndSettle();
+      final message = tester.widget<Text>(
+          find.byKey(const Key('wireguard_profile_error'))).data!;
+      expect(writes, isEmpty);
+      expect(find.byKey(_copyImportError), findsOneWidget);
+      await tester.ensureVisible(find.byKey(_copyImportError));
+      await tester.pumpAndSettle();
+      final button = tester.getRect(find.byKey(_copyImportError));
+      expect(button.left, greaterThanOrEqualTo(0));
+      expect(button.right, lessThanOrEqualTo(360));
+      expect(find.byKey(_copyImportError).hitTestable(), findsOneWidget);
+      await _tapEditorKey(tester, _copyImportError);
+      await tester.pumpAndSettle();
+      expect(writes, [
+        'Pushok Flow — ошибка импорта профиля\n'
+        'Источник: $label\nКод: $code\n$message',
+      ]);
+      for (final private in ['PRIVATE_', _vless, 'example.invalid',
+          '00000000-0000-4000-8000-000000000001']) {
+        expect(writes.single, isNot(contains(private)));
+      }
+      expect(find.text('Текст ошибки скопирован.'), findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _vless);
+      expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('Unknown native codes and unexpected exceptions cannot enter copied diagnostics',
+      (tester) async {
+    final writes = <String>[];
+    _captureClipboardWrites(writes);
+    for (final failure in [
+      PlatformException(code: 'PRIVATE_UNKNOWN_CODE\nPRIVATE_KEY',
+          message: 'PRIVATE_NATIVE_MESSAGE', details: {'uri': 'PRIVATE_DOCUMENT_URI'}),
+      StateError('PRIVATE_UNEXPECTED_EXCEPTION'),
+    ]) {
+      await _openEditor(tester, initialConfig: _config,
+        onImportQrImage: () async => throw failure,
+        onSave: (_, _) async {},
+      );
+      await _tapEditorKey(tester, _qrImage);
+      await tester.pumpAndSettle();
+      final before = writes.length;
+      await _tapEditorKey(tester, _copyImportError);
+      await tester.pumpAndSettle();
+      expect(writes, hasLength(before + 1));
+      expect(writes.last, contains('Код: PROFILE_IMPORT_FAILED'));
+      expect(writes.last, contains('Источник: QR из фото'));
+      expect(writes.last, contains('Не удалось прочитать QR-код.'));
+      expect(writes.last, isNot(contains('PRIVATE_')));
+      expect(writes.last, isNot(contains('ui-test-key')));
+      expect(find.textContaining('PRIVATE_'), findsNothing);
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('Client-side import validation exports a safe code without the returned value',
+      (tester) async {
+    final writes = <String>[];
+    _captureClipboardWrites(writes);
+    for (final invalid in [
+      ('https://private.example.invalid/subscription/PRIVATE_SUBSCRIPTION', 'UNSUPPORTED_PROFILE'),
+      ('00000000-0000-4000-8000-000000000002', 'INVALID_VLESS_CONFIG'),
+      ('PRIVATE_PROFILE' * 6000, 'PROFILE_IMPORT_TOO_LARGE'),
+    ]) {
+      await _openEditor(tester, initialConfig: _config,
+        onImport: () async => invalid.$1,
+        onSave: (_, _) async {},
+      );
+      await _tapEditorKey(tester, _import);
+      await tester.pumpAndSettle();
+      await _tapEditorKey(tester, _copyImportError);
+      await tester.pumpAndSettle();
+      final code = invalid.$2;
+      expect(writes.last, contains('Код: $code'));
+      expect(writes.last, contains('Источник: Файл'));
+      expect(writes.last, isNot(contains(invalid.$1)));
+      expect(writes.last, isNot(contains('PRIVATE_')));
+      expect(writes.last, isNot(contains('example.invalid')));
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('Retry clears old import diagnostics and cancellation or success never restores them',
+      (tester) async {
+    final writes = <String>[];
+    _captureClipboardWrites(writes);
+    final retry = Completer<String?>();
+    var reads = 0;
+    await _openEditor(tester, initialConfig: _config,
+      onImportQrImage: () async {
+        reads++;
+        if (reads == 1 || reads == 3) {
+          throw PlatformException(code: 'PROFILE_QR_NOT_FOUND');
+        }
+        if (reads == 2) return retry.future;
+        return _vlessGrpc;
+      },
+      onSave: (_, _) async {},
+    );
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pumpAndSettle();
+    final oldCopy = tester.widget<TextButton>(find.byKey(_copyImportError)).onPressed!;
+    await _tapEditorKey(tester, _copyImportError);
+    await tester.pumpAndSettle();
+    expect(writes, hasLength(1));
+    expect(find.byKey(_copyImportNotice), findsOneWidget);
+
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pump();
+    expect(find.byKey(_copyImportError), findsNothing);
+    expect(find.byKey(_copyImportNotice), findsNothing);
+    oldCopy();
+    await tester.pump();
+    expect(writes, hasLength(1));
+    retry.complete(null);
+    await tester.pumpAndSettle();
+    oldCopy();
+    await tester.pump();
+    expect(writes, hasLength(1));
+    expect(find.byKey(_copyImportError), findsNothing);
+    expect(find.byKey(const Key('wireguard_profile_error')), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pumpAndSettle();
+    expect(find.byKey(_copyImportError), findsOneWidget);
+    oldCopy();
+    await tester.pump();
+    expect(writes, hasLength(1));
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pumpAndSettle();
+    expect(find.byKey(_copyImportError), findsNothing);
+    expect(find.byKey(_copyImportNotice), findsNothing);
+    expect(find.text('QR-код прочитан. Сохраните профиль.'), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _vlessGrpc);
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(writes, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Editing, pasting and saving remove an earlier import diagnostic',
+      (tester) async {
+    final writes = <String>[];
+    _captureClipboardWrites(writes, pasteText: _vless);
+    for (final action in ['name', 'config', 'paste', 'save']) {
+      await _openEditor(tester, initialConfig: _config,
+        onImportQrImage: () async => throw PlatformException(code: 'PROFILE_QR_NOT_FOUND'),
+        onSave: (_, _) async => throw PlatformException(code: 'INVALID_CONFIG'),
+      );
+      await _tapEditorKey(tester, _qrImage);
+      await tester.pumpAndSettle();
+      final oldCopy = tester.widget<TextButton>(find.byKey(_copyImportError)).onPressed!;
+      await _tapEditorKey(tester, _copyImportError);
+      await tester.pumpAndSettle();
+      final copies = writes.length;
+      if (action == 'name') {
+        await tester.ensureVisible(find.byKey(_name));
+        await tester.enterText(find.byKey(_name), 'Новое название');
+      } else if (action == 'config') {
+        await _tapEditorKey(tester, _visibility);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(_field));
+        await tester.enterText(find.byKey(_field), _vless);
+      } else if (action == 'paste') {
+        await _tapEditorKey(tester, _paste);
+      } else {
+        await _tapSave(tester);
+      }
+      await tester.pumpAndSettle();
+      oldCopy();
+      await tester.pump();
+      expect(writes, hasLength(copies), reason: action);
+      expect(find.byKey(_copyImportError), findsNothing, reason: action);
+      expect(find.byKey(_copyImportNotice), findsNothing, reason: action);
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('An import error before resume cannot copy until a new foreground action',
+      (tester) async {
+    addTearDown(() => tester.binding
+        .handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    final writes = <String>[];
+    _captureClipboardWrites(writes);
+    final read = Completer<String?>();
+    await _openEditor(tester, initialConfig: _config,
+      onImportQrImage: () => read.future,
+      onSave: (_, _) async {},
+    );
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    read.completeError(PlatformException(code: 'PROFILE_QR_NOT_FOUND',
+        message: 'PRIVATE_BACKGROUND_ERROR'));
+    await tester.pumpAndSettle();
+    expect(writes, isEmpty);
+    expect(tester.widget<TextButton>(find.byKey(_copyImportError)).onPressed, isNull);
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    final queuedCopy = tester.widget<TextButton>(find.byKey(_copyImportError)).onPressed!;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    queuedCopy();
+    await tester.pumpAndSettle();
+    expect(writes, isEmpty);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, _copyImportError);
+    await tester.pumpAndSettle();
+    expect(writes, hasLength(1));
+    expect(writes.single, isNot(contains('PRIVATE_')));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A pending clipboard response cannot restore diagnostics after successful import',
+      (tester) async {
+    final writes = <String>[];
+    final copied = Completer<void>();
+    _captureClipboardWrites(writes, onWrite: () => copied.future);
+    var reads = 0;
+    await _openEditor(tester, initialConfig: _config,
+      onImportQrImage: () async {
+        if (++reads == 1) throw PlatformException(code: 'PROFILE_QR_NOT_FOUND');
+        return _vlessWs;
+      },
+      onSave: (_, _) async {},
+    );
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, _copyImportError);
+    await tester.pump();
+    expect(writes, hasLength(1));
+    expect(tester.widget<TextButton>(find.byKey(_copyImportError)).onPressed, isNull);
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pump();
+    expect(find.byKey(_copyImportError), findsNothing);
+    copied.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(_copyImportNotice), findsNothing);
+    expect(find.byKey(const Key('wireguard_profile_error')), findsNothing);
+    expect(find.text('QR-код прочитан. Сохраните профиль.'), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _vlessWs);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Clipboard failures preserve the import error and permit a safe retry',
+      (tester) async {
+    final writes = <String>[];
+    var failCopy = true;
+    _captureClipboardWrites(writes, onWrite: () async {
+      if (failCopy) {
+        throw PlatformException(code: 'PRIVATE_CLIPBOARD_CODE',
+            message: 'PRIVATE_CLIPBOARD_MESSAGE', details: {'key': 'PRIVATE_KEY'});
+      }
+    });
+    await _openEditor(tester, initialConfig: _config,
+      onImport: () async => throw PlatformException(code: 'PROFILE_IMPORT_INVALID'),
+      onSave: (_, _) async {},
+    );
+    await _tapEditorKey(tester, _import);
+    await tester.pumpAndSettle();
+    final error = tester.widget<Text>(
+        find.byKey(const Key('wireguard_profile_error'))).data;
+    await _tapEditorKey(tester, _copyImportError);
+    await tester.pumpAndSettle();
+    expect(find.text('Не удалось скопировать текст ошибки. Попробуйте ещё раз.'), findsOneWidget);
+    expect(find.textContaining('PRIVATE_'), findsNothing);
+    expect(tester.widget<Text>(find.byKey(const Key('wireguard_profile_error'))).data, error);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    expect(tester.widget<TextButton>(find.byKey(_copyImportError)).onPressed, isNotNull);
+    failCopy = false;
+    await _tapEditorKey(tester, _copyImportError);
+    await tester.pumpAndSettle();
+    expect(writes, hasLength(2));
+    expect(writes[0], writes[1]);
+    expect(find.text('Текст ошибки скопирован.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A late clipboard completion after disposal cannot show feedback on another screen',
+      (tester) async {
+    final writes = <String>[];
+    final copied = Completer<void>();
+    _captureClipboardWrites(writes, onWrite: () => copied.future);
+    await _openEditor(tester, initialConfig: _config,
+      onScanQr: () async => throw PlatformException(code: 'PROFILE_QR_NOT_FOUND'),
+      onSave: (_, _) async {},
+    );
+    await _tapEditorKey(tester, _scanQr);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, _copyImportError);
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: Text('Следующий экран')),
+    ));
+    copied.completeError(PlatformException(code: 'PRIVATE_CLIPBOARD_FAILURE'));
+    await tester.pumpAndSettle();
+    expect(writes, hasLength(1));
+    expect(find.text('Следующий экран'), findsOneWidget);
+    expect(find.byKey(_copyImportNotice), findsNothing);
+    expect(find.textContaining('PRIVATE_'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('A pending QR scan blocks every competing import and stale callbacks',
@@ -1260,6 +1621,8 @@ void main() {
     expect(find.textContaining('В 3x-ui'), findsOneWidget);
     expect(find.textContaining('TCP (Raw) с TLS или REALITY'), findsOneWidget);
     expect(find.textContaining('WebSocket и gRPC поддерживаются только с TLS, без Vision.'), findsOneWidget);
+    expect(find.textContaining('на видео он может выглядеть чёрным'), findsOneWidget);
+    expect(find.textContaining('Конфигурация и ключи в него не входят.'), findsOneWidget);
     expect(find.textContaining('QR из фото'), findsWidgets);
     expect(tester.takeException(), isNull);
     await tester.ensureVisible(find.text('Понятно'));

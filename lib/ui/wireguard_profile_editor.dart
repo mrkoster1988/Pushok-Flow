@@ -8,6 +8,25 @@ import '../platform/wireguard_profiles.dart';
 
 enum _ProfileImportSource { file, cameraQr, imageQr }
 
+/// Contains only fixed UI messages and an allowlisted code, never a profile.
+class _ProfileImportFailure {
+  const _ProfileImportFailure(this.code, this.source, this.message);
+
+  final String code;
+  final _ProfileImportSource source;
+  final String message;
+
+  String get clipboardText {
+    final label = switch (source) {
+      _ProfileImportSource.file => 'Файл',
+      _ProfileImportSource.cameraQr => 'Камера QR',
+      _ProfileImportSource.imageQr => 'QR из фото',
+    };
+    return 'Pushok Flow — ошибка импорта профиля\n'
+        'Источник: $label\nКод: $code\n$message';
+  }
+}
+
 /// Edits a local draft and returns it only after the caller saves it successfully.
 class WireGuardProfileEditor extends StatefulWidget {
   const WireGuardProfileEditor({
@@ -50,6 +69,24 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       'Для VLESS нужен TLS с проверкой сертификата или REALITY. REALITY доступен только с TCP (Raw).';
   static const _unsupportedOption =
       'В ссылке VLESS есть параметры, которые пока не поддерживаются. Проверьте варианты подключения в подсказке ⓘ.';
+  static const _safeImportCodes = {
+    'PROFILE_IMPORT_TOO_LARGE',
+    'PROFILE_IMPORT_INVALID',
+    'PROFILE_IMPORT_BUSY',
+    'PROFILE_IMPORT_INTERRUPTED',
+    'PROFILE_IMPORT_UNAVAILABLE',
+    'PROFILE_IMPORT_FAILED',
+    'PROFILE_QR_CAMERA_DENIED',
+    'PROFILE_QR_UNAVAILABLE',
+    'PROFILE_QR_NOT_FOUND',
+    'PROFILE_QR_MULTIPLE',
+    'PROFILE_QR_IMAGE_TOO_LARGE',
+    'UNSUPPORTED_PROFILE',
+    'UNSUPPORTED_TRANSPORT',
+    'UNSUPPORTED_SECURITY',
+    'UNSUPPORTED_PROFILE_OPTION',
+    'INVALID_VLESS_CONFIG',
+  };
   late final TextEditingController _controller;
   late final TextEditingController _nameController;
   final FocusNode _focusNode = FocusNode();
@@ -65,6 +102,9 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   bool _resumed = true;
   String? _error;
   String? _notice;
+  _ProfileImportFailure? _importFailure;
+  bool _copyingImportError = false;
+  String? _importCopyNotice;
 
   bool get _busy => _saving || _pasting || _importing;
   bool get _canReveal {
@@ -133,32 +173,85 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     );
   }
 
-  String? _validationError(String config) {
+  ({String code, String message})? _validationError(String config) {
     if (config.trim().isEmpty) {
-      return 'Добавьте конфигурацию WireGuard или ссылку VLESS перед сохранением.';
+      return (code: 'PROFILE_IMPORT_INVALID',
+          message: 'Добавьте конфигурацию WireGuard или ссылку VLESS перед сохранением.');
     }
     if (config.length > _maxConfigLength) {
-      return 'Профиль слишком большой: максимум 65 536 символов.';
+      return (code: 'PROFILE_IMPORT_TOO_LARGE',
+          message: 'Профиль слишком большой: максимум 65 536 символов.');
     }
     if (RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
         r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(config.trim())) {
-      return 'Вставлен только UUID. Нужна полная ссылка VLESS из 3x-ui '
-          'или профиль WireGuard .conf с разделами [Interface] и [Peer].';
+      return (code: 'INVALID_VLESS_CONFIG',
+          message: 'Вставлен только UUID. Нужна полная ссылка VLESS из 3x-ui '
+              'или профиль WireGuard .conf с разделами [Interface] и [Peer].');
     }
     // Only reject unsupported schemes here. Native code validates every VLESS
     // field; UI parsing must not normalize, log, or partly accept credentials.
     final scheme = RegExp(r'^([A-Za-z][A-Za-z0-9+.-]*)://')
         .firstMatch(config.trim())?.group(1)?.toLowerCase();
     if (scheme == 'http' || scheme == 'https') {
-      return 'Ссылки подписки пока не поддерживаются. Скопируйте ссылку одного клиента VLESS из 3x-ui.';
+      return (code: 'UNSUPPORTED_PROFILE',
+          message: 'Ссылки подписки пока не поддерживаются. Скопируйте ссылку одного клиента VLESS из 3x-ui.');
     }
-    if (scheme != null && scheme != 'vless') return _unsupportedProfile;
+    if (scheme != null && scheme != 'vless') {
+      return (code: 'UNSUPPORTED_PROFILE', message: _unsupportedProfile);
+    }
     return null;
+  }
+
+  void _clearImportFeedback() {
+    _importFailure = null;
+    _importCopyNotice = null;
+  }
+
+  void _setImportFailure(String? code, _ProfileImportSource source,
+      {String? validationMessage}) {
+    final safeCode = _safeImportCodes.contains(code) ? code! : 'PROFILE_IMPORT_FAILED';
+    final message = validationMessage ?? _importError(safeCode, source);
+    setState(() {
+      _error = message;
+      _notice = null;
+      _importFailure = _ProfileImportFailure(safeCode, source, message);
+      _importCopyNotice = null;
+    });
+  }
+
+  Future<void> _copyImportError(_ProfileImportFailure failure) async {
+    if (!mounted || _busy || _copyingImportError || !_canReveal ||
+        !identical(_importFailure, failure) ||
+        ModalRoute.of(context)?.isCurrent == false) return;
+    setState(() {
+      _copyingImportError = true;
+      _importCopyNotice = null;
+    });
+    try {
+      // This is an explicit export of fixed diagnostics. No controller text,
+      // profile name, native message/details or unknown error code is read.
+      await Clipboard.setData(ClipboardData(text: failure.clipboardText));
+      if (mounted && identical(_importFailure, failure)) {
+        setState(() => _importCopyNotice = 'Текст ошибки скопирован.');
+      }
+    } catch (_) {
+      if (mounted && identical(_importFailure, failure)) {
+        setState(() => _importCopyNotice =
+            'Не удалось скопировать текст ошибки. Попробуйте ещё раз.');
+      }
+    } finally {
+      if (mounted) setState(() => _copyingImportError = false);
+    }
   }
 
   Future<void> _paste() async {
     if (!mounted || _busy || !_canReveal) return;
-    setState(() => _pasting = true);
+    setState(() {
+      _pasting = true;
+      _error = null;
+      _notice = null;
+      _clearImportFeedback();
+    });
     try {
       // Clipboard access happens only after the user presses «Вставить».
       final data = await Clipboard.getData(Clipboard.kTextPlain);
@@ -170,7 +263,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       }
       final validation = _validationError(config);
       if (validation != null) {
-        setState(() => _error = validation);
+        setState(() => _error = validation.message);
         return;
       }
       _controller.value = TextEditingValue(
@@ -221,13 +314,15 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       _showConfig = false;
       _error = null;
       _notice = null;
+      _clearImportFeedback();
     });
     try {
       final config = await read();
       if (!mounted || epoch != _importEpoch || config == null) return;
       final validation = _validationError(config);
       if (validation != null) {
-        setState(() => _error = validation);
+        _setImportFailure(validation.code, source,
+            validationMessage: validation.message);
         return;
       }
       // Android may deliver the result before onResume. Only replace the masked
@@ -242,10 +337,10 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       });
     } on PlatformException catch (error) {
       if (!mounted || epoch != _importEpoch) return;
-      setState(() => _error = _importError(error.code, source));
+      _setImportFailure(error.code, source);
     } catch (_) {
       if (mounted && epoch == _importEpoch) {
-        setState(() => _error = _importError(null, source));
+        _setImportFailure(null, source);
       }
     } finally {
       if (mounted && epoch == _importEpoch) {
@@ -284,7 +379,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         'PROFILE_QR_NOT_FOUND' =>
           'На изображении не найден QR-код. Выберите другое фото.',
         'PROFILE_QR_MULTIPLE' =>
-          'На изображении несколько QR-кодов. Выберите фото с одним кодом профиля.',
+          'Выберите изображение с одним полным QR-кодом профиля. Несколько или составные QR-коды не поддерживаются.',
         'PROFILE_QR_IMAGE_TOO_LARGE' =>
           'Изображение слишком большое. Выберите уменьшенную копию или вставьте профиль.',
         _ => file
@@ -314,7 +409,10 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
           'Профили Amnezia пока не поддерживаются.\n\n'
           'Распознавание выполняется на устройстве. Профиль сначала появляется '
           'как скрытый черновик: проверьте название и нажмите «Сохранить профиль» '
-          'или «Сохранить и подключить». При переключении приложений текст скрывается.',
+          'или «Сохранить и подключить». При переключении приложений текст скрывается.\n\n'
+          'Редактор защищён от снимков и записи экрана: на видео он может выглядеть чёрным. '
+          'Если импорт не удался, нажмите «Скопировать ошибку» и передайте текст для проверки. '
+          'Конфигурация и ключи в него не входят.',
         ),
         actions: [TextButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -326,6 +424,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   Future<void> _save() async {
     if (!mounted || _busy || !_canReveal) return;
+    setState(() {
+      _error = null;
+      _notice = null;
+      _clearImportFeedback();
+    });
     final config = _controller.text;
     final name = _nameController.text.trim();
     if (!WireGuardProfiles.isValidName(name)) {
@@ -334,7 +437,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     }
     final validation = _validationError(config);
     if (validation != null) {
-      setState(() => _error = validation);
+      setState(() => _error = validation.message);
       return;
     }
     _focusNode.unfocus();
@@ -396,6 +499,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   @override
   Widget build(BuildContext context) {
+    final importFailure = _importFailure;
     return PopScope<String>(
       canPop: !_saving,
       onPopInvokedWithResult: (didPop, _) {
@@ -458,7 +562,12 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     smartDashesType: SmartDashesType.disabled,
                     smartQuotesType: SmartQuotesType.disabled,
                     onChanged: (_) {
-                      if (_error != null) setState(() => _error = null);
+                      if (_error != null) {
+                        setState(() {
+                          _error = null;
+                          _clearImportFeedback();
+                        });
+                      }
                     },
                     decoration: const InputDecoration(
                       labelText: 'Название профиля',
@@ -490,7 +599,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     smartQuotesType: SmartQuotesType.disabled,
                     onChanged: (_) {
                       if (_error != null || _notice != null) {
-                        setState(() { _error = null; _notice = null; });
+                        setState(() {
+                          _error = null;
+                          _notice = null;
+                          _clearImportFeedback();
+                        });
                       }
                     },
                     decoration: InputDecoration(
@@ -567,6 +680,27 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                         key: const Key('wireguard_profile_error'),
                         style: const TextStyle(color: PushokPalette.orange)),
                     ),
+                    if (importFailure != null) ...[
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          key: const Key('copy_profile_import_error'),
+                          onPressed: _busy || _copyingImportError || !_canReveal
+                              ? null : () => _copyImportError(importFailure),
+                          icon: _copyingImportError
+                              ? const SizedBox(width: 18, height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.copy_outlined),
+                          label: const Text('Скопировать ошибку'),
+                        ),
+                      ),
+                      if (_importCopyNotice != null) Semantics(
+                        liveRegion: true,
+                        child: Text(_importCopyNotice!,
+                          key: const Key('profile_import_copy_notice'),
+                          style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+                      ),
+                    ],
                   ],
                   const SizedBox(height: 16),
                   FilledButton.icon(
