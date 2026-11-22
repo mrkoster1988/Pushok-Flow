@@ -1,0 +1,1777 @@
+{
+  "comparisons": {
+    "arm64-v8a": {
+      "download_saving_vs_v39_universal": {
+        "MiB": 41.223463,
+        "bytes": 43225934,
+        "decimal_MB": 43.225934,
+        "percent": 64.874892
+      },
+      "download_saving_vs_v40_universal": {
+        "MiB": 41.223463,
+        "bytes": 43225934,
+        "decimal_MB": 43.225934,
+        "percent": 64.874892
+      },
+      "native_vs_v39_corresponding_abis": {
+        "all_non_app_engine_bytes_identical": true,
+        "compared_abis": [
+          "arm64-v8a"
+        ],
+        "engines": {
+          "Flutter": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "WireGuard": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "Xray": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "app": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": false,
+            "changed_or_missing_entries": [
+              "lib/arm64-v8a/libapp.so"
+            ],
+            "expected_entry_count": 1
+          }
+        },
+        "libraries": {
+          "lib/arm64-v8a/libapp.so": {
+            "after_sha256_raw": "f394ef49a3bc09db2a3467bec748b098baf8720fc3f22d2c954fc9d8a98de449",
+            "before_sha256_raw": "30e1ed4cad7ad0a77955928f4db4cba854732b1d4b992092317a3f260732ad26",
+            "present_in_both": true,
+            "raw_bytes_identical": false
+          },
+          "lib/arm64-v8a/libflutter.so": {
+            "after_sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005",
+            "before_sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libgojni.so": {
+            "after_sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34",
+            "before_sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg-go.so": {
+            "after_sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005",
+            "before_sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg-quick.so": {
+            "after_sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092",
+            "before_sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg.so": {
+            "after_sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc",
+            "before_sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          }
+        }
+      },
+      "native_vs_v40_universal_corresponding_abi": {
+        "all_non_app_engine_bytes_identical": true,
+        "compared_abis": [
+          "arm64-v8a"
+        ],
+        "engines": {
+          "Flutter": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "WireGuard": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "Xray": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "app": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          }
+        },
+        "libraries": {
+          "lib/arm64-v8a/libapp.so": {
+            "after_sha256_raw": "f394ef49a3bc09db2a3467bec748b098baf8720fc3f22d2c954fc9d8a98de449",
+            "before_sha256_raw": "f394ef49a3bc09db2a3467bec748b098baf8720fc3f22d2c954fc9d8a98de449",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libflutter.so": {
+            "after_sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005",
+            "before_sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libgojni.so": {
+            "after_sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34",
+            "before_sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg-go.so": {
+            "after_sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005",
+            "before_sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg-quick.so": {
+            "after_sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092",
+            "before_sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg.so": {
+            "after_sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc",
+            "before_sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          }
+        }
+      }
+    },
+    "armeabi-v7a": {
+      "download_saving_vs_v39_universal": {
+        "MiB": 41.039858,
+        "bytes": 43033410,
+        "decimal_MB": 43.03341,
+        "percent": 64.585945
+      },
+      "download_saving_vs_v40_universal": {
+        "MiB": 41.039858,
+        "bytes": 43033410,
+        "decimal_MB": 43.03341,
+        "percent": 64.585945
+      },
+      "native_vs_v39_corresponding_abis": {
+        "all_non_app_engine_bytes_identical": true,
+        "compared_abis": [
+          "armeabi-v7a"
+        ],
+        "engines": {
+          "Flutter": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "WireGuard": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "Xray": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "app": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": false,
+            "changed_or_missing_entries": [
+              "lib/armeabi-v7a/libapp.so"
+            ],
+            "expected_entry_count": 1
+          }
+        },
+        "libraries": {
+          "lib/armeabi-v7a/libapp.so": {
+            "after_sha256_raw": "6d0acb958544bb6f052eee996789546b657b22c8fd95511fb32ca7e11d174ce2",
+            "before_sha256_raw": "135bf39d556fc1ec1d5583d7e4d7614a86882a00efe566a3ff48777fdbff1780",
+            "present_in_both": true,
+            "raw_bytes_identical": false
+          },
+          "lib/armeabi-v7a/libflutter.so": {
+            "after_sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec",
+            "before_sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libgojni.so": {
+            "after_sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4",
+            "before_sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg-go.so": {
+            "after_sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680",
+            "before_sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg-quick.so": {
+            "after_sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a",
+            "before_sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg.so": {
+            "after_sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2",
+            "before_sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          }
+        }
+      },
+      "native_vs_v40_universal_corresponding_abi": {
+        "all_non_app_engine_bytes_identical": true,
+        "compared_abis": [
+          "armeabi-v7a"
+        ],
+        "engines": {
+          "Flutter": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "WireGuard": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "Xray": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "app": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          }
+        },
+        "libraries": {
+          "lib/armeabi-v7a/libapp.so": {
+            "after_sha256_raw": "6d0acb958544bb6f052eee996789546b657b22c8fd95511fb32ca7e11d174ce2",
+            "before_sha256_raw": "6d0acb958544bb6f052eee996789546b657b22c8fd95511fb32ca7e11d174ce2",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libflutter.so": {
+            "after_sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec",
+            "before_sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libgojni.so": {
+            "after_sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4",
+            "before_sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg-go.so": {
+            "after_sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680",
+            "before_sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg-quick.so": {
+            "after_sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a",
+            "before_sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg.so": {
+            "after_sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2",
+            "before_sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          }
+        }
+      }
+    },
+    "universal": {
+      "download_saving_vs_v39_universal": {
+        "MiB": 0.0,
+        "bytes": 0,
+        "decimal_MB": 0.0,
+        "percent": 0.0
+      },
+      "download_saving_vs_v40_universal": {
+        "MiB": 0.0,
+        "bytes": 0,
+        "decimal_MB": 0.0,
+        "percent": 0.0
+      },
+      "native_vs_v39_corresponding_abis": {
+        "all_non_app_engine_bytes_identical": true,
+        "compared_abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "x86_64"
+        ],
+        "engines": {
+          "Flutter": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "WireGuard": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 9
+          },
+          "Xray": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "app": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": false,
+            "changed_or_missing_entries": [
+              "lib/arm64-v8a/libapp.so",
+              "lib/armeabi-v7a/libapp.so",
+              "lib/x86_64/libapp.so"
+            ],
+            "expected_entry_count": 3
+          }
+        },
+        "libraries": {
+          "lib/arm64-v8a/libapp.so": {
+            "after_sha256_raw": "f394ef49a3bc09db2a3467bec748b098baf8720fc3f22d2c954fc9d8a98de449",
+            "before_sha256_raw": "30e1ed4cad7ad0a77955928f4db4cba854732b1d4b992092317a3f260732ad26",
+            "present_in_both": true,
+            "raw_bytes_identical": false
+          },
+          "lib/arm64-v8a/libflutter.so": {
+            "after_sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005",
+            "before_sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libgojni.so": {
+            "after_sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34",
+            "before_sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg-go.so": {
+            "after_sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005",
+            "before_sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg-quick.so": {
+            "after_sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092",
+            "before_sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/arm64-v8a/libwg.so": {
+            "after_sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc",
+            "before_sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libapp.so": {
+            "after_sha256_raw": "6d0acb958544bb6f052eee996789546b657b22c8fd95511fb32ca7e11d174ce2",
+            "before_sha256_raw": "135bf39d556fc1ec1d5583d7e4d7614a86882a00efe566a3ff48777fdbff1780",
+            "present_in_both": true,
+            "raw_bytes_identical": false
+          },
+          "lib/armeabi-v7a/libflutter.so": {
+            "after_sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec",
+            "before_sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libgojni.so": {
+            "after_sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4",
+            "before_sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg-go.so": {
+            "after_sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680",
+            "before_sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg-quick.so": {
+            "after_sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a",
+            "before_sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/armeabi-v7a/libwg.so": {
+            "after_sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2",
+            "before_sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libapp.so": {
+            "after_sha256_raw": "abcf748b078290a8bf33e574543f0a228dec1b5dbedf23bfc963d47cb478f070",
+            "before_sha256_raw": "256fc53c9f041959a62cc433e35e4665933d32f59f0a13c494c40fa46036bda1",
+            "present_in_both": true,
+            "raw_bytes_identical": false
+          },
+          "lib/x86_64/libflutter.so": {
+            "after_sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c",
+            "before_sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libgojni.so": {
+            "after_sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b",
+            "before_sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg-go.so": {
+            "after_sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76",
+            "before_sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg-quick.so": {
+            "after_sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd",
+            "before_sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg.so": {
+            "after_sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d",
+            "before_sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          }
+        }
+      }
+    },
+    "x86_64": {
+      "download_saving_vs_v39_universal": {
+        "MiB": 39.922699,
+        "bytes": 41861984,
+        "decimal_MB": 41.861984,
+        "percent": 62.827831
+      },
+      "download_saving_vs_v40_universal": {
+        "MiB": 39.922699,
+        "bytes": 41861984,
+        "decimal_MB": 41.861984,
+        "percent": 62.827831
+      },
+      "native_vs_v39_corresponding_abis": {
+        "all_non_app_engine_bytes_identical": true,
+        "compared_abis": [
+          "x86_64"
+        ],
+        "engines": {
+          "Flutter": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "WireGuard": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "Xray": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "app": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": false,
+            "changed_or_missing_entries": [
+              "lib/x86_64/libapp.so"
+            ],
+            "expected_entry_count": 1
+          }
+        },
+        "libraries": {
+          "lib/x86_64/libapp.so": {
+            "after_sha256_raw": "abcf748b078290a8bf33e574543f0a228dec1b5dbedf23bfc963d47cb478f070",
+            "before_sha256_raw": "256fc53c9f041959a62cc433e35e4665933d32f59f0a13c494c40fa46036bda1",
+            "present_in_both": true,
+            "raw_bytes_identical": false
+          },
+          "lib/x86_64/libflutter.so": {
+            "after_sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c",
+            "before_sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libgojni.so": {
+            "after_sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b",
+            "before_sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg-go.so": {
+            "after_sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76",
+            "before_sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg-quick.so": {
+            "after_sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd",
+            "before_sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg.so": {
+            "after_sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d",
+            "before_sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          }
+        }
+      },
+      "native_vs_v40_universal_corresponding_abi": {
+        "all_non_app_engine_bytes_identical": true,
+        "compared_abis": [
+          "x86_64"
+        ],
+        "engines": {
+          "Flutter": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "WireGuard": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 3
+          },
+          "Xray": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          },
+          "app": {
+            "all_expected_entries_present_in_both": true,
+            "all_raw_bytes_identical": true,
+            "changed_or_missing_entries": [],
+            "expected_entry_count": 1
+          }
+        },
+        "libraries": {
+          "lib/x86_64/libapp.so": {
+            "after_sha256_raw": "abcf748b078290a8bf33e574543f0a228dec1b5dbedf23bfc963d47cb478f070",
+            "before_sha256_raw": "abcf748b078290a8bf33e574543f0a228dec1b5dbedf23bfc963d47cb478f070",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libflutter.so": {
+            "after_sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c",
+            "before_sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libgojni.so": {
+            "after_sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b",
+            "before_sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg-go.so": {
+            "after_sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76",
+            "before_sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg-quick.so": {
+            "after_sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd",
+            "before_sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          },
+          "lib/x86_64/libwg.so": {
+            "after_sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d",
+            "before_sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d",
+            "present_in_both": true,
+            "raw_bytes_identical": true
+          }
+        }
+      }
+    }
+  },
+  "measurement_scope": {
+    "apk_size": "Exact complete APK file bytes including signing overhead; MB uses 1,000,000 bytes and MiB uses 1,048,576 bytes.",
+    "app_library": "libapp.so may change with application code/version; changes are reported and are not an engine-identity failure.",
+    "installed_size": "Not measured. APK download bytes exclude extracted JNI libraries, ART files and application data.",
+    "native_packed_size": "Sum of compressed native ZIP member payloads; excludes local/central headers and signing overhead.",
+    "negative_saving": "A negative saving means the measured APK grew.",
+    "ram_usage": "Not measured. Download size or compression does not measure RAM consumption.",
+    "raw_library_identity": "SHA-256 of every decompressed native library, streamed without extracting files.",
+    "signatures_and_runtime": "Not verified by this helper; use the release verifier and device testing separately.",
+    "variant_comparison": "Each standalone APK is compared only to matching architecture libraries in the universal APKs."
+  },
+  "schema_version": 1,
+  "structure_and_compression_valid": true,
+  "v39_universal": {
+    "actual_abis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "x86_64"
+    ],
+    "apk": {
+      "MiB": 63.543016,
+      "bytes": 66629682,
+      "decimal_MB": 66.629682
+    },
+    "apk_sha256": "42814cb310a312c831a09a9f220d8dd5df037a4feb88068de4c1863142f21b7f",
+    "by_abi": {
+      "arm64-v8a": {
+        "compression_methods": {
+          "DEFLATED": 6
+        },
+        "native_entry_count": 6,
+        "packed": {
+          "MiB": 19.867315,
+          "bytes": 20832390,
+          "decimal_MB": 20.83239
+        },
+        "raw": {
+          "MiB": 52.241371,
+          "bytes": 54779048,
+          "decimal_MB": 54.779048
+        }
+      },
+      "armeabi-v7a": {
+        "compression_methods": {
+          "DEFLATED": 6
+        },
+        "native_entry_count": 6,
+        "packed": {
+          "MiB": 20.052574,
+          "bytes": 21026648,
+          "decimal_MB": 21.026648
+        },
+        "raw": {
+          "MiB": 49.106056,
+          "bytes": 51491432,
+          "decimal_MB": 51.491432
+        }
+      },
+      "x86_64": {
+        "compression_methods": {
+          "DEFLATED": 6
+        },
+        "native_entry_count": 6,
+        "packed": {
+          "MiB": 21.170116,
+          "bytes": 22198476,
+          "decimal_MB": 22.198476
+        },
+        "raw": {
+          "MiB": 56.007736,
+          "bytes": 58728368,
+          "decimal_MB": 58.728368
+        }
+      }
+    },
+    "empty_native_entries": [],
+    "expected_abis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "x86_64"
+    ],
+    "expected_native_entry_count": 18,
+    "file_name": "Pushok-Flow-v0.39.0.apk",
+    "missing_expected_native_entries": [],
+    "native_compression_saving_percent": 61.176993,
+    "native_entries_not_deflated": [],
+    "native_entry_count": 18,
+    "native_members": {
+      "lib/arm64-v8a/libapp.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 2.126628,
+          "bytes": 2229931,
+          "decimal_MB": 2.229931
+        },
+        "raw": {
+          "MiB": 5.375938,
+          "bytes": 5637080,
+          "decimal_MB": 5.63708
+        },
+        "sha256_raw": "30e1ed4cad7ad0a77955928f4db4cba854732b1d4b992092317a3f260732ad26"
+      },
+      "lib/arm64-v8a/libflutter.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 5.154641,
+          "bytes": 5405033,
+          "decimal_MB": 5.405033
+        },
+        "raw": {
+          "MiB": 10.820724,
+          "bytes": 11346352,
+          "decimal_MB": 11.346352
+        },
+        "sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005"
+      },
+      "lib/arm64-v8a/libgojni.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 11.264361,
+          "bytes": 11811539,
+          "decimal_MB": 11.811539
+        },
+        "raw": {
+          "MiB": 32.728859,
+          "bytes": 34318696,
+          "decimal_MB": 34.318696
+        },
+        "sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34"
+      },
+      "lib/arm64-v8a/libwg-go.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 1.267625,
+          "bytes": 1329201,
+          "decimal_MB": 1.329201
+        },
+        "raw": {
+          "MiB": 3.209366,
+          "bytes": 3365264,
+          "decimal_MB": 3.365264
+        },
+        "sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005"
+      },
+      "lib/arm64-v8a/libwg-quick.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 0.012672,
+          "bytes": 13288,
+          "decimal_MB": 0.013288
+        },
+        "raw": {
+          "MiB": 0.028564,
+          "bytes": 29952,
+          "decimal_MB": 0.029952
+        },
+        "sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092"
+      },
+      "lib/arm64-v8a/libwg.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 0.041388,
+          "bytes": 43398,
+          "decimal_MB": 0.043398
+        },
+        "raw": {
+          "MiB": 0.077919,
+          "bytes": 81704,
+          "decimal_MB": 0.081704
+        },
+        "sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc"
+      },
+      "lib/armeabi-v7a/libapp.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 2.338124,
+          "bytes": 2451701,
+          "decimal_MB": 2.451701
+        },
+        "raw": {
+          "MiB": 5.906807,
+          "bytes": 6193736,
+          "decimal_MB": 6.193736
+        },
+        "sha256_raw": "135bf39d556fc1ec1d5583d7e4d7614a86882a00efe566a3ff48777fdbff1780"
+      },
+      "lib/armeabi-v7a/libflutter.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 4.526223,
+          "bytes": 4746089,
+          "decimal_MB": 4.746089
+        },
+        "raw": {
+          "MiB": 8.066563,
+          "bytes": 8458404,
+          "decimal_MB": 8.458404
+        },
+        "sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec"
+      },
+      "lib/armeabi-v7a/libgojni.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 11.858589,
+          "bytes": 12434632,
+          "decimal_MB": 12.434632
+        },
+        "raw": {
+          "MiB": 32.038395,
+          "bytes": 33594692,
+          "decimal_MB": 33.594692
+        },
+        "sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4"
+      },
+      "lib/armeabi-v7a/libwg-go.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 1.290678,
+          "bytes": 1353374,
+          "decimal_MB": 1.353374
+        },
+        "raw": {
+          "MiB": 3.027714,
+          "bytes": 3174788,
+          "decimal_MB": 3.174788
+        },
+        "sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680"
+      },
+      "lib/armeabi-v7a/libwg-quick.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 0.011347,
+          "bytes": 11898,
+          "decimal_MB": 0.011898
+        },
+        "raw": {
+          "MiB": 0.021683,
+          "bytes": 22736,
+          "decimal_MB": 0.022736
+        },
+        "sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a"
+      },
+      "lib/armeabi-v7a/libwg.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 0.027613,
+          "bytes": 28954,
+          "decimal_MB": 0.028954
+        },
+        "raw": {
+          "MiB": 0.044895,
+          "bytes": 47076,
+          "decimal_MB": 0.047076
+        },
+        "sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2"
+      },
+      "lib/x86_64/libapp.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 2.160822,
+          "bytes": 2265786,
+          "decimal_MB": 2.265786
+        },
+        "raw": {
+          "MiB": 5.563438,
+          "bytes": 5833688,
+          "decimal_MB": 5.833688
+        },
+        "sha256_raw": "256fc53c9f041959a62cc433e35e4665933d32f59f0a13c494c40fa46036bda1"
+      },
+      "lib/x86_64/libflutter.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 5.340189,
+          "bytes": 5599594,
+          "decimal_MB": 5.599594
+        },
+        "raw": {
+          "MiB": 11.889542,
+          "bytes": 12467088,
+          "decimal_MB": 12.467088
+        },
+        "sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c"
+      },
+      "lib/x86_64/libgojni.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 12.261942,
+          "bytes": 12857578,
+          "decimal_MB": 12.857578
+        },
+        "raw": {
+          "MiB": 34.995949,
+          "bytes": 36695912,
+          "decimal_MB": 36.695912
+        },
+        "sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b"
+      },
+      "lib/x86_64/libwg-go.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 1.354297,
+          "bytes": 1420083,
+          "decimal_MB": 1.420083
+        },
+        "raw": {
+          "MiB": 3.439835,
+          "bytes": 3606928,
+          "decimal_MB": 3.606928
+        },
+        "sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76"
+      },
+      "lib/x86_64/libwg-quick.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 0.012826,
+          "bytes": 13449,
+          "decimal_MB": 0.013449
+        },
+        "raw": {
+          "MiB": 0.030045,
+          "bytes": 31504,
+          "decimal_MB": 0.031504
+        },
+        "sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd"
+      },
+      "lib/x86_64/libwg.so": {
+        "compression_method": "DEFLATED",
+        "packed": {
+          "MiB": 0.040041,
+          "bytes": 41986,
+          "decimal_MB": 0.041986
+        },
+        "raw": {
+          "MiB": 0.088928,
+          "bytes": 93248,
+          "decimal_MB": 0.093248
+        },
+        "sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d"
+      }
+    },
+    "native_packed": {
+      "MiB": 61.090006,
+      "bytes": 64057514,
+      "decimal_MB": 64.057514
+    },
+    "native_raw": {
+      "MiB": 157.355164,
+      "bytes": 164998848,
+      "decimal_MB": 164.998848
+    },
+    "non_library_entries_under_lib": [],
+    "other_entries_and_zip_signing_overhead": {
+      "MiB": 2.453011,
+      "bytes": 2572168,
+      "decimal_MB": 2.572168
+    },
+    "structure_and_compression_valid": true,
+    "unexpected_native_entries": [],
+    "validation_errors": []
+  },
+  "v40": {
+    "arm64-v8a": {
+      "actual_abis": [
+        "arm64-v8a"
+      ],
+      "apk": {
+        "MiB": 22.319553,
+        "bytes": 23403748,
+        "decimal_MB": 23.403748
+      },
+      "apk_sha256": "942a65676fa0d39fe9b918998be3aa937289bffb880d48fbe488d18410a64003",
+      "by_abi": {
+        "arm64-v8a": {
+          "compression_methods": {
+            "DEFLATED": 6
+          },
+          "native_entry_count": 6,
+          "packed": {
+            "MiB": 19.8673,
+            "bytes": 20832374,
+            "decimal_MB": 20.832374
+          },
+          "raw": {
+            "MiB": 52.241371,
+            "bytes": 54779048,
+            "decimal_MB": 54.779048
+          }
+        }
+      },
+      "empty_native_entries": [],
+      "expected_abis": [
+        "arm64-v8a"
+      ],
+      "expected_native_entry_count": 6,
+      "file_name": "Pushok-Flow-v0.40.0-arm64-v8a.apk",
+      "missing_expected_native_entries": [],
+      "native_compression_saving_percent": 61.970179,
+      "native_entries_not_deflated": [],
+      "native_entry_count": 6,
+      "native_members": {
+        "lib/arm64-v8a/libapp.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 2.126613,
+            "bytes": 2229915,
+            "decimal_MB": 2.229915
+          },
+          "raw": {
+            "MiB": 5.375938,
+            "bytes": 5637080,
+            "decimal_MB": 5.63708
+          },
+          "sha256_raw": "f394ef49a3bc09db2a3467bec748b098baf8720fc3f22d2c954fc9d8a98de449"
+        },
+        "lib/arm64-v8a/libflutter.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 5.154641,
+            "bytes": 5405033,
+            "decimal_MB": 5.405033
+          },
+          "raw": {
+            "MiB": 10.820724,
+            "bytes": 11346352,
+            "decimal_MB": 11.346352
+          },
+          "sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005"
+        },
+        "lib/arm64-v8a/libgojni.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 11.264361,
+            "bytes": 11811539,
+            "decimal_MB": 11.811539
+          },
+          "raw": {
+            "MiB": 32.728859,
+            "bytes": 34318696,
+            "decimal_MB": 34.318696
+          },
+          "sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34"
+        },
+        "lib/arm64-v8a/libwg-go.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 1.267625,
+            "bytes": 1329201,
+            "decimal_MB": 1.329201
+          },
+          "raw": {
+            "MiB": 3.209366,
+            "bytes": 3365264,
+            "decimal_MB": 3.365264
+          },
+          "sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005"
+        },
+        "lib/arm64-v8a/libwg-quick.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.012672,
+            "bytes": 13288,
+            "decimal_MB": 0.013288
+          },
+          "raw": {
+            "MiB": 0.028564,
+            "bytes": 29952,
+            "decimal_MB": 0.029952
+          },
+          "sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092"
+        },
+        "lib/arm64-v8a/libwg.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.041388,
+            "bytes": 43398,
+            "decimal_MB": 0.043398
+          },
+          "raw": {
+            "MiB": 0.077919,
+            "bytes": 81704,
+            "decimal_MB": 0.081704
+          },
+          "sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc"
+        }
+      },
+      "native_packed": {
+        "MiB": 19.8673,
+        "bytes": 20832374,
+        "decimal_MB": 20.832374
+      },
+      "native_raw": {
+        "MiB": 52.241371,
+        "bytes": 54779048,
+        "decimal_MB": 54.779048
+      },
+      "non_library_entries_under_lib": [],
+      "other_entries_and_zip_signing_overhead": {
+        "MiB": 2.452253,
+        "bytes": 2571374,
+        "decimal_MB": 2.571374
+      },
+      "structure_and_compression_valid": true,
+      "unexpected_native_entries": [],
+      "validation_errors": []
+    },
+    "armeabi-v7a": {
+      "actual_abis": [
+        "armeabi-v7a"
+      ],
+      "apk": {
+        "MiB": 22.503159,
+        "bytes": 23596272,
+        "decimal_MB": 23.596272
+      },
+      "apk_sha256": "fbcde2e8d881bb751333da0ec8ad54e698b44e387176937d5530c8538a9fcc43",
+      "by_abi": {
+        "armeabi-v7a": {
+          "compression_methods": {
+            "DEFLATED": 6
+          },
+          "native_entry_count": 6,
+          "packed": {
+            "MiB": 20.052636,
+            "bytes": 21026713,
+            "decimal_MB": 21.026713
+          },
+          "raw": {
+            "MiB": 49.106056,
+            "bytes": 51491432,
+            "decimal_MB": 51.491432
+          }
+        }
+      },
+      "empty_native_entries": [],
+      "expected_abis": [
+        "armeabi-v7a"
+      ],
+      "expected_native_entry_count": 6,
+      "file_name": "Pushok-Flow-v0.40.0-armeabi-v7a.apk",
+      "missing_expected_native_entries": [],
+      "native_compression_saving_percent": 59.164637,
+      "native_entries_not_deflated": [],
+      "native_entry_count": 6,
+      "native_members": {
+        "lib/armeabi-v7a/libapp.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 2.338186,
+            "bytes": 2451766,
+            "decimal_MB": 2.451766
+          },
+          "raw": {
+            "MiB": 5.906807,
+            "bytes": 6193736,
+            "decimal_MB": 6.193736
+          },
+          "sha256_raw": "6d0acb958544bb6f052eee996789546b657b22c8fd95511fb32ca7e11d174ce2"
+        },
+        "lib/armeabi-v7a/libflutter.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 4.526223,
+            "bytes": 4746089,
+            "decimal_MB": 4.746089
+          },
+          "raw": {
+            "MiB": 8.066563,
+            "bytes": 8458404,
+            "decimal_MB": 8.458404
+          },
+          "sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec"
+        },
+        "lib/armeabi-v7a/libgojni.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 11.858589,
+            "bytes": 12434632,
+            "decimal_MB": 12.434632
+          },
+          "raw": {
+            "MiB": 32.038395,
+            "bytes": 33594692,
+            "decimal_MB": 33.594692
+          },
+          "sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4"
+        },
+        "lib/armeabi-v7a/libwg-go.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 1.290678,
+            "bytes": 1353374,
+            "decimal_MB": 1.353374
+          },
+          "raw": {
+            "MiB": 3.027714,
+            "bytes": 3174788,
+            "decimal_MB": 3.174788
+          },
+          "sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680"
+        },
+        "lib/armeabi-v7a/libwg-quick.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.011347,
+            "bytes": 11898,
+            "decimal_MB": 0.011898
+          },
+          "raw": {
+            "MiB": 0.021683,
+            "bytes": 22736,
+            "decimal_MB": 0.022736
+          },
+          "sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a"
+        },
+        "lib/armeabi-v7a/libwg.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.027613,
+            "bytes": 28954,
+            "decimal_MB": 0.028954
+          },
+          "raw": {
+            "MiB": 0.044895,
+            "bytes": 47076,
+            "decimal_MB": 0.047076
+          },
+          "sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2"
+        }
+      },
+      "native_packed": {
+        "MiB": 20.052636,
+        "bytes": 21026713,
+        "decimal_MB": 21.026713
+      },
+      "native_raw": {
+        "MiB": 49.106056,
+        "bytes": 51491432,
+        "decimal_MB": 51.491432
+      },
+      "non_library_entries_under_lib": [],
+      "other_entries_and_zip_signing_overhead": {
+        "MiB": 2.450522,
+        "bytes": 2569559,
+        "decimal_MB": 2.569559
+      },
+      "structure_and_compression_valid": true,
+      "unexpected_native_entries": [],
+      "validation_errors": []
+    },
+    "universal": {
+      "actual_abis": [
+        "arm64-v8a",
+        "armeabi-v7a",
+        "x86_64"
+      ],
+      "apk": {
+        "MiB": 63.543016,
+        "bytes": 66629682,
+        "decimal_MB": 66.629682
+      },
+      "apk_sha256": "b4f3f83e764e0ebdb1751dcf49a49abc1447942cb143389c04306a17a66fd2ad",
+      "by_abi": {
+        "arm64-v8a": {
+          "compression_methods": {
+            "DEFLATED": 6
+          },
+          "native_entry_count": 6,
+          "packed": {
+            "MiB": 19.8673,
+            "bytes": 20832374,
+            "decimal_MB": 20.832374
+          },
+          "raw": {
+            "MiB": 52.241371,
+            "bytes": 54779048,
+            "decimal_MB": 54.779048
+          }
+        },
+        "armeabi-v7a": {
+          "compression_methods": {
+            "DEFLATED": 6
+          },
+          "native_entry_count": 6,
+          "packed": {
+            "MiB": 20.052636,
+            "bytes": 21026713,
+            "decimal_MB": 21.026713
+          },
+          "raw": {
+            "MiB": 49.106056,
+            "bytes": 51491432,
+            "decimal_MB": 51.491432
+          }
+        },
+        "x86_64": {
+          "compression_methods": {
+            "DEFLATED": 6
+          },
+          "native_entry_count": 6,
+          "packed": {
+            "MiB": 21.170175,
+            "bytes": 22198537,
+            "decimal_MB": 22.198537
+          },
+          "raw": {
+            "MiB": 56.007736,
+            "bytes": 58728368,
+            "decimal_MB": 58.728368
+          }
+        }
+      },
+      "empty_native_entries": [],
+      "expected_abis": [
+        "arm64-v8a",
+        "armeabi-v7a",
+        "x86_64"
+      ],
+      "expected_native_entry_count": 18,
+      "file_name": "Pushok-Flow-v0.40.0.apk",
+      "missing_expected_native_entries": [],
+      "native_compression_saving_percent": 61.176927,
+      "native_entries_not_deflated": [],
+      "native_entry_count": 18,
+      "native_members": {
+        "lib/arm64-v8a/libapp.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 2.126613,
+            "bytes": 2229915,
+            "decimal_MB": 2.229915
+          },
+          "raw": {
+            "MiB": 5.375938,
+            "bytes": 5637080,
+            "decimal_MB": 5.63708
+          },
+          "sha256_raw": "f394ef49a3bc09db2a3467bec748b098baf8720fc3f22d2c954fc9d8a98de449"
+        },
+        "lib/arm64-v8a/libflutter.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 5.154641,
+            "bytes": 5405033,
+            "decimal_MB": 5.405033
+          },
+          "raw": {
+            "MiB": 10.820724,
+            "bytes": 11346352,
+            "decimal_MB": 11.346352
+          },
+          "sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005"
+        },
+        "lib/arm64-v8a/libgojni.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 11.264361,
+            "bytes": 11811539,
+            "decimal_MB": 11.811539
+          },
+          "raw": {
+            "MiB": 32.728859,
+            "bytes": 34318696,
+            "decimal_MB": 34.318696
+          },
+          "sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34"
+        },
+        "lib/arm64-v8a/libwg-go.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 1.267625,
+            "bytes": 1329201,
+            "decimal_MB": 1.329201
+          },
+          "raw": {
+            "MiB": 3.209366,
+            "bytes": 3365264,
+            "decimal_MB": 3.365264
+          },
+          "sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005"
+        },
+        "lib/arm64-v8a/libwg-quick.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.012672,
+            "bytes": 13288,
+            "decimal_MB": 0.013288
+          },
+          "raw": {
+            "MiB": 0.028564,
+            "bytes": 29952,
+            "decimal_MB": 0.029952
+          },
+          "sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092"
+        },
+        "lib/arm64-v8a/libwg.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.041388,
+            "bytes": 43398,
+            "decimal_MB": 0.043398
+          },
+          "raw": {
+            "MiB": 0.077919,
+            "bytes": 81704,
+            "decimal_MB": 0.081704
+          },
+          "sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc"
+        },
+        "lib/armeabi-v7a/libapp.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 2.338186,
+            "bytes": 2451766,
+            "decimal_MB": 2.451766
+          },
+          "raw": {
+            "MiB": 5.906807,
+            "bytes": 6193736,
+            "decimal_MB": 6.193736
+          },
+          "sha256_raw": "6d0acb958544bb6f052eee996789546b657b22c8fd95511fb32ca7e11d174ce2"
+        },
+        "lib/armeabi-v7a/libflutter.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 4.526223,
+            "bytes": 4746089,
+            "decimal_MB": 4.746089
+          },
+          "raw": {
+            "MiB": 8.066563,
+            "bytes": 8458404,
+            "decimal_MB": 8.458404
+          },
+          "sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec"
+        },
+        "lib/armeabi-v7a/libgojni.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 11.858589,
+            "bytes": 12434632,
+            "decimal_MB": 12.434632
+          },
+          "raw": {
+            "MiB": 32.038395,
+            "bytes": 33594692,
+            "decimal_MB": 33.594692
+          },
+          "sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4"
+        },
+        "lib/armeabi-v7a/libwg-go.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 1.290678,
+            "bytes": 1353374,
+            "decimal_MB": 1.353374
+          },
+          "raw": {
+            "MiB": 3.027714,
+            "bytes": 3174788,
+            "decimal_MB": 3.174788
+          },
+          "sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680"
+        },
+        "lib/armeabi-v7a/libwg-quick.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.011347,
+            "bytes": 11898,
+            "decimal_MB": 0.011898
+          },
+          "raw": {
+            "MiB": 0.021683,
+            "bytes": 22736,
+            "decimal_MB": 0.022736
+          },
+          "sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a"
+        },
+        "lib/armeabi-v7a/libwg.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.027613,
+            "bytes": 28954,
+            "decimal_MB": 0.028954
+          },
+          "raw": {
+            "MiB": 0.044895,
+            "bytes": 47076,
+            "decimal_MB": 0.047076
+          },
+          "sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2"
+        },
+        "lib/x86_64/libapp.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 2.16088,
+            "bytes": 2265847,
+            "decimal_MB": 2.265847
+          },
+          "raw": {
+            "MiB": 5.563438,
+            "bytes": 5833688,
+            "decimal_MB": 5.833688
+          },
+          "sha256_raw": "abcf748b078290a8bf33e574543f0a228dec1b5dbedf23bfc963d47cb478f070"
+        },
+        "lib/x86_64/libflutter.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 5.340189,
+            "bytes": 5599594,
+            "decimal_MB": 5.599594
+          },
+          "raw": {
+            "MiB": 11.889542,
+            "bytes": 12467088,
+            "decimal_MB": 12.467088
+          },
+          "sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c"
+        },
+        "lib/x86_64/libgojni.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 12.261942,
+            "bytes": 12857578,
+            "decimal_MB": 12.857578
+          },
+          "raw": {
+            "MiB": 34.995949,
+            "bytes": 36695912,
+            "decimal_MB": 36.695912
+          },
+          "sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b"
+        },
+        "lib/x86_64/libwg-go.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 1.354297,
+            "bytes": 1420083,
+            "decimal_MB": 1.420083
+          },
+          "raw": {
+            "MiB": 3.439835,
+            "bytes": 3606928,
+            "decimal_MB": 3.606928
+          },
+          "sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76"
+        },
+        "lib/x86_64/libwg-quick.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.012826,
+            "bytes": 13449,
+            "decimal_MB": 0.013449
+          },
+          "raw": {
+            "MiB": 0.030045,
+            "bytes": 31504,
+            "decimal_MB": 0.031504
+          },
+          "sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd"
+        },
+        "lib/x86_64/libwg.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.040041,
+            "bytes": 41986,
+            "decimal_MB": 0.041986
+          },
+          "raw": {
+            "MiB": 0.088928,
+            "bytes": 93248,
+            "decimal_MB": 0.093248
+          },
+          "sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d"
+        }
+      },
+      "native_packed": {
+        "MiB": 61.090111,
+        "bytes": 64057624,
+        "decimal_MB": 64.057624
+      },
+      "native_raw": {
+        "MiB": 157.355164,
+        "bytes": 164998848,
+        "decimal_MB": 164.998848
+      },
+      "non_library_entries_under_lib": [],
+      "other_entries_and_zip_signing_overhead": {
+        "MiB": 2.452906,
+        "bytes": 2572058,
+        "decimal_MB": 2.572058
+      },
+      "structure_and_compression_valid": true,
+      "unexpected_native_entries": [],
+      "validation_errors": []
+    },
+    "x86_64": {
+      "actual_abis": [
+        "x86_64"
+      ],
+      "apk": {
+        "MiB": 23.620317,
+        "bytes": 24767698,
+        "decimal_MB": 24.767698
+      },
+      "apk_sha256": "eefe98770c4a455022940d1baa4c069dea667cde6af3869c1c5ae4555345f951",
+      "by_abi": {
+        "x86_64": {
+          "compression_methods": {
+            "DEFLATED": 6
+          },
+          "native_entry_count": 6,
+          "packed": {
+            "MiB": 21.170175,
+            "bytes": 22198537,
+            "decimal_MB": 22.198537
+          },
+          "raw": {
+            "MiB": 56.007736,
+            "bytes": 58728368,
+            "decimal_MB": 58.728368
+          }
+        }
+      },
+      "empty_native_entries": [],
+      "expected_abis": [
+        "x86_64"
+      ],
+      "expected_native_entry_count": 6,
+      "file_name": "Pushok-Flow-v0.40.0-x86_64.apk",
+      "missing_expected_native_entries": [],
+      "native_compression_saving_percent": 62.201339,
+      "native_entries_not_deflated": [],
+      "native_entry_count": 6,
+      "native_members": {
+        "lib/x86_64/libapp.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 2.16088,
+            "bytes": 2265847,
+            "decimal_MB": 2.265847
+          },
+          "raw": {
+            "MiB": 5.563438,
+            "bytes": 5833688,
+            "decimal_MB": 5.833688
+          },
+          "sha256_raw": "abcf748b078290a8bf33e574543f0a228dec1b5dbedf23bfc963d47cb478f070"
+        },
+        "lib/x86_64/libflutter.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 5.340189,
+            "bytes": 5599594,
+            "decimal_MB": 5.599594
+          },
+          "raw": {
+            "MiB": 11.889542,
+            "bytes": 12467088,
+            "decimal_MB": 12.467088
+          },
+          "sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c"
+        },
+        "lib/x86_64/libgojni.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 12.261942,
+            "bytes": 12857578,
+            "decimal_MB": 12.857578
+          },
+          "raw": {
+            "MiB": 34.995949,
+            "bytes": 36695912,
+            "decimal_MB": 36.695912
+          },
+          "sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b"
+        },
+        "lib/x86_64/libwg-go.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 1.354297,
+            "bytes": 1420083,
+            "decimal_MB": 1.420083
+          },
+          "raw": {
+            "MiB": 3.439835,
+            "bytes": 3606928,
+            "decimal_MB": 3.606928
+          },
+          "sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76"
+        },
+        "lib/x86_64/libwg-quick.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.012826,
+            "bytes": 13449,
+            "decimal_MB": 0.013449
+          },
+          "raw": {
+            "MiB": 0.030045,
+            "bytes": 31504,
+            "decimal_MB": 0.031504
+          },
+          "sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd"
+        },
+        "lib/x86_64/libwg.so": {
+          "compression_method": "DEFLATED",
+          "packed": {
+            "MiB": 0.040041,
+            "bytes": 41986,
+            "decimal_MB": 0.041986
+          },
+          "raw": {
+            "MiB": 0.088928,
+            "bytes": 93248,
+            "decimal_MB": 0.093248
+          },
+          "sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d"
+        }
+      },
+      "native_packed": {
+        "MiB": 21.170175,
+        "bytes": 22198537,
+        "decimal_MB": 22.198537
+      },
+      "native_raw": {
+        "MiB": 56.007736,
+        "bytes": 58728368,
+        "decimal_MB": 58.728368
+      },
+      "non_library_entries_under_lib": [],
+      "other_entries_and_zip_signing_overhead": {
+        "MiB": 2.450143,
+        "bytes": 2569161,
+        "decimal_MB": 2.569161
+      },
+      "structure_and_compression_valid": true,
+      "unexpected_native_entries": [],
+      "validation_errors": []
+    }
+  }
+}

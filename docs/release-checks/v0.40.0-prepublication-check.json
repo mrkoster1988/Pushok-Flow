@@ -1,0 +1,297 @@
+{
+  "recordedAtUtc": "2026-11-22T17:41:40.004733+00:00",
+  "status": "verified_signed_ready_for_authorized_publication",
+  "apkSourceCommit": "3b1f8672686e99ddadf2b5fffb9ca972bc41812f",
+  "stagingSchemaVersion": 2,
+  "stagingDocument": "release-staging/v0.40.0.json",
+  "stagingDocumentSha256": "30e00cf21f4fff529131b94a6544aad3c5db78d5d6df2ca114102364fbceba99",
+  "verifiedSignedApks": {
+    "universal": {
+      "packageName": "shop.pushok.flow",
+      "versionName": "0.40.0",
+      "versionCode": 40,
+      "minSdk": 24,
+      "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+      "sha256": "b4f3f83e764e0ebdb1751dcf49a49abc1447942cb143389c04306a17a66fd2ad",
+      "sizeBytes": 66629682
+    },
+    "arm64-v8a": {
+      "packageName": "shop.pushok.flow",
+      "versionName": "0.40.0",
+      "versionCode": 40,
+      "minSdk": 24,
+      "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+      "sha256": "942a65676fa0d39fe9b918998be3aa937289bffb880d48fbe488d18410a64003",
+      "sizeBytes": 23403748,
+      "abi": "arm64-v8a"
+    },
+    "armeabi-v7a": {
+      "packageName": "shop.pushok.flow",
+      "versionName": "0.40.0",
+      "versionCode": 40,
+      "minSdk": 24,
+      "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+      "sha256": "fbcde2e8d881bb751333da0ec8ad54e698b44e387176937d5530c8538a9fcc43",
+      "sizeBytes": 23596272,
+      "abi": "armeabi-v7a"
+    },
+    "x86_64": {
+      "packageName": "shop.pushok.flow",
+      "versionName": "0.40.0",
+      "versionCode": 40,
+      "minSdk": 24,
+      "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+      "sha256": "eefe98770c4a455022940d1baa4c069dea667cde6af3869c1c5ae4555345f951",
+      "sizeBytes": 24767698,
+      "abi": "x86_64"
+    }
+  },
+  "sourceChecks": {
+    "runId": 45049822741,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45049822741",
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "3b1f8672686e99ddadf2b5fffb9ca972bc41812f",
+    "createdAtUtc": "2026-11-22T17:30:30Z",
+    "updatedAtUtc": "2026-11-22T17:32:02Z",
+    "runAttempt": 1,
+    "pythonTests": 251,
+    "flutterTests": 249,
+    "analyzer": "No issues found",
+    "verifiedLogMarkers": [
+      "2026-11-22T17:30:50.9473308Z Ran 251 tests in 15.338s",
+      "2026-11-22T17:30:50.9473449Z OK",
+      "2026-11-22T17:30:51.4435987Z Verified recommendations v3: 9 packages, payload SHA-256 52624642e13b14ca0e4f6b921e921e346251b4f7597c651bcfade8c464c9d3bf",
+      "2026-11-22T17:31:09.8365129Z No issues found! (ran in 9.8s)",
+      "2026-11-22T17:31:58.9378749Z \ud83c\udf89 249 tests passed."
+    ]
+  },
+  "androidCandidate": {
+    "runId": 45049822606,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45049822606",
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "3b1f8672686e99ddadf2b5fffb9ca972bc41812f",
+    "createdAtUtc": "2026-11-22T17:30:30Z",
+    "updatedAtUtc": "2026-11-22T17:39:27Z",
+    "runAttempt": 1,
+    "pythonTests": 251,
+    "flutterTests": 249,
+    "kotlinSuites": 16,
+    "kotlinSuccessMarkers": 17,
+    "kotlinMarkerNote": "RouteRecommendations suite also reports RecommendationAutomation checks.",
+    "analyzer": "No issues found",
+    "candidateVerification": "success",
+    "candidateApkArtifactAvailable": true,
+    "verifiedCandidateApks": 4,
+    "verifiedLogMarkers": [
+      "2026-11-22T17:31:32.5389972Z Ran 251 tests in 21.464s",
+      "2026-11-22T17:31:32.5390462Z OK",
+      "2026-11-22T17:31:42.5260283Z Kotlin WireGuardRouting executable checks passed",
+      "2026-11-22T17:31:48.4443412Z TunnelHealth executable checks passed",
+      "2026-11-22T17:31:54.6272524Z TunnelConnectionSession state, failure recovery and shared queue checks passed",
+      "2026-11-22T17:32:03.0606744Z UpdatePolicy executable checks passed",
+      "2026-11-22T17:32:11.6859592Z ABI update selection, strict release assets, retained payloads, archive contents and URL checks passed",
+      "2026-11-22T17:32:19.4420868Z Update automation policy checks passed",
+      "2026-11-22T17:32:24.4427037Z ProfileProtectionPolicy executable checks passed",
+      "2026-11-22T17:32:30.2459153Z ProfileImportReader executable checks passed",
+      "2026-11-22T17:32:39.2289440Z VLESS executable checks passed (RAW/TCP, WebSocket, gRPC, strict URI, TLS/REALITY, bounds, redaction)",
+      "2026-11-22T17:32:49.8928610Z ProfileQrImport executable checks passed (ZXing 3.5.4, WG/VLESS RAW/WS/gRPC, alpha/polarity/ambiguity/structured-append/payload/bounds/cancellation/session)",
+      "2026-11-22T17:32:57.0506370Z ProfileCatalog and process-wide operation checks passed",
+      "2026-11-22T17:33:04.5259230Z RouteSettings CAS, failure recovery, validation and label checks passed",
+      "2026-11-22T17:33:11.8688423Z RouteAppAvailability snapshots, connection guards and recovery checks passed",
+      "2026-11-22T17:33:22.5518142Z Recommendation opt-in, durable cooldowns, restart, clock changes, manual fallback and cancellation checks passed",
+      "2026-11-22T17:33:23.1409907Z Route recommendation signatures, strict data validation, rollback and guarded storage checks passed",
+      "2026-11-22T17:33:28.6558518Z Xray deadline, concurrent cancellation, generation and teardown state checks passed",
+      "2026-11-22T17:33:38.3667641Z Xray RAW/TLS/REALITY, WebSocket/gRPC TLS, transport fields, ALPN, TUN and no-direct-fallback checks passed",
+      "2026-11-22T17:33:49.8684175Z No issues found! (ran in 10.9s)",
+      "2026-11-22T17:34:37.7622560Z 00:34 +249: All tests passed!",
+      "2026-11-22T17:39:14.9349423Z APK private QR scanner, camera permission and optional hardware checks passed",
+      "2026-11-22T17:39:14.9350417Z APK isolated Xray service, required native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T17:39:14.9351533Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T17:39:14.9352450Z APK compressed native libraries, exact expected ABIs and extraction flag verified",
+      "2026-11-22T17:39:14.9353258Z APK package, INTERNET and WireGuard VPN service checks passed",
+      "2026-11-22T17:39:14.9355444Z APK private QR scanner, camera permission and optional hardware checks passed",
+      "2026-11-22T17:39:14.9356300Z APK isolated Xray service, required native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T17:39:14.9357190Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T17:39:14.9358428Z APK compressed native libraries, exact expected ABIs and extraction flag verified",
+      "2026-11-22T17:39:14.9359187Z APK package, INTERNET and WireGuard VPN service checks passed",
+      "2026-11-22T17:39:14.9361143Z APK private QR scanner, camera permission and optional hardware checks passed",
+      "2026-11-22T17:39:14.9362177Z APK isolated Xray service, required native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T17:39:14.9363094Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T17:39:14.9363948Z APK compressed native libraries, exact expected ABIs and extraction flag verified",
+      "2026-11-22T17:39:14.9364707Z APK package, INTERNET and WireGuard VPN service checks passed",
+      "2026-11-22T17:39:14.9366788Z APK private QR scanner, camera permission and optional hardware checks passed",
+      "2026-11-22T17:39:14.9367665Z APK isolated Xray service, required native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T17:39:14.9368656Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T17:39:14.9369627Z APK compressed native libraries, exact expected ABIs and extraction flag verified",
+      "2026-11-22T17:39:14.9388965Z APK package, INTERNET and WireGuard VPN service checks passed",
+      "2026-11-22T17:39:12.1360532Z \u2713 Built build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk (23.6MB)",
+      "2026-11-22T17:39:12.3209986Z \u2713 Built build/app/outputs/flutter-apk/app-arm64-v8a-release.apk (23.4MB)",
+      "2026-11-22T17:39:12.5176696Z \u2713 Built build/app/outputs/flutter-apk/app-x86_64-release.apk (24.8MB)",
+      "2026-11-22T17:39:14.9354312Z Release candidate 0.40.0 (40), universal: 66618575 bytes, SHA-256 1e8725d7a1d07410219eb581d0ddffd01bcb75ad89598f1041b099423e3d068b",
+      "2026-11-22T17:39:14.9360122Z Release candidate 0.40.0 (40), arm64-v8a: 23391825 bytes, SHA-256 c08b689122c02982436175afad411b0d606407e6575a89d75b9018fb61a784d8",
+      "2026-11-22T17:39:14.9365674Z Release candidate 0.40.0 (40), armeabi-v7a: 23586189 bytes, SHA-256 9a7701a99027b032ae226a4d9056bcf9d1685e593f5fae40e392936f3d682ac4",
+      "2026-11-22T17:39:14.9390410Z Release candidate 0.40.0 (40), x86_64: 24757951 bytes, SHA-256 3a0ca12ca8ce5c3f65b1ddb0f47d57d27f42d96cdf3208053dfa1080930974f5",
+      "2026-11-22T17:39:14.9391825Z All four candidates 0.40.0 (40) verified; persistent local signing is still required."
+    ]
+  },
+  "androidCandidateJobIds": [
+    137292257186
+  ],
+  "candidateArtifact": {
+    "id": 14765526357,
+    "name": "pushok-flow-release-candidate",
+    "sizeBytes": 137394733,
+    "sha256": "a121cb1a43489b5f23c3bef0c15800ac2b8bbab8e0aff38cc94da4d6afea490d",
+    "digest": "sha256:a121cb1a43489b5f23c3bef0c15800ac2b8bbab8e0aff38cc94da4d6afea490d",
+    "expired": false,
+    "sourceCommit": "3b1f8672686e99ddadf2b5fffb9ca972bc41812f",
+    "createdAtUtc": "2026-11-22T17:39:20Z"
+  },
+  "initialPackagingAttempt": {
+    "sourceCommit": "bc0ee31cb03fbf251a2505169ab09d5e12995f13",
+    "runId": 45048570177,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45048570177",
+    "conclusion": "failure",
+    "published": false,
+    "candidateApkArtifactUploaded": false,
+    "reason": "Universal APK contained an extra native ABI; strict post-build validation rejected it.",
+    "correction": "Exclude unsupported lib/x86/** during packaging; preserve exact ABI gates and log all four native inventories before validation.",
+    "dependencyEvidence": {
+      "dependency": "com.wireguard.android:tunnel:1.0.20260102",
+      "url": "https://repo.maven.apache.org/maven2/com/wireguard/android/tunnel/1.0.20260102/tunnel-1.0.20260102.aar",
+      "sizeBytes": 5830762,
+      "computedSha256": "2b9c16db026496123e4db695d26d03d1958a201096c7c4c89b21077dc70f3119",
+      "inspection": "Downloaded public official Maven Central AAR into memory; read ZIP central directory without extracting or executing contents. Hash computed over downloaded bytes.",
+      "abis": [
+        "arm64-v8a",
+        "armeabi-v7a",
+        "x86",
+        "x86_64"
+      ],
+      "nativeLibraries": [
+        "jni/arm64-v8a/libwg-go.so",
+        "jni/arm64-v8a/libwg-quick.so",
+        "jni/arm64-v8a/libwg.so",
+        "jni/armeabi-v7a/libwg-go.so",
+        "jni/armeabi-v7a/libwg-quick.so",
+        "jni/armeabi-v7a/libwg.so",
+        "jni/x86/libwg-go.so",
+        "jni/x86/libwg-quick.so",
+        "jni/x86/libwg.so",
+        "jni/x86_64/libwg-go.so",
+        "jni/x86_64/libwg-quick.so",
+        "jni/x86_64/libwg.so"
+      ],
+      "officialSourceUrl": "https://github.com/WireGuard/wireguard-android/blob/1.0.20260102/tunnel/build.gradle.kts",
+      "officialSourceFindings": {
+        "abiFiltersPresent": false,
+        "nativeTargets": [
+          "libwg-go.so",
+          "libwg.so",
+          "libwg-quick.so"
+        ]
+      },
+      "recordedAtUtc": "2026-11-22T17:31:08.898565+00:00"
+    }
+  },
+  "officialSdkTools": {
+    "id": 14764818575,
+    "name": "pushok-flow-android-signing-tools",
+    "sizeBytes": 21275637,
+    "sha256": "e474db3110a07125dbf6376dc7f137fd3fedb6c15a97743d4299461de98686dc",
+    "digest": "sha256:e474db3110a07125dbf6376dc7f137fd3fedb6c15a97743d4299461de98686dc",
+    "expired": false,
+    "sourceCommit": "3b1f8672686e99ddadf2b5fffb9ca972bc41812f",
+    "createdAtUtc": "2026-11-22T17:31:10Z",
+    "buildToolsVersion": "37.0.0",
+    "verifiedFiles": 12
+  },
+  "assets": {
+    "Pushok-Flow-v0.40.0.apk": {
+      "size": 66629682,
+      "digest": "sha256:b4f3f83e764e0ebdb1751dcf49a49abc1447942cb143389c04306a17a66fd2ad",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0.apk"
+    },
+    "Pushok-Flow-v0.40.0.apk.sha256": {
+      "size": 90,
+      "digest": "sha256:6d0d9fead195130c9920d158bfb93d06ffd8e48c75ae1f1609ba083fc44d2252",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0.apk.sha256"
+    },
+    "Pushok-Flow-v0.40.0-arm64-v8a.apk": {
+      "size": 23403748,
+      "digest": "sha256:942a65676fa0d39fe9b918998be3aa937289bffb880d48fbe488d18410a64003",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0-arm64-v8a.apk"
+    },
+    "Pushok-Flow-v0.40.0-arm64-v8a.apk.sha256": {
+      "size": 100,
+      "digest": "sha256:21d6c13ee1b88034a663781023af7cc678dea15cbe2f0c6d8e63cf93f47b0b62",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0-arm64-v8a.apk.sha256"
+    },
+    "Pushok-Flow-v0.40.0-armeabi-v7a.apk": {
+      "size": 23596272,
+      "digest": "sha256:fbcde2e8d881bb751333da0ec8ad54e698b44e387176937d5530c8538a9fcc43",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0-armeabi-v7a.apk"
+    },
+    "Pushok-Flow-v0.40.0-armeabi-v7a.apk.sha256": {
+      "size": 102,
+      "digest": "sha256:499a9841f4414f7dcbf28a601e01d097ead7a94fbac5c7257803df4fae1877d4",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0-armeabi-v7a.apk.sha256"
+    },
+    "Pushok-Flow-v0.40.0-x86_64.apk": {
+      "size": 24767698,
+      "digest": "sha256:eefe98770c4a455022940d1baa4c069dea667cde6af3869c1c5ae4555345f951",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0-x86_64.apk"
+    },
+    "Pushok-Flow-v0.40.0-x86_64.apk.sha256": {
+      "size": 97,
+      "digest": "sha256:7b2bef67380c0a0213899c008d90eb8ed580688188403dfb99aa31044eccc75f",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/Pushok-Flow-v0.40.0-x86_64.apk.sha256"
+    },
+    "update.json": {
+      "size": 431,
+      "digest": "sha256:08c55301b995b371dcef0256161ba411f6b9bd2f49b6bc67a7551cae1f326a6b",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.40.0/update.json"
+    }
+  },
+  "localVerification": {
+    "persistentCertificateMatchesPreviousRelease": true,
+    "samePackageVersionCodeMinSdkAndSignerForAllFourApks": true,
+    "apkPayloadsUnchangedBySigning": true,
+    "allFourPublicDeltasExactRoundTrip": true,
+    "zipalign16KiB": "passed",
+    "packageVersionMinSdkNonDebuggable": "passed",
+    "universalNativeLibraries": 18,
+    "eachAbiNativeLibraries": 6,
+    "allNativeLibrariesDeflatedNonEmptyAndUnencrypted": "passed",
+    "manifestExtractNativeLibsTrue": "passed",
+    "noDuplicateZipEntries": "passed",
+    "legacyUniversalManifestSchema": 1,
+    "legacyManifestFieldCount": 9
+  },
+  "sizeComparison": {
+    "path": "docs/development-checks/apk-size-v040.json",
+    "xrayFlutterWireguardRawContentUnchanged": true,
+    "variantNativeLibrariesMatchUniversal": true,
+    "installedSizeMeasured": false,
+    "ramMeasured": false
+  },
+  "publication": {
+    "status": "authorized_ready_for_workflow",
+    "workflowDispatched": false,
+    "authorization": "Standing user instruction to publish completed Pushok Flow updates, recorded in AGENTS.md on 2026-11-22.",
+    "latestPublishedTag": "v0.39.0",
+    "latestPublishedReleaseId": 454602106,
+    "previousManifestSha256": "99fdfac5d2a4621f60662c6a0cec842018f97d6f9014a70893ad78fd6d67fdb2"
+  },
+  "physicalDeviceAcceptance": {
+    "status": "pending",
+    "scope": [
+      "installation over the previous signed version and profile preservation",
+      "automatic ABI selection and background download on a physical Android device",
+      "real tunnel connection, automatic-install eligibility and system confirmation",
+      "installed storage, startup, installation time and RAM"
+    ]
+  }
+}
