@@ -8,12 +8,8 @@ import com.google.zxing.Result
 import com.google.zxing.common.BitMatrix
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.multi.qrcode.QRCodeMultiReader
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.nio.CharBuffer
-import java.nio.charset.CodingErrorAction
-import java.nio.charset.StandardCharsets
 
 /** Offline QR-only decoding. Protocol-specific validation still checks the returned draft. */
 object ProfileQrDecoder {
@@ -161,30 +157,11 @@ object ProfileQrDecoder {
         }
     }
 
-    fun normalizePayload(value: String?, cancelled: () -> Boolean = { false }): String {
-        active(cancelled)
-        if (value == null || value.length > ProfileImportReader.MAX_BYTES) {
-            fail(if (value == null) "PROFILE_IMPORT_INVALID" else "PROFILE_IMPORT_TOO_LARGE")
-        }
-        val encoded = try {
-            StandardCharsets.UTF_8.newEncoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .encode(CharBuffer.wrap(value))
-        } catch (_: Exception) { fail("PROFILE_IMPORT_INVALID") }
-        if (encoded.remaining() > ProfileImportReader.MAX_BYTES) fail("PROFILE_IMPORT_TOO_LARGE")
-        val bytes = ByteArray(encoded.remaining())
-        encoded.get(bytes)
-        val text = try { ProfileImportReader.read(ByteArrayInputStream(bytes), cancelled) }
-            finally { bytes.fill(0); if (encoded.hasArray()) encoded.array().fill(0) }
-        // A VLESS link is local configuration, never a URL to fetch. JSON, subscription
-        // URLs and base64 wrappers are rejected. WG options (including AWG) remain intact
-        // for authoritative Config.parse validation before the draft crosses the channel.
-        try { ConnectionProfile.validateShape(text) }
-        catch (error: ProfileFormatFailure) { fail(error.code) }
-        active(cancelled)
-        return text
-    }
+    // The image and camera routes use the same bounded, local classifier. The Android
+    // importer returns a typed draft only after WireGuard's authoritative parse as well.
+    // A HTTPS address is a candidate subscription, never an instruction to fetch here.
+    fun normalizePayload(value: String?, cancelled: () -> Boolean = { false }): String =
+        ProfileImportPayload.parse(value, cancelled).text
 
     private fun active(cancelled: () -> Boolean) {
         if (cancelled()) fail("PROFILE_IMPORT_INTERRUPTED")

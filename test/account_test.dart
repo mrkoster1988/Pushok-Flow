@@ -88,14 +88,15 @@ void _pause(WidgetTester tester) {
 
 Future<void> _withCard(WidgetTester tester, Future<void> Function() body,
     {bool isAndroid = true, bool settle = true, double textScale = 1,
-      Size size = const Size(390, 844), VoidCallback? onOpenCabinet}) async {
+      Size size = const Size(390, 844), VoidCallback? onOpenCabinet,
+      DateTime Function()? now}) async {
   _resume(tester);
   await tester.binding.setSurfaceSize(size);
   await tester.pumpWidget(MaterialApp(theme: buildPushokTheme(),
     builder: (context, child) => MediaQuery(
       data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)), child: child!),
     home: Scaffold(body: SingleChildScrollView(padding: const EdgeInsets.all(16),
-      child: PushokAccountCard(isAndroid: isAndroid, onOpenCabinet: onOpenCabinet))),
+      child: PushokAccountCard(isAndroid: isAndroid, onOpenCabinet: onOpenCabinet, now: now))),
   ));
   if (settle) { await tester.pumpAndSettle(); } else { await tester.pump(); }
   try { await body(); }
@@ -284,6 +285,116 @@ void main() {
       expect(find.textContaining('Сохранённые данные остаются доступны'), findsOneWidget);
       expect(bridge.count('beginLogin'), 0);
     });
+  });
+
+  testWidgets('An open connected card marks its cache stale without a network refresh', (tester) async {
+    var now = DateTime.now();
+    bridge.state = _state(state: 'connected');
+    bridge.state['refreshedAt'] = now.millisecondsSinceEpoch;
+    await _withCard(tester, () async {
+      expect(find.byKey(const Key('account_stale')), findsNothing);
+      final calls = bridge.calls.length;
+      now = now.add(const Duration(minutes: 5));
+      await tester.pump(const Duration(minutes: 5));
+      expect(find.byKey(const Key('account_stale')), findsOneWidget);
+      expect(find.text('Проверочный аккаунт'), findsOneWidget);
+      expect(bridge.calls.length, calls, reason: 'A cache age label needs no native or network request.');
+    }, now: () => now);
+  });
+
+  testWidgets('Pending expiry wins over a later slow-down poll deadline', (tester) async {
+    var now = DateTime.now();
+    bridge.state = _state(state: 'pending', error: 'FLOW_LOGIN_SLOW_DOWN');
+    bridge.state['pending'] = {
+      'userCode': _code,
+      'expiresAt': now.millisecondsSinceEpoch + 2000,
+      'nextPollAt': now.millisecondsSinceEpoch + 60000,
+    };
+    await _withCard(tester, () async {
+      expect(find.byKey(const Key('flow_account_code')), findsOneWidget);
+      bridge.state = _state(error: 'FLOW_LOGIN_EXPIRED');
+      now = now.add(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('flow_account_code')), findsNothing);
+      expect(find.byKey(const Key('flow_account_waiting')), findsNothing);
+      expect(find.textContaining('Время подтверждения истекло'), findsOneWidget);
+      expect(bridge.count('status'), 2);
+      expect(bridge.count('pollLogin'), 0);
+      expect(bridge.count('beginLogin'), 0);
+      expect(bridge.count('openLogin'), 0);
+    }, now: () => now);
+  });
+
+  testWidgets('Session expiry hides cached identity and reads native state only once', (tester) async {
+    var now = DateTime.now();
+    bridge.state = _state(state: 'connected');
+    bridge.state['refreshedAt'] = now.millisecondsSinceEpoch;
+    bridge.state['sessionExpiresAt'] = now.millisecondsSinceEpoch + 2000;
+    await _withCard(tester, () async {
+      expect(find.text('Проверочный аккаунт'), findsOneWidget);
+      final gate = Completer<Object?>();
+      bridge.gates['status'] = gate;
+      now = now.add(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(find.text('Проверочный аккаунт'), findsNothing,
+        reason: 'An expired cache is hidden even while the native reply is in flight.');
+      expect(find.byKey(const Key('account_wallet_rub')), findsNothing);
+      gate.complete(_state(error: 'FLOW_SESSION_EXPIRED'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Сессия аккаунта завершена'), findsOneWidget);
+      now = now.add(const Duration(minutes: 1));
+      await tester.pump(const Duration(minutes: 1));
+      expect(bridge.count('status'), 2);
+      expect(bridge.count('refresh'), 0);
+      expect(bridge.count('beginLogin'), 0);
+    }, now: () => now);
+  });
+
+  testWidgets('Expiry bridge failure leaves no stale identity or automatic retry loop', (tester) async {
+    var now = DateTime.now();
+    bridge.state = _state(state: 'connected');
+    bridge.state['refreshedAt'] = now.millisecondsSinceEpoch;
+    bridge.state['sessionExpiresAt'] = now.millisecondsSinceEpoch + 2000;
+    await _withCard(tester, () async {
+      bridge.statusError = MissingPluginException('PRIVATE_NATIVE_DETAILS');
+      now = now.add(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(find.text('Проверочный аккаунт'), findsNothing);
+      expect(find.byKey(const Key('account_wallet_rub')), findsNothing);
+      expect(find.textContaining('PRIVATE'), findsNothing);
+      now = now.add(const Duration(minutes: 1));
+      await tester.pump(const Duration(minutes: 1));
+      expect(bridge.count('status'), 2);
+      expect(bridge.count('refresh'), 0);
+      expect(bridge.count('beginLogin'), 0);
+    }, now: () => now);
+  });
+
+  testWidgets('Clock deadlines pause in background and resume from durable native status', (tester) async {
+    var now = DateTime.now();
+    bridge.state = _state(state: 'pending');
+    bridge.state['pending'] = {
+      'userCode': _code,
+      'expiresAt': now.millisecondsSinceEpoch + 2000,
+      'nextPollAt': now.millisecondsSinceEpoch + 60000,
+    };
+    await _withCard(tester, () async {
+      _pause(tester);
+      bridge.state = _state(error: 'FLOW_LOGIN_EXPIRED');
+      now = now.add(const Duration(minutes: 1));
+      await tester.pump(const Duration(minutes: 1));
+      expect(bridge.count('status'), 1);
+      expect(bridge.count('pollLogin'), 0);
+      _resume(tester);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('flow_account_code')), findsNothing);
+      expect(find.textContaining('Время подтверждения истекло'), findsOneWidget);
+      expect(bridge.count('status'), 2);
+      expect(bridge.count('beginLogin'), 0);
+    }, now: () => now);
   });
 
   testWidgets('Local logout removes profile even when remote revocation is unavailable', (tester) async {

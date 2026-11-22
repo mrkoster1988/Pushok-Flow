@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 import 'tunnel_diagnostics.dart';
 import 'wireguard_profiles.dart';
+import 'profile_import.dart';
 
 class WireGuardTunnel {
   static const _channel = MethodChannel('shop.pushok.flow/app_routes');
@@ -43,17 +44,17 @@ class WireGuardTunnel {
     await _channel.invokeMethod('selectWireGuardProfile', {'profileId': profileId});
   }
 
-  /// Reads one explicitly selected file into a draft; does not save or connect.
-  static Future<String?> importProfile() =>
-      _channel.invokeMethod<String>('importWireGuardProfile');
+  /// Reads an explicit file into a draft; subscription URLs require confirmation.
+  static Future<String?> importProfile() => _import('importWireGuardProfile');
 
   /// Scans a QR locally into a protected draft; does not save or connect.
-  static Future<String?> scanProfileQr() =>
-      _channel.invokeMethod<String>('scanWireGuardProfileQr');
+  static Future<String?> scanProfileQr() => _import('scanWireGuardProfileQr');
 
   /// Reads a QR from one explicitly selected image without opening the camera.
-  static Future<String?> importProfileQrImage() =>
-      _channel.invokeMethod<String>('importWireGuardProfileQrImage');
+  static Future<String?> importProfileQrImage() => _import('importWireGuardProfileQrImage');
+
+  static Future<String?> _import(String method) async => ProfileImportPayload.read(
+      await _channel.invokeMethod<Object?>(method));
 
   static Future<void> cancelProfileImport() async {
     await _channel.invokeMethod('cancelWireGuardProfileImport');

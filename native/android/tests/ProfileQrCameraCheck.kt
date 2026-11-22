@@ -72,6 +72,48 @@ private fun reads(label: String, expected: String, source: PlanarYUVLuminanceSou
     }
 }
 
+private fun importOutcome(read: () -> String): Map<String, String> = try {
+    ProfileImportPayload.parse(read()).toPlatform()
+} catch (failure: ProfileImportReader.Failure) { mapOf("errorCode" to failure.code) }
+
+private fun cameraPhotoImportParity() {
+    val supportedVless = vless.substringBefore('#') + "#%D0%A2%D0%B5%D1%81%D1%82"
+    val subscription = "https://example.invalid/Sub/%2FSYNTHETIC?token=a+b%2Bc"
+    val fixtures = listOf(
+        Triple("VLESS", supportedVless, mapOf("kind" to "profile", "config" to supportedVless)),
+        Triple("WireGuard", wireGuard, mapOf("kind" to "profile", "config" to wireGuard)),
+        Triple("HTTPS", subscription, mapOf("kind" to "subscription", "url" to subscription)),
+        Triple("app subscription link", "pushokflow://subscription?url=" +
+            java.net.URLEncoder.encode(subscription, "UTF-8"),
+            mapOf("kind" to "subscription", "url" to subscription)),
+        Triple("Telegram", "tg://proxy?server=example.invalid&port=443&secret=SYNTHETIC",
+            mapOf("errorCode" to "PROFILE_TELEGRAM_LINK")),
+        Triple("VMess", "vmess://SYNTHETIC", mapOf("errorCode" to "PROFILE_VMESS_LINK")),
+        Triple("Trojan", "trojan://SYNTHETIC@example.invalid:443", mapOf("errorCode" to "PROFILE_TROJAN_LINK")),
+        Triple("Shadowsocks", "ss://SYNTHETIC@example.invalid:443", mapOf("errorCode" to "PROFILE_SHADOWSOCKS_LINK")),
+        Triple("insecure subscription", "http://example.invalid/sub/SYNTHETIC",
+            mapOf("errorCode" to "SUBSCRIPTION_URL_INVALID")),
+        Triple("private subscription", "https://127.0.0.1/sub/SYNTHETIC",
+            mapOf("errorCode" to "SUBSCRIPTION_URL_INVALID")),
+    )
+    for ((label, payload, expected) in fixtures) {
+        val symbol = qr(payload)
+        for (inverted in listOf(false, true)) {
+            val target = decoder()
+            val source = frame(symbol, inverted = inverted)
+            val read = target.decode(source) ?: target.decode(source)
+            check(read?.barcodeFormat == BarcodeFormat.QR_CODE) { "Missing parity fixture: $label" }
+            // Match production's raw camera result -> bounded normalization -> typed draft.
+            val camera = importOutcome { ProfileQrDecoder.normalizePayload(read!!.text) }
+            val pixels = IntArray(symbol.width * symbol.height) { index ->
+                if (symbol[index % symbol.width, index / symbol.width] != inverted) -0x1000000 else -1
+            }
+            val photo = importOutcome { ProfileQrDecoder.decodePixels(symbol.width, symbol.height, pixels) }
+            check(camera == expected && photo == expected) { "Import parity failed: $label" }
+        }
+    }
+}
+
 fun main() {
     val ordinary = frame(qr(vless))
     val inverted = frame(qr(vless), inverted = true)
@@ -101,6 +143,7 @@ fun main() {
     val barcode = frame(Code128Writer().encode("123456789012", BarcodeFormat.CODE_128, 560, 160))
     repeat(4) { check(target.decode(barcode) == null) { "Non-QR format was accepted" } }
     reads("after non-QR frames", vless, ordinary, target)
+    cameraPhotoImportParity()
 
     println("Profile QR camera checks passed")
 }

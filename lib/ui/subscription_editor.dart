@@ -8,9 +8,12 @@ import '../platform/wireguard_profiles.dart';
 /// The caller owns a ProfilePrivacy lease for this route and its closing frame.
 class SubscriptionEditor extends StatefulWidget {
   const SubscriptionEditor({super.key, this.draft,
-    required this.onSave});
+    required this.onSave, this.onClose, this.onCompleted});
   final SubscriptionDraft? draft;
   final Future<void> Function(String url, String name) onSave;
+  /// Inline import keeps the original profile draft in the same protected route.
+  final VoidCallback? onClose;
+  final VoidCallback? onCompleted;
 
   @override
   State<SubscriptionEditor> createState() => _SubscriptionEditorState();
@@ -25,10 +28,11 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   bool _visible = false;
   bool _saving = false;
   bool _pasting = false;
+  bool _closing = false;
   bool _foreground = true;
   int _inputEpoch = 0;
   String? _error;
-  bool get _busy => _saving || _pasting;
+  bool get _busy => _saving || _pasting || _closing;
 
   @override
   void initState() {
@@ -74,7 +78,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   }
 
   Future<void> _paste() async {
-    if (_busy || !_foreground) return;
+    if (!mounted || _busy || !_foreground) return;
     final epoch = _inputEpoch;
     setState(() { _pasting = true; _error = null; });
     try {
@@ -96,7 +100,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   }
 
   Future<void> _save() async {
-    if (_busy || !_foreground) return;
+    if (!mounted || _busy || !_foreground) return;
     final url = _url.text.trim();
     final name = _name.text.trim();
     if (!WireGuardProfiles.isValidName(name)) {
@@ -112,7 +116,12 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     setState(() { _saving = true; _error = null; _visible = false; });
     try {
       await widget.onSave(url, name);
-      if (mounted) Navigator.of(context).pop<bool>(true);
+      if (!mounted || _closing) return;
+      if (widget.onCompleted != null) {
+        widget.onCompleted!();
+      } else {
+        Navigator.of(context).pop<bool>(true);
+      }
     } catch (error) {
       if (mounted) setState(() {
         _saving = false;
@@ -121,11 +130,37 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     }
   }
 
+  void _closeEditor() {
+    if (!mounted || _busy || !_foreground) return;
+    _closing = true;
+    _inputEpoch++;
+    _visible = false;
+    if (widget.onClose != null) {
+      widget.onClose!();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _toggleVisibility() {
+    if (!mounted || _busy || !_foreground) return;
+    setState(() => _visible = !_visible);
+    if (!_visible) _urlFocus.unfocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final host = SubscriptionDraft.validUrl(_url.text.trim())
         ? Uri.parse(_url.text.trim()).host : null;
-    return PopScope<bool>(canPop: !_saving,
+    return PopScope<Object?>(canPop: !_saving && !_closing && widget.onClose == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          _closing = true;
+          _inputEpoch++;
+        } else if (widget.onClose != null) {
+          _closeEditor();
+        }
+      },
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
         child: SafeArea(top: false,
@@ -137,11 +172,12 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                   const Expanded(child: Text('Добавить подписку',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
                   IconButton(key: const Key('close_subscription_editor'),
-                    tooltip: 'Закрыть', onPressed: _busy ? null : () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close)),
+                    tooltip: widget.onClose == null ? 'Закрыть' : 'Вернуться к профилю',
+                    onPressed: _busy || !_foreground ? null : _closeEditor,
+                    icon: Icon(widget.onClose == null ? Icons.close : Icons.arrow_back)),
                 ]),
                 const SizedBox(height: 8),
-                const Text('Ссылка из ${FlowSubscriptions.botUsername} или вашей панели.',
+                const Text('HTTPS-ссылка подписки от провайдера или из вашей панели.',
                   style: TextStyle(color: PushokPalette.muted)),
                 const SizedBox(height: 16),
                 TextField(key: const Key('subscription_name'), controller: _name,
@@ -165,10 +201,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                     helperMaxLines: 2,
                     suffixIcon: IconButton(key: const Key('toggle_subscription_url_visibility'),
                       tooltip: _visible ? 'Скрыть ссылку' : 'Показать ссылку',
-                      onPressed: _busy || !_foreground ? null : () {
-                        setState(() => _visible = !_visible);
-                        if (!_visible) _urlFocus.unfocus();
-                      },
+                      onPressed: _busy || !_foreground ? null : _toggleVisibility,
                       icon: Icon(_visible ? Icons.visibility_off_outlined : Icons.visibility_outlined)))),
                 const SizedBox(height: 10),
                 Align(alignment: Alignment.centerRight,

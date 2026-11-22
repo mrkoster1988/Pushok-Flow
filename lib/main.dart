@@ -555,16 +555,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           side: BorderSide(color: PushokPalette.glowCyan)),
         builder: (context) => SubscriptionEditor(draft: draft,
-          onSave: (url, name) async {
-            if (!mounted || !_foreground || connected || connecting) {
-              throw PlatformException(code: 'VPN_ACTIVE');
-            }
-            final status = await _subscriptionBridge.importSubscription(url, name);
-            if (mounted) setState(() {
-              _subscriptions = status;
-              _subscriptionsError = null;
-            });
-          }),
+          onSave: _saveSubscriptionDraft),
       );
       unawaited(navigator.push<bool>(route));
       saved = await route.completed;
@@ -586,6 +577,25 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
     if (saved == true && mounted && _foreground) {
       _showNotice('Подписка добавлена. Выберите сервер и подключитесь на главной.');
+    }
+  }
+
+  Future<void> _saveSubscriptionDraft(String url, String name) async {
+    if (!mounted || !_foreground || connected || connecting || _nativeBusy) {
+      throw PlatformException(code: 'VPN_ACTIVE');
+    }
+    // A slow read from before confirmation must not overwrite the imported list.
+    _subscriptionEpoch++;
+    _subscriptionPoll?.cancel();
+    setState(() { _subscriptionsLoading = false; _subscriptionsBusy = true; });
+    try {
+      final status = await _subscriptionBridge.importSubscription(url, name);
+      if (mounted) setState(() {
+        _subscriptions = status;
+        _subscriptionsError = null;
+      });
+    } finally {
+      if (mounted) setState(() => _subscriptionsBusy = false);
     }
   }
 
@@ -802,6 +812,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     final requestEpoch = _profileRequestEpoch;
     ProfilePrivacy? protection;
     String? saved;
+    var subscriptionSaved = false;
     int? saveIntentEpoch;
     try {
       try {
@@ -864,6 +875,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           onScanQr: WireGuardTunnel.scanProfileQr,
           onImportQrImage: WireGuardTunnel.importProfileQrImage,
           onCancelImport: WireGuardTunnel.cancelProfileImport,
+          onSaveSubscription: _saveSubscriptionDraft,
+          onSubscriptionSaved: () => subscriptionSaved = true,
           onSave: (config, name) async {
             if (!mounted || !_foreground) {
               throw PlatformException(code: 'PROFILE_SAVE_INTERRUPTED');
@@ -906,7 +919,15 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         await _refreshProfileStatus();
       }
     }
-    if (!mounted || saved == null) return;
+    if (!mounted) return;
+    if (subscriptionSaved) {
+      if (_foreground) {
+        setState(() => tab = 2);
+        _showNotice('Подписка добавлена. Выберите сервер и подключитесь на главной.');
+      }
+      return;
+    }
+    if (saved == null) return;
     if (connectAfterSave) {
       // A slow save must not start VPN permission UI after app switching.
       if (!_foreground || saveIntentEpoch != _profileRequestEpoch) {
@@ -1179,7 +1200,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.44.0',
+            version: '0.45.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,

@@ -171,7 +171,7 @@ class WireGuardProfileImport(
         val documentResolver = resolver
         val platformHandler = handler
         io.execute {
-            var config: String? = null
+            var payload: ProfileImportPayload.Draft? = null
             var failure: String? = null
             try {
                 if (request.cancelled.get()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
@@ -186,13 +186,16 @@ class WireGuardProfileImport(
                     if (request.source == Source.QR_IMAGE) ProfileQrImageReader.read(input) { request.cancelled.get() }
                     else ProfileImportReader.read(input) { request.cancelled.get() }
                 }
-                // Parse before crossing the channel. The editor still requires explicit Save.
-                // No filename, URI, raw parser error, or parsed peer/key object is returned.
-                if (ConnectionProfile.validateShape(draft) == ConnectionProfile.Kind.WIREGUARD) {
-                    val parsed = Config.parse(ByteArrayInputStream(draft.toByteArray(StandardCharsets.UTF_8)))
+                // Classify before crossing the channel. A subscription remains a masked
+                // draft and requires explicit confirmation/import; no URL is fetched here.
+                // A profile still requires explicit Save and authoritative WG validation.
+                val parsedPayload = ProfileImportPayload.parse(draft) { request.cancelled.get() }
+                if (parsedPayload is ProfileImportPayload.Profile &&
+                    parsedPayload.protocol == ConnectionProfile.Kind.WIREGUARD) {
+                    val parsed = Config.parse(ByteArrayInputStream(parsedPayload.text.toByteArray(StandardCharsets.UTF_8)))
                     if (parsed.peers.isEmpty()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INVALID")
                 }
-                if (!request.cancelled.get()) config = draft
+                if (!request.cancelled.get()) payload = parsedPayload
             } catch (error: ProfileFormatFailure) {
                 failure = error.code
             } catch (error: ProfileImportReader.Failure) {
@@ -205,7 +208,7 @@ class WireGuardProfileImport(
                 request.closeResources()
                 reading.set(false)
             }
-            val value = config
+            val value = payload
             val code = failure
             platformHandler.post {
                 val current = owner.get() ?: return@post
@@ -234,7 +237,7 @@ class WireGuardProfileImport(
         stopRead(request)
     }
 
-    private fun finish(request: Request, value: String? = null, code: String? = null) {
+    private fun finish(request: Request, value: ProfileImportPayload.Draft? = null, code: String? = null) {
         if (pending !== request) return
         pending = null
         if (request.source == Source.CAMERA) qrSessions.end(request.code)
@@ -242,7 +245,7 @@ class WireGuardProfileImport(
         request.timeout = null
         val result = request.result ?: return
         request.result = null
-        if (code == null) result.success(value) else error(result, code)
+        if (code == null) result.success(value?.toPlatform()) else error(result, code)
     }
 
     private fun stopRead(request: Request) {
@@ -260,6 +263,11 @@ class WireGuardProfileImport(
             "PROFILE_IMPORT_INVALID" -> "Нужен полный профиль WireGuard или ссылка VLESS в формате UTF-8"
             "INVALID_VLESS_CONFIG" -> "Проверьте ссылку VLESS: обязательные параметры отсутствуют или неверны"
             "UNSUPPORTED_PROFILE" -> "Поддерживаются профиль WireGuard и ссылка VLESS"
+            "SUBSCRIPTION_URL_INVALID" -> "Для подписки нужна полная публичная HTTPS-ссылка без логина и пароля"
+            "PROFILE_TELEGRAM_LINK" -> "Это ссылка Telegram, а не профиль WireGuard/VLESS или HTTPS-подписка"
+            "PROFILE_VMESS_LINK" -> "Это ссылка VMess; этот протокол пока не поддерживается"
+            "PROFILE_TROJAN_LINK" -> "Это ссылка Trojan; этот протокол пока не поддерживается"
+            "PROFILE_SHADOWSOCKS_LINK" -> "Это ссылка Shadowsocks; этот протокол пока не поддерживается"
             "UNSUPPORTED_TRANSPORT" -> "Для VLESS поддерживаются TCP / RAW, WebSocket и gRPC; проверьте параметры транспорта"
             "UNSUPPORTED_SECURITY" -> "Для TCP / RAW нужны TLS или REALITY, для WebSocket и gRPC — TLS; encryption=none, проверка сертификата включена"
             "UNSUPPORTED_PROFILE_OPTION" -> "Ссылка VLESS содержит пока неподдерживаемый параметр"

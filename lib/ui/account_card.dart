@@ -8,11 +8,12 @@ import '../platform/subscriptions.dart';
 
 class PushokAccountCard extends StatefulWidget {
   const PushokAccountCard({super.key, required this.isAndroid, this.account,
-    this.onOpenCabinet, this.onOpenHub});
+    this.onOpenCabinet, this.onOpenHub, this.now});
   final bool isAndroid;
   final FlowAccount? account;
   final VoidCallback? onOpenCabinet;
   final VoidCallback? onOpenHub;
+  final DateTime Function()? now;
 
   @override
   State<PushokAccountCard> createState() => _PushokAccountCardState();
@@ -26,6 +27,12 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   bool _foreground = true;
   int _epoch = 0;
   Timer? _poll;
+  Timer? _viewTimer;
+  int? _expiryChecked;
+
+  int get _nowMs => (widget.now?.call() ?? DateTime.now()).millisecondsSinceEpoch;
+  int? get _expiresAt => _status?.pending?.expiresAt ?? _status?.sessionExpiresAt;
+  bool get _expired => _expiresAt != null && _expiresAt! <= _nowMs;
 
   @override
   void initState() {
@@ -41,6 +48,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   void dispose() {
     _epoch++;
     _poll?.cancel();
+    _viewTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -49,6 +57,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _epoch++;
     _poll?.cancel();
+    _viewTimer?.cancel();
     _foreground = state == AppLifecycleState.resumed;
     // A response from before switching to Telegram must not overwrite the
     // fresh, durable native snapshot read on return.
@@ -59,17 +68,48 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   void _schedulePoll() {
     _poll?.cancel();
     final pending = _status?.pending;
-    if (!mounted || !_foreground || _busy || pending == null || !widget.isAndroid) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!mounted || !_foreground || _busy || pending == null || _expired || !widget.isAndroid) return;
+    final now = _nowMs;
     final delay = (pending.nextPollAt - now).clamp(1000, 60000).toInt();
     _poll = Timer(Duration(milliseconds: delay), () => unawaited(_run(_account.pollLogin)));
+  }
+
+  void _scheduleViewUpdate() {
+    _viewTimer?.cancel();
+    if (!mounted || !_foreground || !widget.isAndroid) return;
+    final expires = _expiresAt;
+    if (expires == null) { _expiryChecked = null; return; }
+    final now = _nowMs;
+    if (expires <= now) {
+      // Read the native authority once at this deadline. A failed bridge must not
+      // create an immediate retry loop; the expired data is already hidden locally.
+      if (!_busy && _expiryChecked != expires) {
+        _expiryChecked = expires;
+        _viewTimer = Timer(Duration.zero, () => unawaited(_run(_account.status)));
+      }
+      return;
+    }
+    _expiryChecked = null;
+    var next = expires;
+    final refreshed = _status?.refreshedAt;
+    if (_status?.state == FlowAccountState.connected && !(_status?.stale ?? false) && refreshed != null) {
+      final staleAt = refreshed + 5 * 60000;
+      if (staleAt > now && staleAt < next) next = staleAt;
+    }
+    _viewTimer = Timer(Duration(milliseconds: next - now), () {
+      if (!mounted || !_foreground) return;
+      // Age labels change locally; only an expiry edge asks native code to clear
+      // its durable record. No network refresh or new login starts from this timer.
+      setState(() {});
+      _scheduleViewUpdate();
+    });
   }
 
   Future<void> _read() async {
     await _run(_account.status);
     final status = _status;
-    if (!mounted || !_foreground || _busy || status?.state != FlowAccountState.connected) return;
-    final age = DateTime.now().millisecondsSinceEpoch - (status!.refreshedAt ?? 0);
+    if (!mounted || !_foreground || _busy || _expired || status?.state != FlowAccountState.connected) return;
+    final age = _nowMs - (status!.refreshedAt ?? 0);
     if (status.stale || age > 60000) await _run(_account.refresh);
   }
 
@@ -89,6 +129,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       if (mounted && epoch == _epoch) {
         setState(() => _busy = false);
         _schedulePoll();
+        _scheduleViewUpdate();
       }
     }
   }
@@ -155,9 +196,16 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   @override
   Widget build(BuildContext context) {
     final status = _status;
-    final pending = status?.pending;
+    final expired = _expired;
+    final pending = expired ? null : status?.pending;
+    final connected = status?.state == FlowAccountState.connected && !expired;
+    final stale = (status?.stale ?? false) || (connected &&
+      _nowMs - (status?.refreshedAt ?? 0) >= 5 * 60000);
     final enabled = widget.isAndroid && _foreground && !_busy && !(status?.busy ?? false);
-    final error = _error ?? (status?.errorCode == null ? null : flowAccountErrorMessage(status!.errorCode!));
+    final errorCode = expired
+      ? status?.pending != null ? 'FLOW_LOGIN_EXPIRED' : 'FLOW_SESSION_EXPIRED'
+      : status?.errorCode;
+    final error = _error ?? (errorCode == null ? null : flowAccountErrorMessage(errorCode));
     return PushokPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         const Expanded(child: Text('Аккаунт Pushok',
@@ -171,10 +219,10 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       else if (status == null && _busy)
         const Padding(padding: EdgeInsets.symmetric(vertical: 12),
           child: Center(child: CircularProgressIndicator()))
-      else if (status?.state == FlowAccountState.connected) ...[
+      else if (connected) ...[
         if (status!.profile != null) _profile(status.profile!)
         else const Text('Аккаунт подключён. Обновите профиль, чтобы получить данные кабинета.'),
-        if (status.stale) const Padding(padding: EdgeInsets.only(top: 10),
+        if (stale) const Padding(padding: EdgeInsets.only(top: 10),
           child: Text('Показаны сохранённые данные. Требуется обновление.',
             key: Key('account_stale'), style: TextStyle(color: PushokPalette.muted))),
         const SizedBox(height: 12),

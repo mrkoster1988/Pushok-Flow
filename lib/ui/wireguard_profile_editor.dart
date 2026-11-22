@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../platform/subscriptions.dart';
 import '../platform/wireguard_profiles.dart';
+import 'subscription_editor.dart';
 
 enum _ProfileImportSource { file, cameraQr, imageQr }
 
@@ -38,6 +40,8 @@ class WireGuardProfileEditor extends StatefulWidget {
     this.onScanQr,
     this.onImportQrImage,
     this.onCancelImport,
+    this.onSaveSubscription,
+    this.onSubscriptionSaved,
     this.connectAfterSave = false,
     this.initialError,
   });
@@ -49,6 +53,8 @@ class WireGuardProfileEditor extends StatefulWidget {
   final Future<String?> Function()? onScanQr;
   final Future<String?> Function()? onImportQrImage;
   final Future<void> Function()? onCancelImport;
+  final Future<void> Function(String url, String name)? onSaveSubscription;
+  final VoidCallback? onSubscriptionSaved;
   final bool connectAfterSave;
   final String? initialError;
 
@@ -86,6 +92,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     'UNSUPPORTED_SECURITY',
     'UNSUPPORTED_PROFILE_OPTION',
     'INVALID_VLESS_CONFIG',
+    'SUBSCRIPTION_URL_INVALID',
+    'PROFILE_TELEGRAM_LINK',
+    'PROFILE_VMESS_LINK',
+    'PROFILE_TROJAN_LINK',
+    'PROFILE_SHADOWSOCKS_LINK',
   };
   late final TextEditingController _controller;
   late final TextEditingController _nameController;
@@ -105,8 +116,10 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   _ProfileImportFailure? _importFailure;
   bool _copyingImportError = false;
   String? _importCopyNotice;
+  SubscriptionDraft? _subscriptionDraft;
+  bool _editingSubscription = false;
 
-  bool get _busy => _saving || _pasting || _importing;
+  bool get _busy => _saving || _pasting || _importing || _editingSubscription;
   bool get _canReveal {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     return _resumed &&
@@ -192,9 +205,28 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     // field; UI parsing must not normalize, log, or partly accept credentials.
     final scheme = RegExp(r'^([A-Za-z][A-Za-z0-9+.-]*)://')
         .firstMatch(config.trim())?.group(1)?.toLowerCase();
-    if (scheme == 'http' || scheme == 'https') {
+    if (scheme == 'http') {
+      return (code: 'SUBSCRIPTION_URL_INVALID',
+          message: _importError('SUBSCRIPTION_URL_INVALID', _ProfileImportSource.file));
+    }
+    final protocolCode = switch (scheme) {
+      'vmess' => 'PROFILE_VMESS_LINK',
+      'trojan' => 'PROFILE_TROJAN_LINK',
+      'ss' || 'ssr' => 'PROFILE_SHADOWSOCKS_LINK',
+      'tg' => 'PROFILE_TELEGRAM_LINK',
+      _ => null,
+    };
+    if (protocolCode != null || _isTelegramProxy(config.trim())) {
+      final code = protocolCode ?? 'PROFILE_TELEGRAM_LINK';
+      return (code: code, message: _importError(code, _ProfileImportSource.file));
+    }
+    if (scheme == 'https') {
+      if (!SubscriptionDraft.validUrl(config.trim())) {
+        return (code: 'SUBSCRIPTION_URL_INVALID',
+            message: _importError('SUBSCRIPTION_URL_INVALID', _ProfileImportSource.file));
+      }
       return (code: 'UNSUPPORTED_PROFILE',
-          message: 'Это ссылка подписки. Откройте «Серверы → Подписки → Добавить подписку».');
+          message: 'Найдена HTTPS-ссылка. Добавьте её через «Серверы → Подписки → Добавить подписку».');
     }
     if (scheme != null && scheme != 'vless') {
       return (code: 'UNSUPPORTED_PROFILE', message: _unsupportedProfile);
@@ -205,6 +237,51 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   void _clearImportFeedback() {
     _importFailure = null;
     _importCopyNotice = null;
+    _subscriptionDraft = null;
+  }
+
+  bool _isTelegramProxy(String text) {
+    final uri = Uri.tryParse(text);
+    return uri != null &&
+        const {'t.me', 'telegram.me', 'www.t.me', 'www.telegram.me'}
+            .contains(uri.host.toLowerCase()) &&
+        const {'/proxy', '/socks'}.contains(uri.path);
+  }
+
+  bool _offerSubscription(String text) {
+    final url = text.trim();
+    if (widget.onSaveSubscription == null || !SubscriptionDraft.validUrl(url) ||
+        _isTelegramProxy(url)) return false;
+    // Keep the original profile and its name untouched. Scanning does not
+    // navigate, download, save, or authorize connecting to anything.
+    setState(() {
+      _showConfig = false;
+      _error = null;
+      _importFailure = null;
+      _importCopyNotice = null;
+      _subscriptionDraft = SubscriptionDraft(url: url);
+      _notice = 'Найдена HTTPS-ссылка. Добавить её как подписку?';
+    });
+    return true;
+  }
+
+  void _openSubscription() {
+    if (!mounted || _busy || !_canReveal || _editingSubscription ||
+        _subscriptionDraft == null || widget.onSaveSubscription == null ||
+        ModalRoute.of(context)?.isCurrent == false) return;
+    _clearInputSelection();
+    setState(() { _showConfig = false; _editingSubscription = true; });
+  }
+
+  void _discardSubscription() {
+    if (!mounted || _busy || !_canReveal) return;
+    setState(() { _subscriptionDraft = null; _notice = null; });
+  }
+
+  void _closeEditor() {
+    // An old profile button cannot close an inline subscription during save.
+    if (!mounted || _saving || _pasting || _editingSubscription) return;
+    Navigator.of(context).pop();
   }
 
   void _setImportFailure(String? code, _ProfileImportSource source,
@@ -214,6 +291,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     setState(() {
       _error = message;
       _notice = null;
+      _subscriptionDraft = null;
       _importFailure = _ProfileImportFailure(safeCode, source, message);
       _importCopyNotice = null;
     });
@@ -261,6 +339,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         setState(() => _error = 'В буфере обмена нет конфигурации.');
         return;
       }
+      if (_offerSubscription(config)) return;
       final validation = _validationError(config);
       if (validation != null) {
         setState(() => _error = validation.message);
@@ -319,6 +398,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     try {
       final config = await read();
       if (!mounted || epoch != _importEpoch || config == null) return;
+      if (_offerSubscription(config)) return;
       final validation = _validationError(config);
       if (validation != null) {
         _setImportFailure(validation.code, source,
@@ -359,6 +439,16 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
             ? 'Нужен текстовый профиль WireGuard .conf или полная ссылка VLESS из 3x-ui.'
             : 'В QR-коде нет поддерживаемого профиля. Нужен WireGuard .conf или полная ссылка VLESS.',
         'UNSUPPORTED_PROFILE' => _unsupportedProfile,
+        'SUBSCRIPTION_URL_INVALID' =>
+          'Для подписки нужна полная HTTPS-ссылка на публичный сервер, без логина и пароля в адресе. Проверьте ссылку в панели.',
+        'PROFILE_TELEGRAM_LINK' =>
+          'Это ссылка прокси Telegram. Она подключается внутри Telegram; для Flow нужен профиль WireGuard, VLESS или HTTPS-ссылка подписки.',
+        'PROFILE_VMESS_LINK' =>
+          'Обнаружена ссылка VMess. Этот протокол пока не поддерживается в Flow. В 3x-ui выберите VLESS и скопируйте ссылку или QR этого клиента.',
+        'PROFILE_TROJAN_LINK' =>
+          'Обнаружена ссылка Trojan. Этот протокол пока не поддерживается в Flow. Добавьте VLESS, WireGuard или подписку с серверами VLESS.',
+        'PROFILE_SHADOWSOCKS_LINK' =>
+          'Обнаружена ссылка Shadowsocks или ShadowsocksR. Эти протоколы пока не поддерживаются в Flow. Добавьте VLESS, WireGuard или подписку с серверами VLESS.',
         'UNSUPPORTED_TRANSPORT' => _unsupportedTransport,
         'UNSUPPORTED_SECURITY' => _unsupportedSecurity,
         'UNSUPPORTED_PROFILE_OPTION' => _unsupportedOption,
@@ -400,7 +490,10 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
           'или откройте QR-код. Поддерживаются TCP (Raw) с TLS или REALITY, '
           'включая XTLS Vision. WebSocket и gRPC поддерживаются только с TLS, без Vision. '
           'Проверка сертификата TLS обязательна. REALITY доступен только с TCP (Raw). '
-          'Другие протоколы, транспорты и ссылки подписки пока не поддерживаются.\n\n'
+          'Другие протоколы и транспорты пока не поддерживаются.\n\n'
+          'Если QR содержит HTTPS-ссылку подписки, Flow предложит добавить её как подписку. '
+          'Ссылка остаётся скрытой, а серверы загружаются только после нажатия «Добавить подписку». '
+          'Можно вернуться к исходному черновику профиля без изменений.\n\n'
           'Если код открыт на другом устройстве, нажмите «Сканировать QR». '
           'Если он сохранён на этом телефоне, нажмите «QR из фото» и выберите изображение. '
           'Ссылку можно вставить кнопкой «Вставить» или импортировать из текстового файла.\n\n'
@@ -423,7 +516,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   }
 
   Future<void> _save() async {
-    if (!mounted || _busy || !_canReveal) return;
+    if (!mounted || _busy || !_canReveal || _subscriptionDraft != null) return;
     setState(() {
       _error = null;
       _notice = null;
@@ -431,6 +524,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     });
     final config = _controller.text;
     final name = _nameController.text.trim();
+    if (_offerSubscription(config)) return;
     if (!WireGuardProfiles.isValidName(name)) {
       setState(() => _error = 'Укажите название: от 1 до 64 символов без переносов строк.');
       return;
@@ -499,6 +593,27 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   @override
   Widget build(BuildContext context) {
+    if (_editingSubscription && _subscriptionDraft != null &&
+        widget.onSaveSubscription != null) {
+      return SubscriptionEditor(
+        key: const Key('profile_subscription_editor'),
+        draft: _subscriptionDraft,
+        onSave: (url, name) async {
+          if (!mounted || !_editingSubscription || !_canReveal) {
+            throw PlatformException(code: 'SUBSCRIPTION_INTERRUPTED');
+          }
+          await widget.onSaveSubscription!(url, name);
+        },
+        onClose: () {
+          if (mounted) setState(() => _editingSubscription = false);
+        },
+        onCompleted: () {
+          if (!mounted || !_editingSubscription) return;
+          widget.onSubscriptionSaved?.call();
+          Navigator.of(context).pop<String>();
+        },
+      );
+    }
     final importFailure = _importFailure;
     return PopScope<String>(
       canPop: !_saving,
@@ -535,12 +650,12 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                       key: const Key('close_wireguard_profile'),
                       tooltip: 'Закрыть',
                       onPressed: _saving || _pasting
-                          ? null : () => Navigator.of(context).pop(),
+                          ? null : _closeEditor,
                       icon: const Icon(Icons.close),
                     ),
                   ]),
                   const SizedBox(height: 8),
-                  const Text('WireGuard .conf или VLESS из 3x-ui: добавьте профиль из QR-кода, файла или буфера обмена. '
+                  const Text('WireGuard .conf, VLESS или HTTPS-ссылка подписки: используйте QR-код, файл или буфер обмена. '
                     'Профиль сохраняется только на этом устройстве.',
                     style: TextStyle(color: PushokPalette.muted)),
                   const SizedBox(height: 8),
@@ -672,6 +787,23 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                       child: Text(_notice!, key: const Key('wireguard_profile_notice'),
                         style: const TextStyle(color: PushokPalette.mint))),
                   ],
+                  if (_subscriptionDraft != null && widget.onSaveSubscription != null) ...[
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      key: const Key('open_imported_subscription'),
+                      onPressed: _busy || !_canReveal ? null : _openSubscription,
+                      icon: const Icon(Icons.add_link),
+                      label: const Text('Добавить как подписку'),
+                    ),
+                    TextButton(
+                      key: const Key('discard_imported_subscription'),
+                      onPressed: _busy || !_canReveal ? null : _discardSubscription,
+                      child: const Text('Отменить импорт ссылки'),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text('Исходный черновик профиля остаётся на этом экране. Серверы ещё не загружались.',
+                      style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
+                  ],
                   if (_error != null) ...[
                     const SizedBox(height: 12),
                     Semantics(
@@ -705,7 +837,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     key: const Key('save_wireguard_profile'),
-                    onPressed: _busy || !_canReveal ? null : _save,
+                    onPressed: _busy || !_canReveal || _subscriptionDraft != null ? null : _save,
                     icon: _saving
                         ? const SizedBox(width: 18, height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2))

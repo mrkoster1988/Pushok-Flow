@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/design/pushok_theme.dart';
+import 'package:pushok_flow/ui/subscription_editor.dart';
 import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
 
 // Local UI fixture only; native parsing and key validation belong to the bridge.
@@ -57,6 +58,8 @@ Future<void> _openEditor(
   Future<String?> Function()? onScanQr,
   Future<String?> Function()? onImportQrImage,
   Future<void> Function()? onCancelImport,
+  Future<void> Function(String, String)? onSaveSubscription,
+  VoidCallback? onSubscriptionSaved,
   double textScale = 1,
 }) async {
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -84,6 +87,8 @@ Future<void> _openEditor(
               onScanQr: onScanQr,
               onImportQrImage: onImportQrImage,
               onCancelImport: onCancelImport,
+              onSaveSubscription: onSaveSubscription,
+              onSubscriptionSaved: onSubscriptionSaved,
               connectAfterSave: connectAfterSave,
             ),
           );
@@ -111,6 +116,272 @@ Future<void> _tapSave(WidgetTester tester) async {
 }
 
 void main() {
+  const subscriptionUrl = 'https://example.invalid/sub/PRIVATE%2FTOKEN?key=a%2Bb+c';
+  const offerSubscription = Key('open_imported_subscription');
+  const discardSubscription = Key('discard_imported_subscription');
+  const subscriptionUrlField = Key('subscription_url');
+  const subscriptionNameField = Key('subscription_name');
+  const subscriptionSave = Key('save_subscription');
+  const subscriptionBack = Key('close_subscription_editor');
+
+  for (final source in [
+    ('file', _import), ('camera', _scanQr), ('photo', _qrImage), ('clipboard', _paste),
+  ]) {
+    testWidgets('HTTPS ${source.$1} offers a masked subscription without replacing the profile',
+        (tester) async {
+      final writes = <String>[];
+      _captureClipboardWrites(writes, pasteText: subscriptionUrl);
+      var saves = 0;
+      var subscriptions = 0;
+      await _openEditor(tester, initialConfig: _config, initialName: 'Мой сервер',
+        onImport: () async => subscriptionUrl,
+        onScanQr: () async => subscriptionUrl,
+        onImportQrImage: () async => subscriptionUrl,
+        onSaveSubscription: (_, _) async { subscriptions++; },
+        onSave: (_, _) async { saves++; },
+      );
+      await _tapEditorKey(tester, source.$2);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Мой сервер');
+      expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+      expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNull);
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(find.byKey(const Key('wireguard_profile_error')), findsNothing);
+      expect(find.textContaining('PRIVATE'), findsNothing);
+      expect(subscriptions, 0);
+      expect(saves, 0);
+
+      await _tapEditorKey(tester, offerSubscription);
+      await tester.pumpAndSettle();
+      expect(find.byType(SubscriptionEditor), findsOneWidget);
+      final url = tester.widget<TextField>(find.byKey(subscriptionUrlField));
+      expect(url.controller!.text, subscriptionUrl);
+      expect(url.obscureText, isTrue);
+      expect(url.readOnly, isTrue);
+      expect(url.enableInteractiveSelection, isFalse);
+      expect(subscriptions, 0);
+      expect(writes, isEmpty);
+
+      // System back returns to the existing draft in the same route.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Мой сервер');
+      expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNull);
+      await _tapEditorKey(tester, discardSubscription);
+      await tester.pumpAndSettle();
+      expect(find.byKey(offerSubscription), findsNothing);
+      expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNotNull);
+      expect(subscriptions, 0);
+      expect(saves, 0);
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('Confirmed QR subscription closes with no profile result and submits once',
+      (tester) async {
+    final pending = Completer<void>();
+    var subscriptions = 0;
+    var profiles = 0;
+    var completions = 0;
+    var closed = false;
+    String? result = 'not closed';
+    await _openEditor(tester, initialConfig: _config, connectAfterSave: true,
+      onImportQrImage: () async => subscriptionUrl,
+      onSave: (_, _) async { profiles++; },
+      onSaveSubscription: (url, name) {
+        expect(url, subscriptionUrl);
+        expect(name, 'Магазин');
+        subscriptions++;
+        return pending.future;
+      },
+      onSubscriptionSaved: () { completions++; },
+      onResult: (value) { closed = true; result = value; },
+    );
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, offerSubscription);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(subscriptionNameField));
+    await tester.enterText(find.byKey(subscriptionNameField), '  Магазин  ');
+    await _tapEditorKey(tester, subscriptionSave);
+    await tester.pump();
+    await _tapEditorKey(tester, subscriptionSave);
+    await tester.pump();
+    expect(subscriptions, 1);
+    expect(profiles, 0);
+    expect(tester.widget<IconButton>(find.byKey(subscriptionBack)).onPressed, isNull);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byType(SubscriptionEditor), findsOneWidget);
+    expect(closed, isFalse);
+    pending.complete();
+    await tester.pumpAndSettle();
+    expect(completions, 1);
+    expect(closed, isTrue);
+    expect(result, isNull);
+    expect(profiles, 0);
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Failed subscription stays retryable and Back restores the untouched profile',
+      (tester) async {
+    var calls = 0;
+    await _openEditor(tester, initialConfig: _config, initialName: 'Дом',
+      onScanQr: () async => subscriptionUrl,
+      onSave: (_, _) async => fail('The profile must not be saved'),
+      onSaveSubscription: (_, _) async {
+        calls++;
+        throw PlatformException(code: 'SUBSCRIPTION_NETWORK_ERROR',
+            message: 'PRIVATE_NATIVE_DETAILS');
+      },
+    );
+    await _tapEditorKey(tester, _scanQr);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, offerSubscription);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, subscriptionSave);
+    await tester.pumpAndSettle();
+    expect(calls, 1);
+    expect(find.byKey(const Key('subscription_editor_error')), findsOneWidget);
+    expect(find.textContaining('PRIVATE'), findsNothing);
+    expect(tester.widget<FilledButton>(find.byKey(subscriptionSave)).onPressed, isNotNull);
+    await _tapEditorKey(tester, subscriptionBack);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Дом');
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Queued subscription opening cannot navigate after app switching',
+      (tester) async {
+    await _openEditor(tester, initialConfig: _config,
+      onImportQrImage: () async => subscriptionUrl,
+      onSave: (_, _) async => fail('The profile must not be saved'),
+      onSaveSubscription: (_, _) async => fail('A scan must not fetch servers'),
+    );
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pumpAndSettle();
+    final queued = tester.widget<OutlinedButton>(find.byKey(offerSubscription)).onPressed!;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    queued();
+    await tester.pump();
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    expect(tester.widget<OutlinedButton>(find.byKey(offerSubscription)).onPressed, isNull);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Old profile callbacks cannot act on the inline subscription route',
+      (tester) async {
+    var scans = 0;
+    await _openEditor(tester, initialConfig: _config,
+      onScanQr: () async { scans++; return subscriptionUrl; },
+      onSave: (_, _) async => fail('An old callback must not save'),
+      onSaveSubscription: (_, _) async => fail('Opening a draft must not fetch'),
+    );
+    final oldScan = tester.widget<OutlinedButton>(find.byKey(_scanQr)).onPressed!;
+    final oldSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+    final oldReveal = tester.widget<IconButton>(find.byKey(_visibility)).onPressed!;
+    final oldClose = tester.widget<IconButton>(find.byKey(_close)).onPressed!;
+    await _tapEditorKey(tester, _scanQr);
+    await tester.pumpAndSettle();
+    final oldDiscard = tester.widget<TextButton>(find.byKey(discardSubscription)).onPressed!;
+    final open = tester.widget<OutlinedButton>(find.byKey(offerSubscription)).onPressed!;
+    open();
+    oldScan(); oldSave(); oldReveal(); oldDiscard(); oldClose();
+    await tester.pumpAndSettle();
+    expect(scans, 1);
+    expect(find.byType(SubscriptionEditor), findsOneWidget);
+    await _tapEditorKey(tester, subscriptionBack);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    expect(find.byKey(offerSubscription), findsOneWidget);
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Subscription callbacks cannot reveal in background or submit after Back',
+      (tester) async {
+    await _openEditor(tester, initialConfig: _config,
+      onImportQrImage: () async => subscriptionUrl,
+      onSave: (_, _) async => fail('The profile must not be saved'),
+      onSaveSubscription: (_, _) async => fail('An old callback must not fetch'),
+    );
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pumpAndSettle();
+    await _tapEditorKey(tester, offerSubscription);
+    await tester.pumpAndSettle();
+    final reveal = tester.widget<IconButton>(
+        find.byKey(const Key('toggle_subscription_url_visibility'))).onPressed!;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    reveal();
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(subscriptionUrlField)).obscureText, isTrue);
+    final save = tester.widget<FilledButton>(find.byKey(subscriptionSave)).onPressed!;
+    final back = tester.widget<IconButton>(find.byKey(subscriptionBack)).onPressed!;
+    back();
+    save();
+    reveal();
+    await tester.pumpAndSettle();
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+    await _tapEditorKey(tester, _close);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final failure in [
+    ('PROFILE_TELEGRAM_LINK', 'Это ссылка прокси Telegram.'),
+    ('PROFILE_VMESS_LINK', 'Обнаружена ссылка VMess.'),
+    ('PROFILE_TROJAN_LINK', 'Обнаружена ссылка Trojan.'),
+    ('PROFILE_SHADOWSOCKS_LINK', 'Обнаружена ссылка Shadowsocks или ShadowsocksR.'),
+    ('SUBSCRIPTION_URL_INVALID', 'Для подписки нужна полная HTTPS-ссылка'),
+  ]) {
+    testWidgets('${failure.$1} explains a photo failure without exposing the payload',
+        (tester) async {
+      final copied = <String>[];
+      _captureClipboardWrites(copied);
+      await _openEditor(tester, initialConfig: _config,
+        onSave: (_, _) async => fail('A failed import must not save'),
+        onImportQrImage: () async => throw PlatformException(code: failure.$1,
+            message: 'PRIVATE_NATIVE_DETAILS', details: subscriptionUrl),
+        onSaveSubscription: (_, _) async => fail('A failed import must not fetch'),
+      );
+      await _tapEditorKey(tester, _qrImage);
+      await tester.pumpAndSettle();
+      expect(find.textContaining(failure.$2), findsOneWidget);
+      expect(find.textContaining('PRIVATE'), findsNothing);
+      expect(find.byKey(offerSubscription), findsNothing);
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      await _tapEditorKey(tester, _copyImportError);
+      await tester.pumpAndSettle();
+      expect(copied.single, contains('Источник: QR из фото'));
+      expect(copied.single, contains('Код: ${failure.$1}'));
+      expect(copied.single, isNot(contains('PRIVATE')));
+      expect(copied.single, isNot(contains('example.invalid')));
+      await _tapEditorKey(tester, _close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('VLESS paste stays masked and saves the complete link only after an explicit action',
       (tester) async {
     var clipboardReads = 0;
@@ -201,7 +472,7 @@ void main() {
       expect(find.textContaining('PRIVATE_UNSUPPORTED_CONTENT'), findsNothing);
       expect(saves, 0);
     }
-    expect(find.textContaining('Это ссылка подписки.'), findsOneWidget);
+    expect(find.textContaining('Найдена HTTPS-ссылка.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

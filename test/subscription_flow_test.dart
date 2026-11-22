@@ -3,11 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/main.dart';
 import 'package:pushok_flow/ui/subscription_editor.dart';
+import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
 
 const _manualId = '10000000-0000-4000-8000-000000000001';
 const _managedId = '10000000-0000-4000-8000-000000000002';
 const _subscriptionId = '10000000-0000-4000-8000-000000000003';
 const _privateUrl = 'https://example.invalid/sub/PRIVATE_TOKEN';
+const _manualConfig = '[Interface]\nPrivateKey = UI_ONLY\nAddress = 10.0.0.2/32\n'
+    '[Peer]\nPublicKey = UI_ONLY_PEER\n';
 
 class _Bridge {
   bool connected = false;
@@ -46,6 +49,11 @@ class _Bridge {
         'statistics': connected ? {'status': 'unavailable'} : {'status': 'inactive'},
       };
       case 'disconnectWireGuard': connected = false; return null;
+      case 'loadWireGuardProfile': return _manualConfig;
+      case 'scanWireGuardProfileQr':
+      case 'importWireGuardProfileQrImage':
+        return {'kind': 'subscription', 'url': _privateUrl};
+      case 'saveWireGuardProfile': fail('Adding a subscription must not overwrite a profile');
       case 'connectWireGuard': fail('A subscription must not connect automatically');
       default: return null;
     }
@@ -87,6 +95,7 @@ class _Bridge {
 }
 
 Future<void> _pump(WidgetTester tester, _Bridge bridge) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const routes = MethodChannel('shop.pushok.flow/app_routes');
   const subscriptions = MethodChannel('shop.pushok.flow/subscriptions');
@@ -110,6 +119,94 @@ Future<void> _pump(WidgetTester tester, _Bridge bridge) async {
 }
 
 void main() {
+  for (final source in [
+    ('camera', 'scan_wireguard_profile_qr'),
+    ('photo', 'import_wireguard_profile_qr_image'),
+  ]) {
+    testWidgets('Typed ${source.$1} subscription keeps privacy through confirmation and preserves the active server',
+        (tester) async {
+      final bridge = _Bridge()..pending = null;
+      await _pump(tester, bridge);
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+      await tester.pumpAndSettle();
+      final edit = find.byKey(const ValueKey('edit_wireguard_profile_$_manualId'));
+      await tester.ensureVisible(edit);
+      await tester.tap(edit);
+      await tester.pumpAndSettle();
+      expect(find.byType(WireGuardProfileEditor), findsOneWidget);
+      expect(bridge.leases, isNotEmpty);
+      final scan = find.byKey(Key(source.$2));
+      await tester.ensureVisible(scan);
+      await tester.tap(scan);
+      await tester.pumpAndSettle();
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(bridge.calls, isNot(contains('importSubscription')));
+      expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')))
+          .controller!.text, _manualConfig);
+      expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
+      final offer = find.byKey(const Key('open_imported_subscription'));
+      await tester.ensureVisible(offer);
+      await tester.tap(offer);
+      await tester.pumpAndSettle();
+      expect(find.byType(SubscriptionEditor), findsOneWidget);
+      expect(bridge.calls.where((call) => call == 'privacy:acquire').length, 1);
+      expect(bridge.calls, isNot(contains('privacy:release')));
+      expect(bridge.calls, isNot(contains('importSubscription')));
+      final name = find.byKey(const Key('subscription_name'));
+      await tester.ensureVisible(name);
+      await tester.enterText(name, 'Магазин');
+      final save = find.byKey(const Key('save_subscription'));
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(bridge.calls.where((call) => call == 'importSubscription').length, 1);
+      expect(bridge.calls.where((call) => call == 'privacy:release').length, 1);
+      expect(bridge.leases, isEmpty);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(find.byKey(const ValueKey('active_wireguard_profile_$_manualId')), findsOneWidget);
+      expect(find.byKey(const ValueKey('edit_wireguard_profile_$_managedId')), findsNothing);
+      expect(bridge.calls, isNot(contains('saveWireGuardProfile')));
+      expect(bridge.calls, isNot(contains('connectWireGuard')));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('Back from QR subscription and closing the editor performs no import or connection',
+      (tester) async {
+    final bridge = _Bridge()..pending = null;
+    await _pump(tester, bridge);
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+    final edit = find.byKey(const ValueKey('edit_wireguard_profile_$_manualId'));
+    await tester.ensureVisible(edit);
+    await tester.tap(edit);
+    await tester.pumpAndSettle();
+    for (final key in ['import_wireguard_profile_qr_image', 'open_imported_subscription']) {
+      final button = find.byKey(Key(key));
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+    }
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    expect(bridge.leases, isNotEmpty);
+    expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')))
+        .controller!.text, _manualConfig);
+    final close = find.byKey(const Key('close_wireguard_profile'));
+    await tester.ensureVisible(close);
+    await tester.tap(close);
+    await tester.pumpAndSettle();
+    expect(bridge.leases, isEmpty);
+    expect(bridge.calls, isNot(contains('importSubscription')));
+    expect(bridge.calls, isNot(contains('saveWireGuardProfile')));
+    expect(bridge.calls, isNot(contains('connectWireGuard')));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('External link opens a protected draft and imports only after confirmation', (tester) async {
     final bridge = _Bridge();
     await _pump(tester, bridge);

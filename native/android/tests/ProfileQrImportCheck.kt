@@ -16,6 +16,7 @@ import com.google.zxing.qrcode.encoder.ByteMatrix
 import com.google.zxing.qrcode.encoder.Encoder
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.net.URLEncoder
 
 private const val WHITE = -0x1
 private const val BLACK = -0x1000000
@@ -84,7 +85,7 @@ private fun imageAppearanceChecks() {
         ProfileQrDecoder.decodePixels(size, size, first.map { it and 0x00FFFFFF }.toIntArray())
     }
     val second = qr(profile.replace("10.44.0.2", "10.44.0.3"))
-    val unsupported = qr("https://example.invalid/not-a-profile")
+    val subscription = qr("https://example.invalid/sub/synthetic")
     // Counts are based on physical QR symbols, including identical payloads and mixed
     // polarity. Payload validity must not allow selecting one of several symbols.
     for ((left, right) in listOf(
@@ -93,8 +94,8 @@ private fun imageAppearanceChecks() {
         first to inverted(second),
         inverted(first) to second,
         inverted(first) to inverted(second),
-        first to inverted(unsupported),
-        unsupported to inverted(first),
+        first to inverted(subscription),
+        subscription to inverted(first),
     )) {
         val (width, combined) = beside(left, right, size)
         rejected("PROFILE_QR_MULTIPLE") { ProfileQrDecoder.decodePixels(width, size, combined) }
@@ -163,7 +164,8 @@ private fun decoderChecks() {
     rejected("PROFILE_QR_NOT_FOUND") {
         ProfileQrDecoder.decodePixels(size, size, IntArray(size * size) { WHITE })
     }
-    rejected("UNSUPPORTED_PROFILE") { ProfileQrDecoder.decodePixels(size, size, qr("https://example.invalid/profile")) }
+    val subscription = "https://example.invalid/sub/synthetic"
+    check(ProfileQrDecoder.decodePixels(size, size, qr(subscription)) == subscription)
     for (payload in listOf("random text", "eyJjb250YWluZXJzIjpbXX0=",
         "{\"containers\":[{\"container\":\"amnezia-awg\"}]}", "[Interface]\nPrivateKey = missing-peer")) {
         rejected("PROFILE_IMPORT_INVALID") { ProfileQrDecoder.decodePixels(size, size, qr(payload)) }
@@ -226,6 +228,78 @@ private fun payloadChecks() {
     // The shape gate keeps unknown attributes intact for the authoritative WireGuard parser.
     val awg = profile.replace("[Interface]", "[Interface]\nJc = 5")
     check(ProfileQrDecoder.normalizePayload(awg) == awg)
+}
+
+private fun importClassificationChecks() {
+    val vless = "vless://11111111-2222-4333-8444-555555555555@example.invalid:443" +
+        "?type=ws&security=tls&path=%2Fflow%252Fsocket%3Ftoken%3Da%2Bb#%D0%A2%D0%B5%D1%81%D1%82"
+    for ((raw, kind) in listOf(profile to ConnectionProfile.Kind.WIREGUARD,
+        vless to ConnectionProfile.Kind.VLESS)) {
+        val parsed = ProfileImportPayload.parse(raw)
+        check(parsed is ProfileImportPayload.Profile && parsed.protocol == kind)
+        check(parsed.text == raw && parsed.toPlatform() == mapOf("kind" to "profile", "config" to raw))
+        check("11111111" !in parsed.toString() && "PrivateKey" !in parsed.toString())
+    }
+    // Existing 3x-ui percent escapes are preserved; no unwrapping or double decoding.
+    val prefixed = "\uFEFF\r\n" + vless + "\r\n"
+    check(ProfileImportPayload.parse(prefixed).text == prefixed.removePrefix("\uFEFF"))
+    val original = " HTTPS://EXAMPLE.INVALID:443/Sub/%2fSYNTHETIC?token=A+b%2BC%2fD \r\n"
+    val expected = "https://example.invalid/Sub/%2fSYNTHETIC?token=A+b%2BC%2fD"
+    val wrapped = "pushokflow://subscription?url=" + URLEncoder.encode(original.trim(), "UTF-8") +
+        "&name=%D0%9C%D0%BE%D1%8F+%D0%BF%D0%BE%D0%B4%D0%BF%D0%B8%D1%81%D0%BA%D0%B0"
+    for (raw in listOf(original, "\uFEFF" + original, wrapped)) {
+        val parsed = ProfileImportPayload.parse(raw)
+        check(parsed is ProfileImportPayload.Subscription)
+        check(parsed.text == expected)
+        check(parsed.toPlatform() == mapOf("kind" to "subscription", "url" to expected))
+        check("SYNTHETIC" !in parsed.toString())
+        // Camera/photo normalization and subsequent native classification are idempotent.
+        check(ProfileImportPayload.parse(parsed.text).toPlatform() == parsed.toPlatform())
+        val file = ProfileImportReader.read(ByteArrayInputStream(raw.toByteArray(Charsets.UTF_8)))
+        check(ProfileImportPayload.parse(file).toPlatform() == parsed.toPlatform())
+        val size = 600
+        check(ProfileImportPayload.parse(ProfileQrDecoder.decodePixels(size, size, qr(raw))).toPlatform() ==
+            parsed.toPlatform())
+    }
+    // A subscription URL must remain impossible to save or connect as a profile.
+    try { ConnectionProfile.validateShape(expected); error("Subscription reached profile gate") }
+    catch (failure: ProfileFormatFailure) { check(failure.code == "UNSUPPORTED_PROFILE") }
+    for (raw in listOf("http://example.invalid/sub/synthetic", "https://localhost/sub/synthetic",
+        "https://127.0.0.1/sub/synthetic", "https://10.0.0.1/sub/synthetic", "https://[::1]/sub/synthetic",
+        "https://user:password@example.invalid/sub/synthetic", "https://example.invalid/sub/synthetic#fragment",
+        "https://example.invalid:0/sub/synthetic", "https://example.invalid/a b", "https:///missing-host",
+        "pushokflow://subscription?url=https%253A%252F%252Fexample.invalid%252Fsub",
+        "pushokflow://subscription?url=https%3A%2F%2Fexample.invalid%2Fsub&url=https%3A%2F%2Fexample.invalid%2Fother",
+        "pushokflow://subscription?url=https%3A%2F%2Fexample.invalid%2Fsub&extra=ignored",
+        "pushokflow://other?url=https%3A%2F%2Fexample.invalid%2Fsub")) {
+        rejected("SUBSCRIPTION_URL_INVALID") { ProfileImportPayload.parse(raw) }
+    }
+    val urlPrefix = "https://example.invalid/"
+    val limit = urlPrefix + "x".repeat(SubscriptionPolicy.MAX_URL_LENGTH - urlPrefix.length)
+    check(ProfileImportPayload.parse(limit) is ProfileImportPayload.Subscription)
+    rejected("SUBSCRIPTION_URL_INVALID") { ProfileImportPayload.parse(limit + "x") }
+    val telegram = "https://t.me/proxy?server=example.invalid&port=443&secret=SYNTHETIC"
+    for ((raw, code) in listOf(
+        "tg://proxy?server=example.invalid&port=443&secret=SYNTHETIC" to "PROFILE_TELEGRAM_LINK",
+        telegram to "PROFILE_TELEGRAM_LINK",
+        "pushokflow://subscription?url=${URLEncoder.encode(telegram, "UTF-8")}" to "PROFILE_TELEGRAM_LINK",
+        "VMESS://SYNTHETIC" to "PROFILE_VMESS_LINK",
+        "trojan://SYNTHETIC@example.invalid:443" to "PROFILE_TROJAN_LINK",
+        "ss://SYNTHETIC@example.invalid:443" to "PROFILE_SHADOWSOCKS_LINK",
+        "ssr://SYNTHETIC" to "PROFILE_SHADOWSOCKS_LINK",
+        "hysteria2://SYNTHETIC@example.invalid:443" to "UNSUPPORTED_PROFILE",
+        "v2rayng://install-config?url=https%3A%2F%2Fexample.invalid%2Fsub" to "UNSUPPORTED_PROFILE",
+    )) {
+        rejected(code) { ProfileImportPayload.parse(raw) }
+        rejected(code) { ProfileQrDecoder.decodePixels(600, 600, qr(raw)) }
+        try { ProfileImportPayload.parse(raw); error("Expected safe error") }
+        catch (failure: ProfileImportReader.Failure) {
+            check(failure.message == null && "SYNTHETIC" !in failure.toString())
+        }
+    }
+    rejected("PROFILE_IMPORT_INTERRUPTED") { ProfileImportPayload.parse(expected) { true } }
+    var calls = 0
+    rejected("PROFILE_IMPORT_INTERRUPTED") { ProfileImportPayload.parse(expected) { ++calls > 3 } }
 }
 
 private fun imageBoundsChecks() {
@@ -319,7 +393,8 @@ fun main() {
     imageAppearanceChecks()
     structuredAppendChecks()
     payloadChecks()
+    importClassificationChecks()
     imageBoundsChecks()
     ownerSessionChecks()
-    println("ProfileQrImport executable checks passed (ZXing 3.5.4, WG/VLESS RAW/WS/gRPC, alpha/polarity/ambiguity/structured-append/payload/bounds/cancellation/session)")
+    println("ProfileQrImport executable checks passed (ZXing 3.5.4, typed profile/subscription, WG/VLESS RAW/WS/gRPC, alpha/polarity/ambiguity/structured-append/payload/bounds/cancellation/session)")
 }

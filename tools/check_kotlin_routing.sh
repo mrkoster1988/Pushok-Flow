@@ -62,9 +62,17 @@ expected = '71de5d89341b5fcf5dd89da7f44e84d825d0e084cdf3ec77c9abe26b0f0ceb13'
 if hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() != expected:
     raise SystemExit('The pinned ZXing core 3.5.4 checksum does not match')
 PY
-kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
-  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt \
-  native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt \
+profile_import_core=(
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionPolicy.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionFeed.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportPayload.kt
+)
+kotlinc "${profile_import_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrDecoder.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
   native/android/tests/ProfileQrImportCheck.kt -classpath "$core" -include-runtime -d "$out/qr-import-tests.jar"
@@ -89,7 +97,9 @@ if hashlib.sha256(archive.read_bytes()).hexdigest() != '4ab03353127c34e55cbb80fb
 with zipfile.ZipFile(archive) as bundle:
     Path(sys.argv[2]).write_bytes(bundle.read('classes.jar'))
 EMBEDDED_CHECK
-kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrCameraDecoder.kt \
+kotlinc "${profile_import_core[@]}" \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrDecoder.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrCameraDecoder.kt \
   native/android/tests/ProfileQrCameraCheck.kt -classpath "$core:$embedded_core" \
   -include-runtime -d "$out/qr-camera-tests.jar"
 java -cp "$out/qr-camera-tests.jar:$core:$embedded_core" shop.pushok.flow.ProfileQrCameraCheckKt
