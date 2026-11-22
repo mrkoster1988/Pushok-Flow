@@ -1,5 +1,11 @@
 # Pushok Flow: сборка, подпись и проверка Android
 
+## Подготовлено для следующего общего выпуска — 22.11.2026
+
+В исходниках добавлена включаемая автоматическая проверка подписанных рекомендаций при открытии или возврате в «Маршруты». Проверенный коммит — [`872f66f`](https://github.com/mrkoster1988/Pushok-Flow/commit/872f66f2db2dfa9166de51cb8128fb1b489efdeb). Успешны [Source checks 45002006232](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45002006232) и [Android candidate 45002006177](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45002006177): 158 Python-тестов, 195 Flutter-тестов, десять Kotlin-наборов, анализатор и полная Android-сборка.
+
+Этот этап не публикует новый APK: версия, постоянная подпись и публичные файлы выпуска v0.34.0 не меняются, данные рекомендаций остаются на №2. Перед следующим общим выпуском нужно увеличить номер сборки и выполнить обычную процедуру постоянной подписи и публикации; внутренний кандидат не заменяет текущий релиз. [Поведение функции и проверка](NO-APK-UPDATES.md#следующий-общий-выпуск-автоматическая-проверка) · [Запись проверки](development-checks/recommendation-auto-update.json).
+
 ## Опубликованный v0.34.0 — 22.11.2026
 
 [Выпуск](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.34.0) опубликован в 08:11:22 МСК, release ID `454218318`; точный источник APK — `3b124a098334c4f83cd4ca6385a1eb3780145555`. Успешны [Source checks 44987493443](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44987493443), [Android candidate 44987493433](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44987493433) и [публикация 44988272777](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44988272777): 158 Python, 186 Flutter, десять Kotlin-наборов, анализатор и полная Android-сборка.

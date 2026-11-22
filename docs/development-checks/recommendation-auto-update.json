@@ -1,0 +1,79 @@
+{
+  "scope": "Opt-in foreground automatic recommendation checks; development source only",
+  "sourceCommit": "872f66f2db2dfa9166de51cb8128fb1b489efdeb",
+  "sourceUrl": "https://github.com/mrkoster1988/Pushok-Flow/commit/872f66f2db2dfa9166de51cb8128fb1b489efdeb",
+  "sourceChecks": {
+    "runId": 45002006232,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45002006232",
+    "headSha": "872f66f2db2dfa9166de51cb8128fb1b489efdeb",
+    "status": "completed",
+    "conclusion": "success",
+    "python": {
+      "jobId": 137145382440,
+      "testsPassed": 158,
+      "signatureVerification": "recommendations v2, 5 packages"
+    },
+    "flutter": {
+      "jobId": 137145382162,
+      "analysis": "No issues found",
+      "testsPassed": 195,
+      "testsPassedAt": "2026-11-22T08:17:26.3863750Z"
+    },
+    "workflowUpdatedAt": "2026-11-22T08:17:30Z"
+  },
+  "androidCandidate": {
+    "runId": 45002006177,
+    "jobId": 137145453882,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45002006177",
+    "headSha": "872f66f2db2dfa9166de51cb8128fb1b489efdeb",
+    "status": "completed",
+    "conclusion": "success",
+    "distribution": "Internal build candidate only; no production signing or publication requested for this stage",
+    "workflowUpdatedAt": "2026-11-22T08:23:28Z",
+    "pythonTestsPassed": 158,
+    "kotlinSuitesPassed": 10,
+    "recommendationAutomationChecksPassed": true,
+    "flutterAnalysis": "No issues found",
+    "flutterTestsPassed": 195,
+    "assembleReleaseSeconds": 227.5,
+    "apkBuildConfirmedAt": "2026-11-22T08:23:18.7523310Z",
+    "packageInternetWireGuardChecks": "passed"
+  },
+  "initialSourceCheck": {
+    "runId": 45001818903,
+    "headSha": "733cb42842af7d88a0ec357a47dd6fa480f43b4d",
+    "conclusion": "failure",
+    "pythonTestsPassed": 158,
+    "flutterTestsPassed": 194,
+    "flutterTestsFailed": 1,
+    "cause": "Existing route test helper could only search down after its lazy header had been unmounted.",
+    "correction": "Restore the scroll position to the start before searching downward; retain product code and all assertions."
+  },
+  "reviewRegressions": [
+    "Default opt-out, persisted consent and cooldowns after process restart",
+    "Shared queue prevents duplicate automatic reservations across Activity hosts",
+    "Automatic reservation must be saved before network access",
+    "Manual refresh survives malformed or unreadable scheduling metadata while signed catalogue checks remain mandatory",
+    "Turning off while a request is running cancels automatic commit and persists after pause or Activity recreation",
+    "Late Flutter replies cannot replace a newer preference or catalogue",
+    "Busy polling remains local and cannot become a network retry loop",
+    "Clock rollback cannot flood a live process or indefinitely suppress checks after restart",
+    "Narrow-screen and large-text interaction; chosen routes remain unchanged"
+  ],
+  "releaseChannel": {
+    "tag": "v0.34.0",
+    "releaseId": 454218318,
+    "newReleasePublished": false,
+    "apkSha256": "ad7705bba1976d9f695adc90e9a01c63381a4fc032fc84a906a8e7feca36e11b",
+    "updateManifestSha256": "15015df8f117db5fd724cedad948926c80a7b9b3a124ee865c7fd4564dff142a"
+  },
+  "recommendationChannel": {
+    "rulesVersion": 2,
+    "changed": false,
+    "envelopeBytes": 966,
+    "envelopeSha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+    "payloadSha256": "dee49ef08b6defdeb03eefdd49b0fee03c15abf2ca4727813656dab3e32031a2"
+  },
+  "physicalDeviceAcceptance": "Not performed. The opt-in feature must ship in a later combined APK release before device acceptance.",
+  "verifiedAt": "2026-11-22T08:23:46Z"
+}
