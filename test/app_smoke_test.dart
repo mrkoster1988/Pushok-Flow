@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pushok_flow/main.dart';
@@ -60,8 +62,11 @@ void main() {
       await tester.tap(find.byKey(const Key('open_app_information')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('app_information_sheet')), findsOneWidget);
+      final packageVersion = RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$',
+          multiLine: true).firstMatch(File('pubspec.yaml').readAsStringSync());
+      expect(packageVersion, isNotNull, reason: 'The app version must match the package metadata.');
       expect(tester.widget<Text>(find.byKey(const Key('app_information_version'))).data,
-          contains('0.31.0'));
+          contains(packageVersion!.group(1)!));
       final close = find.byKey(const Key('close_app_information'));
       expect(close.hitTestable(), findsOneWidget);
       await tester.tap(close);
