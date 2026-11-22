@@ -1,0 +1,267 @@
+{
+  "sourceCommit": "1f98a5585a29d3323e282d04d1884fef443e44b5",
+  "sourceChecks": {
+    "id": 45006828878,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45006828878",
+    "conclusion": "success",
+    "pythonTests": 182,
+    "flutterTests": 207,
+    "analyzer": "No issues found",
+    "signedCatalogueVerified": true
+  },
+  "workflowsForExactSource": [
+    {
+      "id": 45006828878,
+      "name": "Source contract checks",
+      "conclusion": "success"
+    }
+  ],
+  "androidCandidateTriggered": false,
+  "apkBefore": {
+    "id": 454319017,
+    "tag": "v0.35.0",
+    "publishedAt": "2026-11-22T08:57:22Z",
+    "assets": [
+      {
+        "id": 778461854,
+        "name": "Pushok-Flow-v0.35.0.apk",
+        "sizeBytes": 62872504,
+        "digest": "sha256:7e656cb292e5edabe3f93bb54f815a110284c95a34804bc7e50f2a850987ed22",
+        "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.35.0/Pushok-Flow-v0.35.0.apk"
+      },
+      {
+        "id": 778461934,
+        "name": "Pushok-Flow-v0.35.0.apk.sha256",
+        "sizeBytes": 90,
+        "digest": "sha256:a88fbb67ecc813ad0c35abc3ad0284afff8e4caaf7f79c5344594d295eadc242",
+        "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.35.0/Pushok-Flow-v0.35.0.apk.sha256"
+      },
+      {
+        "id": 778461949,
+        "name": "update.json",
+        "sizeBytes": 431,
+        "digest": "sha256:c3db1bdbb3f3dba9bf0470f08f4b919df45694a4edbf1c8f8f750d6c8e9c8ec5",
+        "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.35.0/update.json"
+      }
+    ]
+  },
+  "apkAfter": {
+    "id": 454319017,
+    "tag": "v0.35.0",
+    "publishedAt": "2026-11-22T08:57:22Z",
+    "assets": [
+      {
+        "id": 778461854,
+        "name": "Pushok-Flow-v0.35.0.apk",
+        "sizeBytes": 62872504,
+        "digest": "sha256:7e656cb292e5edabe3f93bb54f815a110284c95a34804bc7e50f2a850987ed22",
+        "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.35.0/Pushok-Flow-v0.35.0.apk"
+      },
+      {
+        "id": 778461934,
+        "name": "Pushok-Flow-v0.35.0.apk.sha256",
+        "sizeBytes": 90,
+        "digest": "sha256:a88fbb67ecc813ad0c35abc3ad0284afff8e4caaf7f79c5344594d295eadc242",
+        "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.35.0/Pushok-Flow-v0.35.0.apk.sha256"
+      },
+      {
+        "id": 778461949,
+        "name": "update.json",
+        "sizeBytes": 431,
+        "digest": "sha256:c3db1bdbb3f3dba9bf0470f08f4b919df45694a4edbf1c8f8f750d6c8e9c8ec5",
+        "url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.35.0/update.json"
+      }
+    ]
+  },
+  "previousPublicData": {
+    "requestUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+    "requestedAt": "2026-11-22T09:14:55.147890+00:00",
+    "httpStatus": 200,
+    "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+    "sizeBytes": 966,
+    "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+    "rulesVersion": 2,
+    "packageCount": 5,
+    "signatureVerified": true,
+    "payloadSha256": "dee49ef08b6defdeb03eefdd49b0fee03c15abf2ca4727813656dab3e32031a2"
+  },
+  "publicData": {
+    "sourceCommit": "1f98a5585a29d3323e282d04d1884fef443e44b5",
+    "requestUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+    "expectedRulesVersion": 3,
+    "expectedSizeBytes": 1114,
+    "expectedSha256": "4d5c77bccc6f099236841acebaacf66f4b7190e78ad92b976bef4dcf52c81137",
+    "attempts": [
+      {
+        "attempt": 1,
+        "requestedAt": "2026-11-22T09:18:01.182804+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 2,
+        "requestedAt": "2026-11-22T09:18:13.386246+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 3,
+        "requestedAt": "2026-11-22T09:18:22.654003+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 4,
+        "requestedAt": "2026-11-22T09:18:32.328208+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 5,
+        "requestedAt": "2026-11-22T09:18:41.011898+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 6,
+        "requestedAt": "2026-11-22T09:18:49.697673+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 7,
+        "requestedAt": "2026-11-22T09:18:58.000192+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 8,
+        "requestedAt": "2026-11-22T09:19:06.880409+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 9,
+        "requestedAt": "2026-11-22T09:19:15.424173+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 10,
+        "requestedAt": "2026-11-22T09:19:24.396435+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 11,
+        "requestedAt": "2026-11-22T09:19:32.964563+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 12,
+        "requestedAt": "2026-11-22T09:19:42.032730+00:00",
+        "matches": false,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 966,
+        "sha256": "86a0615776d6f6435558434797ba5a144dc5e4dab67cde8ce8badcf7a6bec5af",
+        "age": "",
+        "cacheControl": "max-age=300",
+        "failure": "PUBLIC_BYTES_NOT_CURRENT",
+        "observedRulesVersion": 2
+      },
+      {
+        "attempt": 13,
+        "requestedAt": "2026-11-22T09:20:14.250294+00:00",
+        "matches": true,
+        "httpStatus": 200,
+        "finalUrl": "https://raw.githubusercontent.com/mrkoster1988/Pushok-Flow/main/updates/route-recommendations.json",
+        "sizeBytes": 1114,
+        "sha256": "4d5c77bccc6f099236841acebaacf66f4b7190e78ad92b976bef4dcf52c81137",
+        "cacheControl": "max-age=300",
+        "rulesVersion": 3,
+        "packageCount": 9,
+        "signatureVerified": true,
+        "payloadSha256": "52624642e13b14ca0e4f6b921e921e346251b4f7597c651bcfade8c464c9d3bf"
+      }
+    ]
+  }
+}
