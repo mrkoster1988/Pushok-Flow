@@ -174,7 +174,7 @@ class BootstrapScriptTests(unittest.TestCase):
 
         self.native_names = (
             "MainActivity.kt", "WireGuardRouting.kt", "SecureWireGuardStore.kt",
-            "LocalDecisionMemory.kt", "TunnelHealth.kt", "AppUpdates.kt", "UpdatePolicy.kt",
+            "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportReader.kt",
             "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "RouteSettingsStore.kt",

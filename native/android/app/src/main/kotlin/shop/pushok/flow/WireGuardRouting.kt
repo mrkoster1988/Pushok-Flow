@@ -6,18 +6,22 @@ object WireGuardRouting {
     private val interfaceHeader = Regex("^\\[Interface]$", RegexOption.IGNORE_CASE)
     private val applicationKeys = setOf("includedapplications", "excludedapplications")
 
+    // Match Config.parse: comments end a line before sections or keys are read.
+    // Keep the original line separately so credentials, routes and comments survive.
+    private fun meaningfulLine(line: String): String = line.substringBefore('#').trim()
+
     fun prepare(raw: String, exclusions: Set<String>): String {
         require(exclusions.all { packagePattern.matches(it) }) { "Некорректный идентификатор приложения" }
         require(raw.length <= 65536) { "Слишком большая конфигурация" }
         val lines = raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        require(lines.count { interfaceHeader.matches(it.trim()) } == 1) { "Нужна ровно одна секция Interface" }
+        require(lines.count { interfaceHeader.matches(meaningfulLine(it)) } == 1) { "Нужна ровно одна секция Interface" }
 
         // Existing application routing settings may appear ONLY in [Interface].
         // Reject misplaced options, including keys in [Peer], instead of silently
         // passing them to the WireGuard configuration parser.
         var section = ""
         for (line in lines) {
-            val trimmed = line.substringBefore('#').trim()
+            val trimmed = meaningfulLine(line)
             if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
                 section = trimmed.lowercase()
                 continue
@@ -34,7 +38,7 @@ object WireGuardRouting {
         var inInterface = false
         var inserted = false
         for (line in lines) {
-            val trimmed = line.trim()
+            val trimmed = meaningfulLine(line)
             if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
                 if (inInterface && !inserted) {
                     if (exclusions.isNotEmpty()) output.add("ExcludedApplications = " + exclusions.sorted().joinToString(", "))
@@ -42,7 +46,7 @@ object WireGuardRouting {
                 }
                 inInterface = interfaceHeader.matches(trimmed)
             }
-            if (inInterface && trimmed.substringBefore('#').substringBefore('=', "").trim().equals("ExcludedApplications", ignoreCase = true)) continue
+            if (inInterface && trimmed.substringBefore('=', "").trim().equals("ExcludedApplications", ignoreCase = true)) continue
             output.add(line)
         }
         if (inInterface && !inserted && exclusions.isNotEmpty())

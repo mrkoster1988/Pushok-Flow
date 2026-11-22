@@ -17,7 +17,11 @@ class SessionSafetyTests(TestCase):
         src = ACTIVITY.read_text()
         self.assertIn('get() = Session.backend', src)
         self.assertIn('set(value) { Session.backend = value }', src)
-        self.assertIn('get() = Session.connected', src)
+        self.assertIn('val connection = TunnelConnectionSession(', src)
+        self.assertIn('private val io get() = Session.connection.io', src)
+        self.assertNotIn('Executors.newSingleThreadExecutor()', src)
+        self.assertIn('Session.connection.connect(', src)
+        self.assertIn('Session.connection.disconnect(', src)
 
     def test_mutually_exclusive_connect_disconnect(self):
         src = ACTIVITY.read_text()
@@ -29,8 +33,11 @@ class SessionSafetyTests(TestCase):
         routes = src.split('private fun mutateRoutes(', 1)[1].split('override fun configureFlutterEngine', 1)[0]
         self.assertIn('Session.operationInProgress.acquire()', routes)
         self.assertIn('backend?.getState(tunnel)', routes)
-        self.assertIn('connected || state != Tunnel.State.DOWN', routes)
-        self.assertLess(routes.index('state != Tunnel.State.DOWN'), routes.index('routeStore.replace(request)'))
+        self.assertIn('Session.connection.observe', routes)
+        self.assertIn('if (!state.known) throw RouteSettingsFailure("VPN_STATE_UNAVAILABLE")', routes)
+        self.assertIn('if (state.connected) throw RouteSettingsFailure("VPN_ACTIVE")', routes)
+        self.assertLess(routes.index('if (!state.known)'), routes.index('routeStore.replace(request)'))
+        self.assertLess(routes.index('if (state.connected)'), routes.index('routeStore.replace(request)'))
         self.assertIn('Session.operationInProgress.release(token)', routes)
 
     def test_error_does_not_leak_profile_to_ui(self):

@@ -65,5 +65,60 @@ AllowedIPs = 0.0.0.0/0, ::/0"""
         WireGuardRouting.prepare(sample, setOf("bad app"))
         error("Invalid package accepted")
     } catch (_: IllegalArgumentException) { }
+
+    // Config.parse accepts comments after section headers. Preparing an unchanged
+    // profile must accept the same headers and retain the original text.
+    val interfaceComment = sample.replace("[Interface]", "[Interface] # client")
+    check(WireGuardRouting.prepare(interfaceComment, emptySet()) == interfaceComment)
+    val peerComment = sample.replace("[Peer]", "[Peer] # server")
+    check(WireGuardRouting.prepare(peerComment, setOf("com.example.bank")) ==
+        peerComment.replace("[Peer] # server", "ExcludedApplications = com.example.bank\n[Peer] # server"))
+
+    // Insert exclusions before the first commented Peer, never within either
+    // peer. Preserve DNS, IPv4/IPv6 routes, key lines, whitespace and comments.
+    val commentedProfile = """# [Interface] is only a comment
+ [iNtErFaCe] # client settings
+PrivateKey = PRIVATE_PLACEHOLDER # keep this comment
+Address = 10.8.0.2/32, fd00::2/128
+DNS = 1.1.1.1, 2606:4700:4700::1111 # resolver settings
+# ExcludedApplications = comment.only
+
+ [pEeR] # first server
+PublicKey = FIRST_PUBLIC_PLACEHOLDER
+AllowedIPs = 0.0.0.0/0, ::/0 # default routes
+Endpoint = first.example:51820
+
+[Peer] # second server
+PublicKey = SECOND_PUBLIC_PLACEHOLDER
+AllowedIPs = 192.0.2.0/24, 2001:db8::/32 # specific routes
+Endpoint = second.example:51820"""
+    val expectedCommented = commentedProfile.replace(" [pEeR] # first server",
+        "ExcludedApplications = com.example.bank, com.example.chat\n [pEeR] # first server")
+    val chosen = setOf("com.example.chat", "com.example.bank")
+    check(WireGuardRouting.prepare(commentedProfile, chosen) == expectedCommented)
+    check(WireGuardRouting.prepare(commentedProfile, emptySet()) == commentedProfile)
+    check(WireGuardRouting.prepare(commentedProfile.replace("\n", "\r\n"), chosen) == expectedCommented)
+    check(WireGuardRouting.prepare(commentedProfile.replace("\n", "\r"), chosen) == expectedCommented)
+
+    // A previous inline exclusion is removed as a directive, but standalone
+    // comments remain. Clearing the selection leaves all unrelated text intact.
+    val previousCommented = commentedProfile.replace("DNS =",
+        "  excludedapplications = old.app # obsolete selection\nDNS =")
+    check(WireGuardRouting.prepare(previousCommented, chosen) == expectedCommented)
+    check(WireGuardRouting.prepare(previousCommented, emptySet()) == commentedProfile)
+
+    // Comments cannot bypass existing restrictions on duplicate Interface
+    // sections or application directives outside Interface.
+    val invalidCommented = listOf(
+        commentedProfile + "\n[INTERFACE] # duplicate\nAddress = 10.9.0.2/32",
+        commentedProfile + "\nExcludedApplications = com.example.bank # misplaced",
+        commentedProfile.replace("DNS =", "IncludedApplications = com.example.bank # unsupported\nDNS ="),
+    )
+    for (invalid in invalidCommented) {
+        try {
+            WireGuardRouting.prepare(invalid, chosen)
+            error("Invalid commented application routing accepted")
+        } catch (_: IllegalArgumentException) { }
+    }
     println("Kotlin WireGuardRouting executable checks passed")
 }

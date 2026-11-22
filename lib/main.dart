@@ -88,6 +88,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _diagnostics.transitioning && !_diagnosticsStale;
   bool get _tunnelConfirmed => connected && _diagnostics.isKnown &&
       !_diagnosticsStale && !_nativeBusy && !connecting;
+  // A new connection requires a current DOWN observation. On startup/resume,
+  // the last screen state cannot authorize reconfiguring an existing tunnel.
+  // Keep Disconnect available for a last-known UP even when status reads fail.
+  bool get _canToggleTunnel => _isAndroid && _foreground && !_informationOpen &&
+      !connecting && !_nativeBusy && !_profileBusy && !_profileEditorOpen &&
+      !_savingRoute && !_routeConfirmationOpen &&
+      (connected || (!_statusRefreshing && _diagnostics.isKnown &&
+          !_diagnosticsStale && !_diagnostics.connected));
   bool get _canManageProfiles => _isAndroid && _foreground &&
       !_informationOpen &&
       !connected && !connecting && !_nativeBusy && !_profileBusy &&
@@ -116,6 +124,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'Запрос разрешения VPN прерван. Повторите подключение.';
         case 'VPN_BUSY':
           return 'Подключение уже изменяется. Дождитесь завершения.';
+        case 'VPN_STATE_UNAVAILABLE':
+          return 'Не удалось уточнить состояние туннеля. Обновите диагностику и повторите действие.';
         case 'INVALID_CONFIG':
           return 'Профиль WireGuard некорректен. Откройте его настройки и проверьте данные.';
         case 'PROFILE_LOAD_FAILED':
@@ -139,8 +149,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTunnel({String? profile}) async {
-    if (!_isAndroid || !_foreground || _informationOpen || connecting || _nativeBusy || _profileBusy ||
-        _profileEditorOpen || _savingRoute || _routeConfirmationOpen) return;
+    if (!_canToggleTunnel) return;
     final tunnelIntent = ++_tunnelIntentEpoch;
     final disconnecting = connected;
     final requestEpoch = _profileRequestEpoch;
@@ -720,7 +729,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.31.0',
+            version: '0.32.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -802,9 +811,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
         key: const Key('pushok_connect_button'),
         customBorder: const CircleBorder(),
-        onTap: connecting || _nativeBusy || _profileBusy || _profileEditorOpen ||
-            _savingRoute || _routeConfirmationOpen || !_isAndroid
-            ? null : () => _toggleTunnel(),
+        onTap: _canToggleTunnel ? () => _toggleTunnel() : null,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(_tunnelConfirmed ? Icons.check_circle_outline
               : connected ? Icons.info_outline : Icons.power_settings_new,

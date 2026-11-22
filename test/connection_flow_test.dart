@@ -280,6 +280,61 @@ void main() {
     });
   });
 
+  testWidgets('Initial status must finish before a missing profile can open setup', (tester) async {
+    final pending = Completer<Object?>();
+    bridge.statusGate = pending;
+    await _withApp(tester, () async {
+      final connect = find.byKey(const Key('pushok_connect_button'));
+      expect(bridge.named('vpnStatus'), hasLength(1));
+      expect(tester.widget<InkWell>(connect).onTap, isNull);
+      await tester.tap(connect);
+      await tester.pump();
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('acquire'), isEmpty);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+
+      bridge.statusGate = null;
+      pending.complete(_snapshot(active: false));
+      await tester.pumpAndSettle();
+      // Waiting never queues a connection or opens the editor automatically.
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(tester.widget<InkWell>(connect).onTap, isNotNull);
+      await tester.tap(connect);
+      await tester.pumpAndSettle();
+      expect(find.byType(WireGuardProfileEditor), findsOneWidget);
+      expect(find.text('Сохранить и подключить'), findsOneWidget);
+      expect(bridge.named('acquire'), hasLength(1));
+      expect(bridge.named('connectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('Delayed startup status discovers an existing tunnel without reconnecting it', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.connected = true;
+    final pending = Completer<Object?>();
+    bridge.statusGate = pending;
+    await _withApp(tester, () async {
+      final connect = find.byKey(const Key('pushok_connect_button'));
+      expect(tester.widget<InkWell>(connect).onTap, isNull);
+      await tester.tap(connect);
+      await tester.pump();
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+
+      bridge.statusGate = null;
+      pending.complete(_snapshot());
+      await tester.pumpAndSettle();
+      expect(find.text('Отключить'), findsOneWidget);
+      expect(tester.widget<InkWell>(connect).onTap, isNotNull);
+      await tester.tap(connect);
+      await tester.pumpAndSettle();
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), hasLength(1));
+      expect(find.text('Статус: отключено'), findsOneWidget);
+    });
+  });
+
   testWidgets('A stored profile connects after a cold start without opening editor', (tester) async {
     bridge.savedProfile = _profile;
     await _withApp(tester, () async {
@@ -400,6 +455,65 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Статус: отключено'), findsOneWidget);
       expect(bridge.named('vpnStatus').length, greaterThan(polls));
+    });
+  });
+
+  testWidgets('Resume waits for current status before offering a new connection', (tester) async {
+    bridge.savedProfile = _profile;
+    await _withApp(tester, () async {
+      final connect = find.byKey(const Key('pushok_connect_button'));
+      expect(tester.widget<InkWell>(connect).onTap, isNotNull);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      bridge.connected = true;
+      final pending = Completer<Object?>();
+      bridge.statusGate = pending;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('Статус уточняется'), findsOneWidget);
+      expect(tester.widget<InkWell>(connect).onTap, isNull);
+      await tester.tap(connect);
+      await tester.pump();
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+
+      bridge.statusGate = null;
+      pending.complete(_snapshot());
+      await tester.pumpAndSettle();
+      expect(find.text('Отключить'), findsOneWidget);
+      expect(tester.widget<InkWell>(connect).onTap, isNotNull);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('An unreadable native state blocks new connections until an explicit retry', (tester) async {
+    bridge.savedProfile = _profile;
+    await _withApp(tester, () async {
+      bridge.connectError = PlatformException(code: 'VPN_STATE_UNAVAILABLE',
+          message: 'SECRET_NATIVE_DETAIL');
+      bridge.statusState = 'unknown';
+      final connect = find.byKey(const Key('pushok_connect_button'));
+      await tester.tap(connect);
+      await tester.pumpAndSettle();
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      expect(find.textContaining('Не удалось уточнить состояние туннеля'), findsWidgets);
+      expect(find.textContaining('SECRET_NATIVE_DETAIL'), findsNothing);
+      expect(tester.widget<InkWell>(connect).onTap, isNull);
+      await tester.tap(connect);
+      await tester.pump();
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+
+      bridge.connectError = null;
+      bridge.statusState = null;
+      await _showDiagnostics(tester);
+      await _closeInformation(tester);
+      expect(tester.widget<InkWell>(connect).onTap, isNotNull);
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      await tester.tap(connect);
+      await tester.pumpAndSettle();
+      expect(bridge.named('connectWireGuard'), hasLength(2));
+      expect(find.text('Туннель включён'), findsOneWidget);
     });
   });
 
@@ -651,7 +765,16 @@ void main() {
       expect(find.text('Отключить'), findsOneWidget);
       expect(find.text('Туннель включён'), findsNothing);
       expect(find.text('Статус уточняется'), findsOneWidget);
+      final connect = find.byKey(const Key('pushok_connect_button'));
+      expect(tester.widget<InkWell>(connect).onTap, isNotNull);
       expect(bridge.named('disconnectWireGuard'), isEmpty);
+      bridge.statusState = null;
+      bridge.statusConnected = null;
+      await tester.tap(connect);
+      await tester.pumpAndSettle();
+      expect(bridge.named('disconnectWireGuard'), hasLength(1));
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(find.text('Статус: отключено'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
@@ -965,7 +1088,7 @@ void main() {
     });
   });
 
-  testWidgets('A manual connection during post-save refresh is never toggled off by Save and Connect', (tester) async {
+  testWidgets('Post-save refresh blocks a duplicate tap while Save and Connect completes once', (tester) async {
     await _withApp(tester, () async {
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pumpAndSettle();
@@ -980,7 +1103,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pump();
       expect(find.byType(WireGuardProfileEditor), findsNothing);
-      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      final connect = find.byKey(const Key('pushok_connect_button'));
+      expect(tester.widget<InkWell>(connect).onTap, isNull);
+      await tester.tap(connect);
       await tester.pump();
       expect(bridge.named('connectWireGuard'), isEmpty);
       bridge.catalogGate = null;
