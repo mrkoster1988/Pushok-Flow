@@ -416,7 +416,8 @@ void main() {
       expect(bridge.named('acquire'), isEmpty);
       expect(find.text('Туннель включён'), findsOneWidget);
       await _openRoutes(tester);
-      final toggle = tester.widget<SwitchListTile>(find.byType(SwitchListTile));
+      final toggle = tester.widget<SwitchListTile>(
+        find.byKey(const Key('route_toggle_example.browser')));
       expect(toggle.onChanged, isNull);
     });
   });
@@ -878,7 +879,8 @@ void main() {
       await _showDiagnostics(tester);
       expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
       await _openRoutes(tester);
-      expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged, isNull);
+      expect(tester.widget<SwitchListTile>(
+        find.byKey(const Key('route_toggle_example.browser'))).onChanged, isNull);
       expect(bridge.named('connectWireGuard'), isEmpty);
       expect(bridge.named('disconnectWireGuard'), isEmpty);
       expect(tester.takeException(), isNull);

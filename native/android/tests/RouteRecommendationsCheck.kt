@@ -74,6 +74,7 @@ private class MemoryRecommendations : RouteRecommendationStorage {
 }
 
 fun main() {
+    checkRecommendationAutomation()
     val keys = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
     val otherKeys = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
     fun verify(value: ByteArray) = RouteRecommendationPolicy.verify(value, keys.public)
@@ -242,6 +243,24 @@ fun main() {
     readbackStore.restore(guard)
     check(readbackStore.snapshot().recommendations.rulesVersion == 2)
     check(readbackStore.snapshot().checkedAtMillis == null)
+
+    // Opt-out is serialized with the signed catalogue commit, independently of Activity lifetime.
+    val automaticRequests = RecommendationAutomaticRequests()
+    val cancelledStorage = MemoryRecommendations()
+    val cancelledStore = RouteRecommendationStore(cancelledStorage, ::verify)
+    cancelledStore.accept(one, 1000L, guard)
+    val requestToken = automaticRequests.capture()
+    cancelledStorage.beforeCommit = { automaticRequests.cancel() }
+    reject("RECOMMENDATIONS_INTERRUPTED") {
+        cancelledStore.accept(two, 2000L) { action -> automaticRequests.guarded(requestToken, action) }
+    }
+    check(cancelledStorage.disk!!.contentEquals(one))
+    check(cancelledStore.snapshot().recommendations.rulesVersion == 1)
+    check(cancelledStore.snapshot().checkedAtMillis == 1000L)
+    // A manual refresh has no automatic token and remains usable after opt-out.
+    cancelledStorage.beforeCommit = {}
+    cancelledStore.accept(two, 3000L, guard)
+    check(cancelledStore.snapshot().recommendations.rulesVersion == 2)
 
     println("Route recommendation signatures, strict data validation, rollback and guarded storage checks passed")
 }

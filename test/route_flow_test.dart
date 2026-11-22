@@ -23,10 +23,14 @@ class _RoutesBridge {
     'checkedAtMillis': 1795320000000,
     'busy': false,
     'errorCode': null,
+    'autoUpdateEnabled': false,
   };
   Completer<Object?>? nextRecommendationRead;
   Completer<Object?>? nextRecommendationRefresh;
+  Completer<Object?>? nextRecommendationAutomaticRefresh;
+  Completer<void>? recommendationSettingGate;
   Object? recommendationRefreshError;
+  Object? recommendationSettingError;
 
   List<MethodCall> named(String method) =>
       calls.where((call) => call.method == method).toList();
@@ -43,6 +47,19 @@ class _RoutesBridge {
         final refresh = nextRecommendationRefresh;
         nextRecommendationRefresh = null;
         return refresh == null ? recommendations : refresh.future;
+      case 'refreshRecommendationsIfDue':
+        if (recommendationRefreshError != null) throw recommendationRefreshError!;
+        final automaticRefresh = nextRecommendationAutomaticRefresh;
+        nextRecommendationAutomaticRefresh = null;
+        return automaticRefresh == null ? recommendations : automaticRefresh.future;
+      case 'setAutoUpdateEnabled':
+        if (recommendationSettingGate != null) await recommendationSettingGate!.future;
+        if (recommendationSettingError != null) throw recommendationSettingError!;
+        recommendations = {
+          ...recommendations,
+          'autoUpdateEnabled': (call.arguments as Map)['enabled'],
+        };
+        return recommendations;
       case 'installedApps':
         if (appsError != null) throw appsError!;
         return [
@@ -148,6 +165,8 @@ void main() {
     await _withRoutes(tester, () async {
       expect(bridge.named('recommendationStatus'), hasLength(1));
       expect(bridge.named('refreshRecommendations'), isEmpty);
+      expect(bridge.named('refreshRecommendationsIfDue'), isEmpty);
+      expect(bridge.named('setAutoUpdateEnabled'), isEmpty);
       final filter = find.byKey(const Key('routes_filter_recommended'));
       await _reveal(tester, filter);
       await tester.tap(filter);
@@ -258,8 +277,203 @@ void main() {
       expect(find.text('Версия рекомендаций: 2'), findsOneWidget);
       expect(bridge.named('recommendationStatus'), hasLength(2));
       expect(bridge.named('refreshRecommendations'), isEmpty);
+      expect(bridge.named('refreshRecommendationsIfDue'), isEmpty);
       expect(bridge.named('setBypass'), isEmpty);
       expect(bridge.selected, {'example.mail'});
+    });
+  });
+
+  testWidgets('Opt-in waits for durable acknowledgement then asks native once without changing routes', (tester) async {
+    await _withRoutes(tester, () async {
+      final automatic = find.byKey(const Key('recommendations_auto_update'));
+      await _reveal(tester, automatic);
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      final saved = Completer<void>();
+      bridge.recommendationSettingGate = saved;
+      await tester.tap(automatic);
+      await tester.pump();
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      expect(tester.widget<SwitchListTile>(automatic).onChanged, isNull);
+      expect(bridge.named('refreshRecommendationsIfDue'), isEmpty);
+      expect(bridge.named('setAutoUpdateEnabled').single.arguments, {'enabled': true});
+      saved.complete();
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(automatic).value, isTrue);
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      expect(bridge.named('refreshRecommendations'), isEmpty);
+      expect(bridge.named('setBypass'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('installUpdate'), isEmpty);
+      expect(bridge.selected, {'example.mail'});
+    });
+  });
+
+  testWidgets('Persisted opt-in checks once on Routes entry and resume, never on Home', (tester) async {
+    bridge.recommendations['autoUpdateEnabled'] = true;
+    await _withRoutes(tester, () async {
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      await _nav(tester, 'Маршруты');
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(2));
+      await _nav(tester, 'Главная');
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(2));
+      await _nav(tester, 'Маршруты');
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(3));
+      expect(bridge.named('refreshRecommendations'), isEmpty);
+      expect(bridge.named('setBypass'), isEmpty);
+    });
+  });
+
+  testWidgets('Busy automatic result polls only local status without automatic retry', (tester) async {
+    await _withRoutes(tester, () async {
+      final automatic = find.byKey(const Key('recommendations_auto_update'));
+      final pendingRefresh = Completer<Object?>();
+      bridge.nextRecommendationAutomaticRefresh = pendingRefresh;
+      await _reveal(tester, automatic);
+      await tester.tap(automatic);
+      await tester.pump();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      bridge.recommendations = {...bridge.recommendations,
+        'autoUpdateEnabled': true, 'busy': true};
+      pendingRefresh.complete(bridge.recommendations);
+      await tester.pump();
+      final localReads = bridge.named('recommendationStatus').length;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(bridge.named('recommendationStatus'), hasLength(localReads + 1));
+      bridge.recommendations = {...bridge.recommendations, 'busy': false};
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      expect(bridge.named('recommendationStatus'), hasLength(localReads + 2));
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      expect(bridge.named('refreshRecommendations'), isEmpty);
+    });
+  });
+
+  testWidgets('Failed opt-in preserves disabled setting and never starts a due check', (tester) async {
+    await _withRoutes(tester, () async {
+      bridge.recommendationSettingError = PlatformException(
+        code: 'RECOMMENDATIONS_STORAGE_ERROR', message: 'PRIVATE_NATIVE_DETAILS');
+      final automatic = find.byKey(const Key('recommendations_auto_update'));
+      await _reveal(tester, automatic);
+      await tester.tap(automatic);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      expect(bridge.named('refreshRecommendationsIfDue'), isEmpty);
+      expect(find.text('Версия рекомендаций: 1'), findsOneWidget);
+      expect(find.textContaining('PRIVATE_NATIVE_DETAILS'), findsNothing);
+      expect(bridge.named('setBypass'), isEmpty);
+    });
+  });
+
+  testWidgets('Opt-out invalidates an in-flight automatic result and keeps manual refresh', (tester) async {
+    await _withRoutes(tester, () async {
+      final automatic = find.byKey(const Key('recommendations_auto_update'));
+      final pendingRefresh = Completer<Object?>();
+      bridge.nextRecommendationAutomaticRefresh = pendingRefresh;
+      await _reveal(tester, automatic);
+      await tester.tap(automatic);
+      await tester.pump();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      expect(tester.widget<SwitchListTile>(automatic).value, isTrue);
+      expect(tester.widget<SwitchListTile>(automatic).onChanged, isNotNull);
+      await tester.tap(automatic);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      pendingRefresh.complete({...bridge.recommendations,
+        'autoUpdateEnabled': true, 'rulesVersion': 9});
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      expect(find.text('Версия рекомендаций: 9'), findsNothing);
+      final manual = find.byKey(const Key('refresh_recommendations'));
+      await _reveal(tester, manual);
+      await tester.tap(manual);
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendations'), hasLength(1));
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      await _nav(tester, 'Главная');
+      await tester.pumpAndSettle();
+      await _nav(tester, 'Маршруты');
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      expect(bridge.named('setBypass'), isEmpty);
+    });
+  });
+
+  testWidgets('Late automatic response after navigation cannot replace a newer catalogue or preference', (tester) async {
+    await _withRoutes(tester, () async {
+      final pendingRefresh = Completer<Object?>();
+      bridge.nextRecommendationAutomaticRefresh = pendingRefresh;
+      final automatic = find.byKey(const Key('recommendations_auto_update'));
+      await _reveal(tester, automatic);
+      await tester.tap(automatic);
+      await tester.pump();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      await _nav(tester, 'Главная');
+      await tester.pumpAndSettle();
+      bridge.recommendations = {...bridge.recommendations,
+        'autoUpdateEnabled': false, 'rulesVersion': 3};
+      await _nav(tester, 'Маршруты');
+      await tester.pumpAndSettle();
+      pendingRefresh.complete({...bridge.recommendations,
+        'autoUpdateEnabled': true, 'rulesVersion': 2});
+      await tester.pumpAndSettle();
+      expect(find.text('Версия рекомендаций: 3'), findsOneWidget);
+      expect(find.text('Версия рекомендаций: 2'), findsNothing);
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      expect(bridge.named('setBypass'), isEmpty);
+    });
+  });
+
+  testWidgets('Automatic network error keeps opt-in and selected routes without retry polling', (tester) async {
+    bridge.recommendations['autoUpdateEnabled'] = true;
+    bridge.recommendationRefreshError = PlatformException(
+      code: 'RECOMMENDATIONS_NETWORK_ERROR', message: 'PRIVATE_NATIVE_DETAILS');
+    await _withRoutes(tester, () async {
+      expect(find.text('Версия рекомендаций: 1'), findsOneWidget);
+      expect(tester.widget<SwitchListTile>(
+        find.byKey(const Key('recommendations_auto_update'))).value, isTrue);
+      await tester.pump(const Duration(seconds: 3));
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      expect(bridge.named('recommendationStatus'), hasLength(1));
+      expect(bridge.named('setBypass'), isEmpty);
+      expect(bridge.selected, {'example.mail'});
+      expect(find.byKey(const Key('routes_error')), findsNothing);
+      expect(find.textContaining('PRIVATE_NATIVE_DETAILS'), findsNothing);
+    });
+  });
+
+  testWidgets('Late opt-in acknowledgement in background cannot start network until Routes resumes', (tester) async {
+    await _withRoutes(tester, () async {
+      final saved = Completer<void>();
+      bridge.recommendationSettingGate = saved;
+      final automatic = find.byKey(const Key('recommendations_auto_update'));
+      await _reveal(tester, automatic);
+      await tester.tap(automatic);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      saved.complete();
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendationsIfDue'), isEmpty);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(bridge.named('refreshRecommendationsIfDue'), hasLength(1));
+      expect(tester.widget<SwitchListTile>(automatic).value, isTrue);
+      expect(bridge.named('setBypass'), isEmpty);
     });
   });
 

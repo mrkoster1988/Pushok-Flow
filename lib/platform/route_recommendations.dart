@@ -24,6 +24,7 @@ class RecommendationStatus {
     required this.rulesVersion,
     required this.packages,
     required this.busy,
+    required this.autoUpdateEnabled,
     this.checkedAtMillis,
     this.errorCode,
   });
@@ -33,27 +34,32 @@ class RecommendationStatus {
         packages = const {},
         checkedAtMillis = null,
         busy = false,
+        autoUpdateEnabled = false,
         errorCode = null;
 
   final int rulesVersion;
   final Set<String> packages;
   final int? checkedAtMillis;
   final bool busy;
+  final bool autoUpdateEnabled;
   final String? errorCode;
 
   factory RecommendationStatus.fromPlatform(Object? raw) {
-    if (raw is! Map || raw.length != 5 ||
-        !const {'rulesVersion', 'packages', 'checkedAtMillis', 'busy', 'errorCode'}
+    if (raw is! Map || raw.length != 6 ||
+        !const {'rulesVersion', 'packages', 'checkedAtMillis', 'busy', 'errorCode',
+          'autoUpdateEnabled'}
             .every(raw.containsKey)) {
       throw const FormatException('Invalid recommendation status.');
     }
     final version = raw['rulesVersion'];
     final values = raw['packages'];
     final busy = raw['busy'];
+    final autoUpdateEnabled = raw['autoUpdateEnabled'];
     final checkedAt = raw['checkedAtMillis'];
     final error = raw['errorCode'];
     if (version is! int || version < 0 || version > 2147483647 ||
         values is! List || values.length > 256 || busy is! bool ||
+        autoUpdateEnabled is! bool ||
         (checkedAt != null && (checkedAt is! int || checkedAt <= 0 ||
             checkedAt > 8640000000000000)) ||
         (error != null && (error is! String || !_errorCodes.contains(error)))) {
@@ -74,6 +80,7 @@ class RecommendationStatus {
       rulesVersion: version,
       packages: Set.unmodifiable(packages),
       busy: busy,
+      autoUpdateEnabled: autoUpdateEnabled,
       checkedAtMillis: checkedAt as int?,
       errorCode: error as String?,
     );
@@ -84,13 +91,15 @@ class RecommendationStatus {
     rulesVersion: rulesVersion,
     packages: packages,
     busy: false,
+    autoUpdateEnabled: autoUpdateEnabled,
     checkedAtMillis: checkedAtMillis,
     errorCode: _errorCodes.contains(code) ? code : 'RECOMMENDATIONS_INVALID',
   );
 }
 
-/// Reading status is local; only refreshRecommendations starts a network check.
-/// Neither method changes selected applications or opens Android's installer.
+/// Status and settings are local. Automatic refresh is gated by native consent
+/// and persisted timing; manual refresh remains explicit. No method changes
+/// selected applications or opens Android's installer.
 class RouteRecommendations {
   RouteRecommendations({bool? isAndroid})
       : _isAndroid = isAndroid ?? Platform.isAndroid;
@@ -104,12 +113,20 @@ class RouteRecommendations {
   Future<RecommendationStatus> refreshRecommendations() =>
       _invoke('refreshRecommendations', const Duration(seconds: 50));
 
-  Future<RecommendationStatus> _invoke(String method, Duration timeout) async {
+  Future<RecommendationStatus> refreshRecommendationsIfDue() =>
+      _invoke('refreshRecommendationsIfDue', const Duration(seconds: 50));
+
+  Future<RecommendationStatus> setAutoUpdateEnabled(bool enabled) =>
+      _invoke('setAutoUpdateEnabled', const Duration(seconds: 50),
+          arguments: {'enabled': enabled});
+
+  Future<RecommendationStatus> _invoke(String method, Duration timeout,
+      {Map<String, Object?>? arguments}) async {
     if (!_isAndroid) {
       throw const RecommendationFailure('RECOMMENDATIONS_UNAVAILABLE');
     }
     try {
-      final raw = await _channel.invokeMethod<Object?>(method).timeout(timeout);
+      final raw = await _channel.invokeMethod<Object?>(method, arguments).timeout(timeout);
       return RecommendationStatus.fromPlatform(raw);
     } on MissingPluginException {
       throw const RecommendationFailure('RECOMMENDATIONS_UNAVAILABLE');

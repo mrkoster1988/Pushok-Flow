@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.HttpsURLConnection
 
-/** Explicit user refreshes fetch suggestions only. No profile, route or tunnel store is referenced. */
+/** Explicit refreshes and opted-in foreground checks fetch advisory data only. */
 class RouteRecommendations(activity: Activity) {
     private val context = activity.applicationContext
     private val activityReference = WeakReference(activity)
@@ -34,8 +34,11 @@ class RouteRecommendations(activity: Activity) {
     private val foreground = AtomicBoolean(false)
     private val foregroundEpoch = AtomicLong(0)
     private val busy = AtomicBoolean(false)
+    private val settingsBusy = AtomicBoolean(false)
     private var channel: MethodChannel? = null
     private var pendingResult: MethodChannel.Result? = null
+    private var pendingSettingsResult: MethodChannel.Result? = null
+    @Volatile private var automaticRequestEpoch: Long? = null
     @Volatile private var connection: HttpsURLConnection? = null
     @Volatile private var errorCode: String? = null
     private val signingKey: PublicKey? = try { installedSigningKey() } catch (_: Exception) { null }
@@ -43,10 +46,16 @@ class RouteRecommendations(activity: Activity) {
         val key = signingKey ?: throw RouteRecommendationFailure("RECOMMENDATIONS_UNAVAILABLE")
         RouteRecommendationPolicy.verify(bytes, key)
     }
+    private val automation = RecommendationAutomationStore(
+        PrivateStorage("route-recommendations-settings.bin", RecommendationAutomationStore.STORAGE_BYTES),
+        automationSession,
+    )
 
     companion object {
         // Shared across Activity recreation: an older writer cannot race a newer cache restore/write.
         private val io = Executors.newSingleThreadExecutor()
+        private val automationSession = RecommendationAutomationSession()
+        private val automaticRequests = RecommendationAutomaticRequests()
         private const val CHECK_TIMEOUT_MS = 40_000L
     }
 
@@ -57,7 +66,15 @@ class RouteRecommendations(activity: Activity) {
             registered.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "recommendationStatus" -> recommendationStatus(result)
-                    "refreshRecommendations" -> refreshRecommendations(result)
+                    "refreshRecommendations" -> refreshRecommendations(result, automatic = false)
+                    "refreshRecommendationsIfDue" -> refreshRecommendations(result, automatic = true)
+                    "setAutoUpdateEnabled" -> {
+                        val arguments = call.arguments as? Map<*, *>
+                        val enabled = arguments?.get("enabled") as? Boolean
+                        if (arguments?.size != 1 || enabled == null) {
+                            result.success(snapshot("RECOMMENDATIONS_INVALID"))
+                        } else setAutoUpdateEnabled(enabled, result)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -83,8 +100,13 @@ class RouteRecommendations(activity: Activity) {
         channel = null
         val result = pendingResult
         pendingResult = null
+        val settingsResult = pendingSettingsResult
+        pendingSettingsResult = null
         busy.set(false)
+        settingsBusy.set(false)
+        automaticRequestEpoch = null
         if (result != null) result.success(snapshot("RECOMMENDATIONS_INTERRUPTED"))
+        if (settingsResult != null) settingsResult.success(snapshot("RECOMMENDATIONS_INTERRUPTED"))
         activityReference.clear()
     }
 
@@ -98,57 +120,117 @@ class RouteRecommendations(activity: Activity) {
             "rulesVersion" to current.recommendations.rulesVersion,
             "packages" to current.recommendations.packages,
             "checkedAtMillis" to current.checkedAtMillis,
-            "busy" to busy.get(),
+            "busy" to (busy.get() || settingsBusy.get()),
             "errorCode" to (errorOverride ?: errorCode),
+            "autoUpdateEnabled" to automation.snapshot().enabled,
         )
     }
 
     private fun recommendationStatus(result: MethodChannel.Result) {
-        if (busy.get()) {
+        if (busy.get() || settingsBusy.get()) {
             result.success(snapshot())
             return
         }
-        runIo(result, null) { store.restore { action -> guarded(null, action) } }
+        runIo(result, null) {
+            var settingsFailure: RouteRecommendationFailure? = null
+            try { automation.restore { action -> guarded(null, action) } }
+            catch (failure: RouteRecommendationFailure) { settingsFailure = failure }
+            // Unreadable scheduling metadata must not hide the last verified catalogue.
+            store.restore { action -> guarded(null, action) }
+            settingsFailure?.let { throw it }
+        }
     }
 
-    private fun refreshRecommendations(result: MethodChannel.Result) {
+    private fun refreshRecommendations(result: MethodChannel.Result, automatic: Boolean) {
         val epoch = foregroundEpoch.get()
+        val automaticEpoch = if (automatic) automaticRequests.capture() else null
         val deadline = SystemClock.elapsedRealtime() + CHECK_TIMEOUT_MS
-        try { ensureActive(epoch) }
+        try { ensureActive(epoch, automaticEpoch) }
         catch (failure: RouteRecommendationFailure) {
             result.success(snapshot(failure.code))
             return
         }
-        runIo(result, epoch) {
+        runIo(result, epoch, automaticEpoch) {
+            val guard: (action: () -> Unit) -> Unit = { action -> guarded(epoch, action, automaticEpoch) }
             // Re-read on the shared queue in case another Activity accepted a newer catalogue.
-            try { store.restore { action -> guarded(epoch, action) } }
+            try { store.restore(guard) }
             catch (failure: RouteRecommendationFailure) {
                 if (failure.code == "RECOMMENDATIONS_INTERRUPTED" ||
                     failure.code == "RECOMMENDATIONS_UNAVAILABLE") throw failure
                 // The last verified in-memory catalogue survives. An explicit signed refresh
                 // can repair a damaged/missing cache, while freshness still uses that catalogue.
             }
-            val envelope = fetch(epoch, deadline)
-            ensureActive(epoch)
-            store.accept(envelope, System.currentTimeMillis()) { action -> guarded(epoch, action) }
+            val now = clockSample()
+            val reserved = automation.reserve(now, automatic, guard)
+            if (!reserved) return@runIo
+            val envelope = fetch(epoch, deadline, automaticEpoch)
+            ensureActive(epoch, automaticEpoch)
+            store.accept(envelope, System.currentTimeMillis(), guard)
+            try { automation.recordSuccess(clockSample(), guard) }
+            catch (failure: RouteRecommendationFailure) {
+                if (failure.code != "RECOMMENDATIONS_STORAGE_ERROR") throw failure
+                // The catalogue is already durably committed and the process cooldown retained.
+                // The pre-fetch reservation still limits another process to the retry interval.
+            }
         }
     }
 
-    private fun runIo(result: MethodChannel.Result, epoch: Long?, action: () -> Unit) {
+    private fun clockSample() = RecommendationClockSample(System.currentTimeMillis(), SystemClock.elapsedRealtime())
+
+    private fun setAutoUpdateEnabled(enabled: Boolean, result: MethodChannel.Result) {
+        val epoch = foregroundEpoch.get()
+        try { ensureActive(epoch) }
+        catch (failure: RouteRecommendationFailure) {
+            result.success(snapshot(failure.code))
+            return
+        }
+        if (!settingsBusy.compareAndSet(false, true)) {
+            result.success(snapshot("RECOMMENDATIONS_BUSY"))
+            return
+        }
+        pendingSettingsResult = result
+        if (!enabled) {
+            // Immediate invalidation prevents a queued/in-flight auto request committing while
+            // the durable setting write waits on IO. Manual requests have no automatic token.
+            automaticRequests.cancel()
+            if (automaticRequestEpoch != null) disconnect()
+        }
+        io.execute {
+            var failure: String? = null
+            // This is an already accepted explicit local setting intent. Complete it after pause
+            // or Activity disposal too; abandoning a queued OFF would silently re-enable checks.
+            // The shared queue orders it before any subsequently accepted setting change.
+            try { automation.setEnabled(enabled) }
+            catch (error: RouteRecommendationFailure) { failure = error.code }
+            catch (_: Exception) { failure = "RECOMMENDATIONS_STORAGE_ERROR" }
+            val completedError = failure
+            main.post {
+                if (disposed.get() || pendingSettingsResult !== result) return@post
+                pendingSettingsResult = null
+                settingsBusy.set(false)
+                errorCode = completedError
+                result.success(snapshot())
+            }
+        }
+    }
+
+    private fun runIo(result: MethodChannel.Result, epoch: Long?, automaticEpoch: Long? = null,
+        action: () -> Unit) {
         if (disposed.get()) {
             result.success(snapshot("RECOMMENDATIONS_INTERRUPTED"))
             return
         }
-        if (!busy.compareAndSet(false, true)) {
+        if (settingsBusy.get() || !busy.compareAndSet(false, true)) {
             result.success(snapshot("RECOMMENDATIONS_BUSY"))
             return
         }
         pendingResult = result
+        automaticRequestEpoch = automaticEpoch
         errorCode = null
         io.execute {
             var failure: String? = null
             try {
-                ensureActive(epoch)
+                ensureActive(epoch, automaticEpoch)
                 if (signingKey == null) throw RouteRecommendationFailure("RECOMMENDATIONS_UNAVAILABLE")
                 action()
             } catch (error: RouteRecommendationFailure) {
@@ -157,7 +239,7 @@ class RouteRecommendations(activity: Activity) {
                 failure = "RECOMMENDATIONS_UNAVAILABLE"
             }
             // Disconnection often surfaces as IOException; interruption remains the useful result.
-            try { ensureActive(epoch) } catch (_: RouteRecommendationFailure) {
+            try { ensureActive(epoch, automaticEpoch) } catch (_: RouteRecommendationFailure) {
                 failure = "RECOMMENDATIONS_INTERRUPTED"
             }
             val completedError = failure
@@ -165,20 +247,21 @@ class RouteRecommendations(activity: Activity) {
                 if (disposed.get() || pendingResult !== result) return@post
                 errorCode = completedError
                 pendingResult = null
+                automaticRequestEpoch = null
                 busy.set(false)
                 result.success(snapshot())
             }
         }
     }
 
-    private fun guarded(epoch: Long?, action: () -> Unit) = synchronized(lifecycleLock) {
+    private fun guarded(epoch: Long?, action: () -> Unit, automaticEpoch: Long? = null) = synchronized(lifecycleLock) {
         // Final atomic replacement and in-memory acknowledgement occur under this same lock.
         // Pause/dispose therefore either precedes the whole commit or follows a completed commit.
-        ensureActive(epoch)
-        action()
+        ensureActive(epoch, automaticEpoch)
+        if (automaticEpoch == null) action() else automaticRequests.guarded(automaticEpoch, action)
     }
 
-    private fun ensureActive(epoch: Long?) {
+    private fun ensureActive(epoch: Long?, automaticEpoch: Long? = null) {
         if (disposed.get() || Thread.currentThread().isInterrupted) {
             throw RouteRecommendationFailure("RECOMMENDATIONS_INTERRUPTED")
         }
@@ -189,16 +272,17 @@ class RouteRecommendations(activity: Activity) {
                 throw RouteRecommendationFailure("RECOMMENDATIONS_INTERRUPTED")
             }
         }
+        automaticEpoch?.let(automaticRequests::requireCurrent)
     }
 
-    private fun fetch(epoch: Long, deadline: Long): ByteArray {
-        ensureActive(epoch)
+    private fun fetch(epoch: Long, deadline: Long, automaticEpoch: Long?): ByteArray {
+        ensureActive(epoch, automaticEpoch)
         var remote: HttpsURLConnection? = null
         try {
             remote = URL(RouteRecommendationPolicy.URL).openConnection() as? HttpsURLConnection
                 ?: throw RouteRecommendationFailure("RECOMMENDATIONS_NETWORK_ERROR")
             connection = remote
-            ensureActive(epoch)
+            ensureActive(epoch, automaticEpoch)
             remote.instanceFollowRedirects = false
             remote.connectTimeout = remainingTimeout(deadline, 10_000)
             remote.readTimeout = remainingTimeout(deadline, 10_000)
@@ -215,7 +299,7 @@ class RouteRecommendations(activity: Activity) {
             val active = remote
             return remote.inputStream.use { input ->
                 boundedRead(input) {
-                    ensureActive(epoch)
+                    ensureActive(epoch, automaticEpoch)
                     active.readTimeout = remainingTimeout(deadline, 10_000)
                 }
             }
@@ -235,14 +319,16 @@ class RouteRecommendations(activity: Activity) {
         return left.coerceAtMost(maximum.toLong()).toInt()
     }
 
-    private fun boundedRead(input: InputStream, beforeRead: () -> Unit = {}): ByteArray {
+    private fun boundedRead(input: InputStream,
+        maximum: Int = RouteRecommendationPolicy.MAX_ENVELOPE_BYTES,
+        beforeRead: () -> Unit = {}): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(8192)
         while (true) {
             beforeRead()
             val count = input.read(buffer)
             if (count == -1) break
-            if (count > RouteRecommendationPolicy.MAX_ENVELOPE_BYTES - output.size()) {
+            if (count > maximum - output.size()) {
                 throw RouteRecommendationFailure("RECOMMENDATIONS_INVALID")
             }
             output.write(buffer, 0, count)
@@ -263,10 +349,13 @@ class RouteRecommendations(activity: Activity) {
             ByteArrayInputStream(signer.toByteArray())).publicKey as? RSAPublicKey
     }
 
-    private inner class PrivateStorage : RouteRecommendationStorage {
+    private inner class PrivateStorage(
+        private val name: String = "route-recommendations.json",
+        private val maximum: Int = RouteRecommendationPolicy.MAX_ENVELOPE_BYTES,
+    ) : RouteRecommendationStorage, RecommendationAutomationStorage {
         private fun file(): AtomicFile {
             val directory = context.filesDir.canonicalFile
-            val base = File(directory, "route-recommendations.json")
+            val base = File(directory, name)
             // AtomicFile may also restore/delete its two implementation sidecars.
             for (name in listOf(base.name, "${base.name}.new", "${base.name}.bak")) {
                 val item = File(directory, name)
@@ -279,7 +368,7 @@ class RouteRecommendations(activity: Activity) {
 
         override fun read(): ByteArray? {
             val atomic = file()
-            return try { atomic.openRead().use { boundedRead(it) } }
+            return try { atomic.openRead().use { boundedRead(it, maximum) } }
             catch (_: FileNotFoundException) {
                 if (atomic.baseFile.exists()) throw RouteRecommendationFailure("RECOMMENDATIONS_STORAGE_ERROR")
                 null
@@ -287,6 +376,7 @@ class RouteRecommendations(activity: Activity) {
         }
 
         override fun replace(value: ByteArray, commit: (write: () -> Unit) -> Unit) {
+            if (value.size > maximum) throw RouteRecommendationFailure("RECOMMENDATIONS_STORAGE_ERROR")
             val atomic = file()
             val output = atomic.startWrite()
             replaceRecommendationFile(
@@ -298,7 +388,7 @@ class RouteRecommendations(activity: Activity) {
                 finish = { atomic.finishWrite(output) },
                 verifyCommitted = {
                     // AtomicFile can report a rename error only in logcat; verify the exact result.
-                    val saved = atomic.openRead().use { boundedRead(it) }
+                    val saved = atomic.openRead().use { boundedRead(it, maximum) }
                     if (!saved.contentEquals(value)) throw RouteRecommendationFailure("RECOMMENDATIONS_STORAGE_ERROR")
                 },
                 abortUnfinished = { atomic.failWrite(output) },

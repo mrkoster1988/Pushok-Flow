@@ -86,6 +86,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   RecommendationStatus _recommendations = const RecommendationStatus.empty();
   bool _recommendationsLoading = false;
   bool _recommendationsRefreshing = false;
+  bool _recommendationsSavingAutoUpdate = false;
   int _recommendationEpoch = 0;
   Timer? _recommendationPoll;
   int _statusEpoch = 0;
@@ -137,7 +138,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _onlyRecommendedRoutes = false;
     });
     unawaited(_refreshRoutes());
-    unawaited(_readRecommendations());
+    unawaited(_readRecommendations(checkAutomatically: true));
   }
 
   String _connectionMessage(Object error, {bool disconnecting = false}) {
@@ -293,7 +294,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _startHealthPolling();
       _refreshProfileStatus();
       _loadRoutes();
-      if (tab == 1) unawaited(_readRecommendations());
+      if (tab == 1) unawaited(_readRecommendations(checkAutomatically: true));
     } else {
       // A request made before losing focus must not open the editor later,
       // even if the user returns before a native response arrives.
@@ -309,6 +310,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         loadingApps = false;
         _recommendationsLoading = false;
         _recommendationsRefreshing = false;
+        _recommendationsSavingAutoUpdate = false;
       });
       _healthPoll?.cancel();
     }
@@ -323,13 +325,18 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     } catch (_) { if (mounted) setState(() => feedbackMessage = 'Память недоступна на этом устройстве.'); }
   }
 
-  Future<void> _readRecommendations() => _requestRecommendations(refresh: false);
+  Future<void> _readRecommendations({bool checkAutomatically = false}) =>
+      _requestRecommendations(refresh: false,
+          checkAutomatically: checkAutomatically);
 
   Future<void> _refreshRecommendations() => _requestRecommendations(refresh: true);
 
-  Future<void> _requestRecommendations({required bool refresh}) async {
+  Future<void> _requestRecommendations({required bool refresh,
+      bool automatic = false, bool checkAutomatically = false}) async {
     if (!_isAndroid || !mounted || !_foreground || tab != 1 ||
         _recommendationsLoading || _recommendationsRefreshing ||
+        _recommendationsSavingAutoUpdate ||
+        (automatic && !_recommendations.autoUpdateEnabled) ||
         (refresh && _recommendations.busy)) return;
     final epoch = ++_recommendationEpoch;
     _recommendationPoll?.cancel();
@@ -339,16 +346,54 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     });
     RecommendationStatus status;
     try {
-      status = await (refresh ? _recommendationBridge.refreshRecommendations()
-          : _recommendationBridge.recommendationStatus());
+      status = await (automatic
+          ? _recommendationBridge.refreshRecommendationsIfDue()
+          : refresh ? _recommendationBridge.refreshRecommendations()
+              : _recommendationBridge.recommendationStatus());
     } on RecommendationFailure catch (failure) {
       status = _recommendations.withError(failure.code);
     }
     if (!mounted || !_foreground || tab != 1 || epoch != _recommendationEpoch) return;
+    _acceptRecommendations(status);
+    // Only a route entry/resume may request an automatic check. Busy polling
+    // calls the local read without this flag, so it never becomes a retry loop.
+    if (checkAutomatically && status.autoUpdateEnabled && !status.busy &&
+        status.errorCode == null) {
+      await _requestRecommendations(refresh: true, automatic: true);
+    }
+  }
+
+  Future<void> _setRecommendationAutoUpdate(bool enabled) async {
+    if (!_isAndroid || !mounted || !_foreground || tab != 1 ||
+        _recommendationsLoading || _recommendationsSavingAutoUpdate ||
+        enabled == _recommendations.autoUpdateEnabled) return;
+    // Invalidate a pending refresh before asking native to cancel an automatic
+    // request. Its late snapshot cannot turn the user's switch back on.
+    final epoch = ++_recommendationEpoch;
+    _recommendationPoll?.cancel();
+    setState(() {
+      _recommendationsSavingAutoUpdate = true;
+      _recommendationsRefreshing = false;
+    });
+    RecommendationStatus status;
+    try {
+      status = await _recommendationBridge.setAutoUpdateEnabled(enabled);
+    } on RecommendationFailure catch (failure) {
+      status = _recommendations.withError(failure.code);
+    }
+    if (!mounted || !_foreground || tab != 1 || epoch != _recommendationEpoch) return;
+    _acceptRecommendations(status);
+    if (enabled && status.autoUpdateEnabled && !status.busy && status.errorCode == null) {
+      await _requestRecommendations(refresh: true, automatic: true);
+    }
+  }
+
+  void _acceptRecommendations(RecommendationStatus status) {
     setState(() {
       _recommendations = status;
       _recommendationsLoading = false;
       _recommendationsRefreshing = false;
+      _recommendationsSavingAutoUpdate = false;
     });
     // A refresh can outlive Activity focus. Polling only reads the local
     // snapshot and never starts another network request.
@@ -860,6 +905,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         indicatorColor: PushokFlowApp.panel,
         selectedIndex: tab,
         onDestinationSelected: (v) {
+          final enteringRoutes = v == 1 && v != tab;
           if (v != tab) {
             _recommendationEpoch++;
             _recommendationPoll?.cancel();
@@ -868,12 +914,13 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
             if (v != tab) {
               _recommendationsLoading = false;
               _recommendationsRefreshing = false;
+              _recommendationsSavingAutoUpdate = false;
             }
             tab = v;
           });
           if (v == 1) {
             unawaited(_refreshRoutes());
-            unawaited(_readRecommendations());
+            unawaited(_readRecommendations(checkAutomatically: enteringRoutes));
           }
           if (v == 2) unawaited(_refreshProfileStatus());
         },
@@ -979,7 +1026,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       status: _recommendations,
       loading: _recommendationsLoading,
       refreshing: _recommendationsRefreshing,
+      savingAutoUpdate: _recommendationsSavingAutoUpdate,
       onRefresh: _foreground ? _refreshRecommendations : null,
+      onAutoUpdateChanged: _isAndroid && _foreground ? _setRecommendationAutoUpdate : null,
     ),
   );
   Widget servers() => ListView(children: [

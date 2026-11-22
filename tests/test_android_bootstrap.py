@@ -178,7 +178,7 @@ class BootstrapScriptTests(unittest.TestCase):
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportReader.kt",
             "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "RouteSettingsStore.kt", "RouteAppAvailability.kt",
-            "RouteRecommendationPolicy.kt", "RouteRecommendationStore.kt", "RouteRecommendations.kt",
+            "RouteRecommendationPolicy.kt", "RouteRecommendationStore.kt", "RecommendationAutomation.kt", "RouteRecommendations.kt",
         )
         native = self.project / "native/android/app/src/main/kotlin/shop/pushok/flow"
         native.mkdir(parents=True)
