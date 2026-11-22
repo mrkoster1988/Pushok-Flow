@@ -1,0 +1,206 @@
+{
+  "recordedAtUtc": "2026-11-22T21:56:09.567164+00:00",
+  "status": "verified_signed_ready_for_authorized_publication",
+  "apkSourceCommit": "830656795367e3e19d0af988326aa9b1e0ddb92c",
+  "stagingSchemaVersion": 1,
+  "stagingDocument": "release-staging/v0.44.0.json",
+  "stagingDocumentSha256": "c5727c2ebb23f6c64cf0335776767f047469a74d81891d850474da054ead6bff",
+  "verifiedSignedApks": {
+    "universal": {
+      "packageName": "shop.pushok.flow",
+      "versionName": "0.44.0",
+      "versionCode": 44,
+      "minSdk": 24,
+      "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+      "sha256": "7181bd8b7de82914eccda9d3fd436c12a393725741808da9cfc9b2f4a1c29cd2",
+      "sizeBytes": 66809906
+    }
+  },
+  "sourceChecks": {
+    "runId": 45073778407,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45073778407",
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "830656795367e3e19d0af988326aa9b1e0ddb92c",
+    "headBranch": "main",
+    "event": "push",
+    "workflowPath": ".github/workflows/source-checks.yml",
+    "createdAtUtc": "2026-11-22T21:44:30Z",
+    "updatedAtUtc": "2026-11-22T21:45:42Z",
+    "runAttempt": 1,
+    "pythonTests": 267,
+    "flutterTests": 284,
+    "analyzer": "No issues found",
+    "verifiedLogMarkers": [
+      "2026-11-22T21:44:56.9038057Z Ran 267 tests in 20.314s",
+      "2026-11-22T21:44:56.9038320Z OK",
+      "2026-11-22T21:45:04.2596122Z No issues found! (ran in 6.2s)",
+      "2026-11-22T21:45:39.2577549Z 🎉 284 tests passed."
+    ]
+  },
+  "androidCandidate": {
+    "runId": 45073778419,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45073778419",
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "830656795367e3e19d0af988326aa9b1e0ddb92c",
+    "headBranch": "main",
+    "event": "push",
+    "workflowPath": ".github/workflows/android-candidate.yml",
+    "createdAtUtc": "2026-11-22T21:44:30Z",
+    "updatedAtUtc": "2026-11-22T21:54:05Z",
+    "runAttempt": 1,
+    "pythonTests": 267,
+    "flutterTests": 284,
+    "analyzer": "No issues found",
+    "kotlinSuites": 22,
+    "kotlinSuccessMarkers": 23,
+    "kotlinMarkerNote": "A JVM executable may report more than one completed check group.",
+    "candidateVerification": "success",
+    "candidateApkArtifactAvailable": true,
+    "verifiedCandidateApks": 1,
+    "verifiedLogMarkers": [
+      "2026-11-22T21:45:53.2386566Z Ran 267 tests in 19.891s",
+      "2026-11-22T21:45:53.2387164Z OK",
+      "2026-11-22T21:46:03.1360257Z Kotlin WireGuardRouting executable checks passed",
+      "2026-11-22T21:46:08.9693666Z TunnelHealth executable checks passed",
+      "2026-11-22T21:46:14.8827841Z TunnelConnectionSession state, failure recovery and shared queue checks passed",
+      "2026-11-22T21:46:22.8791411Z UpdatePolicy executable checks passed",
+      "2026-11-22T21:46:31.0518459Z ABI update selection, strict release assets, retained payloads, archive contents and URL checks passed",
+      "2026-11-22T21:46:38.4116068Z Update automation policy checks passed",
+      "2026-11-22T21:46:47.5167753Z Update Worker durable ownership, foreground progress, cancellation and resume checks passed",
+      "2026-11-22T21:46:55.2035548Z Flow account bounded schema, native secret boundary, durable login, expiry, logout and stale-response checks passed",
+      "2026-11-22T21:47:00.0494404Z ProfileProtectionPolicy executable checks passed",
+      "2026-11-22T21:47:05.4972949Z ProfileImportReader executable checks passed",
+      "2026-11-22T21:47:14.2175120Z VLESS executable checks passed (RAW/TCP, WebSocket, gRPC, strict URI, TLS/REALITY, bounds, redaction)",
+      "2026-11-22T21:47:24.4857172Z ProfileQrImport executable checks passed (ZXing 3.5.4, WG/VLESS RAW/WS/gRPC, alpha/polarity/ambiguity/structured-append/payload/bounds/cancellation/session)",
+      "2026-11-22T21:47:30.0230615Z Profile QR camera checks passed",
+      "2026-11-22T21:47:40.2556199Z ProfileCatalog and process-wide operation checks passed",
+      "2026-11-22T21:47:51.6424594Z Subscription feed and URL policy checks passed",
+      "2026-11-22T21:47:51.8169047Z Subscription catalog atomicity and migration checks passed",
+      "2026-11-22T21:47:52.0674350Z Subscription HTTPS, link and refresh policy checks passed",
+      "2026-11-22T21:47:58.5173198Z RouteSettings CAS, failure recovery, validation and label checks passed",
+      "2026-11-22T21:48:05.0593941Z RouteAppAvailability snapshots, connection guards and recovery checks passed",
+      "2026-11-22T21:48:13.8243296Z Recommendation opt-in, durable cooldowns, restart, clock changes, manual fallback and cancellation checks passed",
+      "2026-11-22T21:48:14.2503069Z Route recommendation signatures, strict data validation, rollback and guarded storage checks passed",
+      "2026-11-22T21:48:18.9809891Z Xray deadline, concurrent cancellation, generation and teardown state checks passed",
+      "2026-11-22T21:48:27.1716472Z Xray RAW/TLS/REALITY, WebSocket/gRPC TLS, transport fields, ALPN, TUN and no-direct-fallback checks passed",
+      "2026-11-22T21:48:37.2130352Z No issues found! (ran in 9.6s)",
+      "2026-11-22T21:49:30.8081973Z 00:41 +284: All tests passed!",
+      "2026-11-22T21:53:57.4819457Z Universal candidate 0.44.0 (44) verified: 66796503 bytes, SHA-256 e8295bdfc647146d856be3da0fc7e939224593a85a20c27c543c03916c13f568; persistent local signing is still required."
+    ]
+  },
+  "sourceChecksJobIds": [
+    137366377458,
+    137366377619
+  ],
+  "androidCandidateJobIds": [
+    137366452712
+  ],
+  "candidateArtifact": {
+    "id": 14775190582,
+    "name": "pushok-flow-release-candidate",
+    "sizeBytes": 66406165,
+    "sha256": "8b7cbb636d7d5094be94819c5a572d24766439596d67a39824b8a7e348f16602",
+    "digest": "sha256:8b7cbb636d7d5094be94819c5a572d24766439596d67a39824b8a7e348f16602",
+    "expired": false,
+    "sourceCommit": "830656795367e3e19d0af988326aa9b1e0ddb92c",
+    "createdAtUtc": "2026-11-22T21:54:00Z"
+  },
+  "candidateApks": {
+    "universal": {
+      "packageName": "shop.pushok.flow",
+      "versionName": "0.44.0",
+      "versionCode": 44,
+      "minSdk": 24,
+      "kind": "release-candidate",
+      "trustedRelease": false,
+      "requiresPersistentSigning": true,
+      "sourceCommit": "830656795367e3e19d0af988326aa9b1e0ddb92c",
+      "temporaryCertificateSha256": "7014a77edc555e62803f578b9281a0619d5e30f4b1c1dd693bd83603015b35c7",
+      "sha256": "e8295bdfc647146d856be3da0fc7e939224593a85a20c27c543c03916c13f568",
+      "sizeBytes": 66796503
+    }
+  },
+  "kotlinChecks": {
+    "executableSuites": 22,
+    "successMarkers": 23,
+    "compilerInvocations": 20,
+    "markerNote": "A JVM executable may report more than one completed check group."
+  },
+  "checkedEvidenceSha256": {
+    "checked-source-evidence.json": "acb7f0f2b9e5f381d3726905943953f93ad87615cea4bbfe7b988c3b296eb731",
+    "checked-candidate-evidence.json": "904fa58a0d5b0fbf5eb42815d7b2b1d42d40c7f062919f81cf4a645e5486b8f6"
+  },
+  "previousPublicManifest": {
+    "schemaVersion": 1,
+    "packageName": "shop.pushok.flow",
+    "versionName": "0.43.0",
+    "versionCode": 43,
+    "minSdk": 24,
+    "apkUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.43.0/Pushok-Flow-v0.43.0.apk",
+    "sha256": "14bad1e25ccbf6bbcaafbca94def11932c4fcc3a079e62e2be1f5e24eede7f23",
+    "sizeBytes": 66727986,
+    "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047"
+  },
+  "previousPublicManifestSha256": "a052bbb1363cf7da9a85d368262056947abf9acbc23f26b21d5f2bbcc34dee89",
+  "officialSdkTools": {
+    "id": 14774222502,
+    "name": "pushok-flow-android-signing-tools",
+    "sizeBytes": 21275477,
+    "sha256": "9de0f31cfbb7f50cde4703e6c5e88db509986cc1b23fafc044d6b38a4c0f7ccd",
+    "digest": "sha256:9de0f31cfbb7f50cde4703e6c5e88db509986cc1b23fafc044d6b38a4c0f7ccd",
+    "expired": false,
+    "sourceCommit": "830656795367e3e19d0af988326aa9b1e0ddb92c",
+    "createdAtUtc": "2026-11-22T21:45:32Z",
+    "buildToolsVersion": "37.0.0",
+    "verifiedFiles": 12
+  },
+  "assets": {
+    "Pushok-Flow-v0.44.0.apk": {
+      "size": 66809906,
+      "digest": "sha256:7181bd8b7de82914eccda9d3fd436c12a393725741808da9cfc9b2f4a1c29cd2",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.44.0/Pushok-Flow-v0.44.0.apk"
+    },
+    "Pushok-Flow-v0.44.0.apk.sha256": {
+      "size": 90,
+      "digest": "sha256:affcc42c26fba5dd65b03e2c1514c8b30b0e28639caf22b76174cc98e25d3732",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.44.0/Pushok-Flow-v0.44.0.apk.sha256"
+    },
+    "update.json": {
+      "size": 431,
+      "digest": "sha256:059a224bd65109099800b014462e74f0113e5b2e49ba7a5f9ab8eda232f0f2fb",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.44.0/update.json"
+    }
+  },
+  "localVerification": {
+    "persistentCertificateMatchesPreviousRelease": true,
+    "universalPackageVersionCodeMinSdkAndSignerVerified": true,
+    "signedUniversalApkFreshlyVerified": true,
+    "apkPayloadsUnchangedBySigning": true,
+    "universalPublicDeltaExactRoundTrip": true,
+    "publicAssetCount": 3,
+    "zipalign16KiB": "passed",
+    "packageVersionMinSdkNonDebuggable": "passed",
+    "nativeAbiCompressionAlignmentAndManifestChecks": "passed",
+    "legacyUniversalManifestSchema": 1,
+    "legacyManifestFieldCount": 9
+  },
+  "publicationScope": "one universal Android APK; other devices deferred until Android acceptance",
+  "publication": {
+    "status": "authorized_ready_for_workflow",
+    "workflowDispatched": false,
+    "authorization": "Standing user instruction to publish completed Pushok Flow updates, recorded in AGENTS.md on 2026-11-22."
+  },
+  "physicalDeviceAcceptance": {
+    "status": "pending",
+    "scope": [
+      "installation over previous signed Android versions and preservation of encrypted profiles",
+      "opening the existing MTProxy bot using an installed Telegram handler",
+      "opening the existing HTTPS cabinet when Telegram resolution is unavailable",
+      "explicit existing MTProxy account consent and read-only profile/wallet session inside Flow",
+      "background APK download, notification permission, screen-off and exact partial resume on the user phone",
+      "existing QR scanner and tunnel regression acceptance on the physical device"
+    ]
+  }
+}
