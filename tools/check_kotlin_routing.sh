@@ -37,3 +37,8 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.k
   native/android/app/src/main/kotlin/shop/pushok/flow/RouteAppAvailability.kt \
   native/android/tests/RouteAppAvailabilityCheck.kt -include-runtime -d "$out/route-availability-tests.jar"
 java -jar "$out/route-availability-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/RouteRecommendationPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/RouteRecommendationStore.kt \
+  native/android/tests/RouteRecommendationsCheck.kt -include-runtime -d "$out/route-recommendations-tests.jar"
+java -jar "$out/route-recommendations-tests.jar"

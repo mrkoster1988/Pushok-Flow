@@ -1,0 +1,89 @@
+import 'package:material_ui/material_ui.dart';
+
+import '../design/pushok_theme.dart';
+import '../platform/route_recommendations.dart';
+
+class RouteRecommendationsCard extends StatelessWidget {
+  const RouteRecommendationsCard({
+    super.key,
+    required this.status,
+    required this.loading,
+    required this.refreshing,
+    this.onRefresh,
+  });
+
+  final RecommendationStatus status;
+  final bool loading;
+  final bool refreshing;
+  final VoidCallback? onRefresh;
+
+  String _errorMessage(String code) {
+    switch (code) {
+      case 'RECOMMENDATIONS_NETWORK_ERROR':
+        return 'Не удалось обновить рекомендации. Проверьте интернет и повторите попытку.';
+      case 'RECOMMENDATIONS_STALE':
+        return 'Сервис вернул прежние данные. Сохранённые рекомендации остаются доступны.';
+      case 'RECOMMENDATIONS_STORAGE_ERROR':
+        return 'Не удалось сохранить рекомендации. Попробуйте ещё раз.';
+      case 'RECOMMENDATIONS_BUSY':
+        return 'Рекомендации уже обновляются. Подождите немного.';
+      case 'RECOMMENDATIONS_UNAVAILABLE':
+        return 'Обновление рекомендаций недоступно в этой версии приложения.';
+      case 'RECOMMENDATIONS_INTERRUPTED':
+        return 'Проверка рекомендаций прервана. Повторите попытку.';
+      default:
+        return 'Не удалось проверить рекомендации. Сохранённые данные не изменены.';
+    }
+  }
+
+  String _lastChecked(int milliseconds) {
+    final time = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return 'Проверено: ${two(time.day)}.${two(time.month)}.${time.year} '
+        '${two(time.hour)}:${two(time.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = loading || refreshing || status.busy;
+    return PushokPanel(
+      padding: const EdgeInsets.all(14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Text('Рекомендации',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        const Text('Обновляются внутри приложения без установки. '
+            'Вы сами выбираете исключения.',
+          style: TextStyle(color: PushokPalette.muted)),
+        const SizedBox(height: 8),
+        Text(status.rulesVersion == 0 ? 'Рекомендации ещё не загружены'
+            : 'Версия рекомендаций: ${status.rulesVersion}',
+          key: const Key('recommendations_version'),
+          style: const TextStyle(color: PushokPalette.muted)),
+        if (status.checkedAtMillis != null) Text(
+          _lastChecked(status.checkedAtMillis!),
+          key: const Key('recommendations_checked_at'),
+          style: const TextStyle(color: PushokPalette.muted)),
+        const SizedBox(height: 8),
+        Align(alignment: Alignment.centerLeft, child: OutlinedButton.icon(
+          key: const Key('refresh_recommendations'),
+          onPressed: pending ? null : onRefresh,
+          icon: pending
+              ? const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh),
+          label: Text(refreshing || status.busy ? 'Обновляем рекомендации…'
+              : loading ? 'Читаем рекомендации…' : 'Обновить рекомендации'),
+        )),
+        if (status.errorCode != null && !pending) Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Semantics(liveRegion: true, child: Text(
+            _errorMessage(status.errorCode!),
+            key: const Key('recommendations_error'),
+            style: const TextStyle(color: PushokPalette.orange),
+          )),
+        ),
+      ]),
+    );
+  }
+}

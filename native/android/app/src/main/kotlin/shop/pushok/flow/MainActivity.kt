@@ -38,6 +38,7 @@ class MainActivity : FlutterActivity() {
     private val secureStore by lazy { SecureWireGuardStore(applicationContext) }
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
     private val appUpdates by lazy { AppUpdates(this) }
+    private val routeRecommendations by lazy { RouteRecommendations(this) }
     private val profileScreenProtection by lazy { ProfileScreenProtection(this) }
     private val profileImport by lazy { WireGuardProfileImport(this) { profileScreenProtection.isActive } }
     private val lastErrorCode get() = Session.connection.lastErrorCode
@@ -46,10 +47,12 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         appUpdates.setForeground(true)
+        routeRecommendations.setForeground(true)
     }
 
     override fun onPause() {
         appUpdates.setForeground(false)
+        routeRecommendations.setForeground(false)
         super.onPause()
     }
 
@@ -147,6 +150,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         profileImport.dispose()
         appUpdates.dispose()
+        routeRecommendations.dispose()
         profileScreenProtection.dispose()
         interruptPendingVpnRequest()
         super.onDestroy()
@@ -189,6 +193,7 @@ class MainActivity : FlutterActivity() {
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         profileImport.dispose()
+        routeRecommendations.dispose()
         profileScreenProtection.dispose()
         interruptPendingVpnRequest()
         super.cleanUpFlutterEngine(flutterEngine)
@@ -263,6 +268,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
+        routeRecommendations.register(flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

@@ -5,9 +5,13 @@ on:
     branches: [main]
     paths-ignore:
       - '**/*.md'
+      - 'config/route_recommendations.json'
+      - 'updates/route-recommendations.json'
   pull_request:
     paths-ignore:
       - '**/*.md'
+      - 'config/route_recommendations.json'
+      - 'updates/route-recommendations.json'
   workflow_dispatch:
 
 permissions:

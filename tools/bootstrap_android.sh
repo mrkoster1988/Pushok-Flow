@@ -13,7 +13,7 @@ if [[ ! -f android/app/build.gradle.kts ]]; then
   cp -a "$scaffold_dir/project/android/." android/
 fi
 mkdir -p android/app/src/main/kotlin/shop/pushok/flow
-cp native/android/app/src/main/kotlin/shop/pushok/flow/{MainActivity.kt,WireGuardRouting.kt,SecureWireGuardStore.kt,LocalDecisionMemory.kt,TunnelHealth.kt,TunnelConnectionSession.kt,AppUpdates.kt,UpdatePolicy.kt,ProfileScreenProtection.kt,ProfileProtectionPolicy.kt,WireGuardProfileImport.kt,ProfileImportReader.kt,ProfileCatalogStore.kt,ProfileOperationGate.kt,RouteSettingsStore.kt,RouteAppAvailability.kt} android/app/src/main/kotlin/shop/pushok/flow/
+cp native/android/app/src/main/kotlin/shop/pushok/flow/{MainActivity.kt,WireGuardRouting.kt,SecureWireGuardStore.kt,LocalDecisionMemory.kt,TunnelHealth.kt,TunnelConnectionSession.kt,AppUpdates.kt,UpdatePolicy.kt,ProfileScreenProtection.kt,ProfileProtectionPolicy.kt,WireGuardProfileImport.kt,ProfileImportReader.kt,ProfileCatalogStore.kt,ProfileOperationGate.kt,RouteSettingsStore.kt,RouteAppAvailability.kt,RouteRecommendationPolicy.kt,RouteRecommendationStore.kt,RouteRecommendations.kt} android/app/src/main/kotlin/shop/pushok/flow/
 mkdir -p android/app/src/main/res
 cp -a native/android/app/src/main/res/. android/app/src/main/res/
 # flutter create --org shop.pushok --project-name pushok_flow generates a stub

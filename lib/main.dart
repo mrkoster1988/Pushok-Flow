@@ -4,6 +4,7 @@ import 'design/pushok_theme.dart';
 import 'dart:io' show Platform;
 import 'dart:async' show Timer, unawaited;
 import 'platform/android_app_routes.dart';
+import 'platform/route_recommendations.dart';
 import 'ai/pushok_ai_memory.dart';
 import 'platform/wireguard_tunnel.dart';
 import 'platform/wireguard_profiles.dart';
@@ -14,6 +15,7 @@ import 'ui/wireguard_profiles_card.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
+import 'ui/route_recommendations_card.dart';
 import 'ui/animated_pushok_mascot.dart';
 
 void main() => runApp(const PushokFlowApp());
@@ -79,6 +81,13 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   String _routeQuery = '';
   bool _onlySelectedRoutes = false;
   bool _onlyUnavailableRoutes = false;
+  bool _onlyRecommendedRoutes = false;
+  late final RouteRecommendations _recommendationBridge;
+  RecommendationStatus _recommendations = const RecommendationStatus.empty();
+  bool _recommendationsLoading = false;
+  bool _recommendationsRefreshing = false;
+  int _recommendationEpoch = 0;
+  Timer? _recommendationPoll;
   int _statusEpoch = 0;
   int _profileRequestEpoch = 0;
   int _tunnelIntentEpoch = 0;
@@ -125,8 +134,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _routeQuery = '';
       _onlySelectedRoutes = !onlyUnavailable;
       _onlyUnavailableRoutes = onlyUnavailable;
+      _onlyRecommendedRoutes = false;
     });
     unawaited(_refreshRoutes());
+    unawaited(_readRecommendations());
   }
 
   String _connectionMessage(Object error, {bool disconnecting = false}) {
@@ -246,6 +257,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   void dispose() {
     _healthPoll?.cancel();
+    _recommendationEpoch++;
+    _recommendationPoll?.cancel();
     _informationRevision.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -254,6 +267,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _recommendationBridge = RouteRecommendations(isAndroid: _isAndroid);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
@@ -279,6 +293,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _startHealthPolling();
       _refreshProfileStatus();
       _loadRoutes();
+      if (tab == 1) unawaited(_readRecommendations());
     } else {
       // A request made before losing focus must not open the editor later,
       // even if the user returns before a native response arrives.
@@ -286,10 +301,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       // A sample requested before app switching is no longer a fresh reading.
       _statusEpoch++;
       _routeEpoch++;
+      _recommendationEpoch++;
+      _recommendationPoll?.cancel();
       setState(() {
         _diagnosticsStale = true;
         _routesStale = true;
         loadingApps = false;
+        _recommendationsLoading = false;
+        _recommendationsRefreshing = false;
       });
       _healthPoll?.cancel();
     }
@@ -302,6 +321,42 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       final data = await PushokAiMemory.summary();
       if (mounted) setState(() => feedback = data);
     } catch (_) { if (mounted) setState(() => feedbackMessage = 'Память недоступна на этом устройстве.'); }
+  }
+
+  Future<void> _readRecommendations() => _requestRecommendations(refresh: false);
+
+  Future<void> _refreshRecommendations() => _requestRecommendations(refresh: true);
+
+  Future<void> _requestRecommendations({required bool refresh}) async {
+    if (!_isAndroid || !mounted || !_foreground || tab != 1 ||
+        _recommendationsLoading || _recommendationsRefreshing ||
+        (refresh && _recommendations.busy)) return;
+    final epoch = ++_recommendationEpoch;
+    _recommendationPoll?.cancel();
+    setState(() {
+      _recommendationsLoading = !refresh;
+      _recommendationsRefreshing = refresh;
+    });
+    RecommendationStatus status;
+    try {
+      status = await (refresh ? _recommendationBridge.refreshRecommendations()
+          : _recommendationBridge.recommendationStatus());
+    } on RecommendationFailure catch (failure) {
+      status = _recommendations.withError(failure.code);
+    }
+    if (!mounted || !_foreground || tab != 1 || epoch != _recommendationEpoch) return;
+    setState(() {
+      _recommendations = status;
+      _recommendationsLoading = false;
+      _recommendationsRefreshing = false;
+    });
+    // A refresh can outlive Activity focus. Polling only reads the local
+    // snapshot and never starts another network request.
+    if (status.busy) {
+      _recommendationPoll = Timer(const Duration(seconds: 1), () {
+        unawaited(_readRecommendations());
+      });
+    }
   }
 
   Future<void> _rateConnection(bool helpful) async {
@@ -760,7 +815,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.33.0',
+            version: '0.34.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -805,8 +860,21 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         indicatorColor: PushokFlowApp.panel,
         selectedIndex: tab,
         onDestinationSelected: (v) {
-          setState(() => tab = v);
-          if (v == 1) unawaited(_refreshRoutes());
+          if (v != tab) {
+            _recommendationEpoch++;
+            _recommendationPoll?.cancel();
+          }
+          setState(() {
+            if (v != tab) {
+              _recommendationsLoading = false;
+              _recommendationsRefreshing = false;
+            }
+            tab = v;
+          });
+          if (v == 1) {
+            unawaited(_refreshRoutes());
+            unawaited(_readRecommendations());
+          }
           if (v == 2) unawaited(_refreshProfileStatus());
         },
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
@@ -873,6 +941,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     apps: installed,
     selectedPackages: bypassPackages,
     unavailablePackages: unavailableBypassPackages,
+    recommendedPackages: _recommendations.packages,
     availabilityCurrent: !_routesStale && !loadingApps && routeError == null,
     isAndroid: _isAndroid,
     loading: loadingApps,
@@ -882,22 +951,36 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     query: _routeQuery,
     onlySelected: _onlySelectedRoutes,
     onlyUnavailable: _onlyUnavailableRoutes,
+    onlyRecommended: _onlyRecommendedRoutes,
     error: routeError,
     disabledReason: _isAndroid ? _routeDisabledReason : null,
     onQueryChanged: (value) => setState(() => _routeQuery = value),
     onFilterChanged: (value) => setState(() {
       _onlySelectedRoutes = value;
       _onlyUnavailableRoutes = false;
+      _onlyRecommendedRoutes = false;
     }),
     onUnavailableFilterChanged: (value) => setState(() {
       _onlyUnavailableRoutes = value;
       _onlySelectedRoutes = false;
+      _onlyRecommendedRoutes = false;
+    }),
+    onRecommendedFilterChanged: (value) => setState(() {
+      _onlyRecommendedRoutes = value;
+      _onlySelectedRoutes = false;
+      _onlyUnavailableRoutes = false;
     }),
     onToggle: _setBypass,
     onRefresh: !_isAndroid || !_foreground || loadingApps || _savingRoute ||
         _routeConfirmationOpen || _profileBusy || _profileEditorOpen
             ? null : _refreshRoutes,
     onClear: _canEditRoutes && bypassPackages.isNotEmpty ? _clearBypass : null,
+    recommendationsCard: RouteRecommendationsCard(
+      status: _recommendations,
+      loading: _recommendationsLoading,
+      refreshing: _recommendationsRefreshing,
+      onRefresh: _foreground ? _refreshRecommendations : null,
+    ),
   );
   Widget servers() => ListView(children: [
     WireGuardProfilesCard(

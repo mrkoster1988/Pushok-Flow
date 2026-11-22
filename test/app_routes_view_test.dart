@@ -13,6 +13,7 @@ Future<void> _pumpRoutes(WidgetTester tester, {
   List<InstalledApp> apps = _apps,
   Set<String> selected = const {},
   Set<String> unavailable = const {},
+  Set<String> recommended = const {},
   bool availabilityCurrent = true,
   bool loaded = true,
   bool loading = false,
@@ -22,6 +23,7 @@ Future<void> _pumpRoutes(WidgetTester tester, {
   String query = '',
   bool onlySelected = false,
   bool onlyUnavailable = false,
+  bool onlyRecommended = false,
   String? error,
   String? disabledReason,
   VoidCallback? onRefresh,
@@ -40,17 +42,26 @@ Future<void> _pumpRoutes(WidgetTester tester, {
       child: StatefulBuilder(builder: (context, setState) => AppRoutesView(
         apps: apps, selectedPackages: selected, isAndroid: isAndroid,
         unavailablePackages: unavailable, availabilityCurrent: availabilityCurrent,
+        recommendedPackages: recommended,
         loading: loading, saving: saving, loaded: loaded, canEdit: canEdit,
         query: query, onlySelected: onlySelected, onlyUnavailable: onlyUnavailable, error: error,
+        onlyRecommended: onlyRecommended,
         disabledReason: disabledReason, onRefresh: onRefresh, onClear: onClear,
         onQueryChanged: (value) => setState(() => query = value),
         onFilterChanged: (value) => setState(() {
           onlySelected = value;
           onlyUnavailable = false;
+          onlyRecommended = false;
         }),
         onUnavailableFilterChanged: (value) => setState(() {
           onlyUnavailable = value;
           onlySelected = false;
+          onlyRecommended = false;
+        }),
+        onRecommendedFilterChanged: (value) => setState(() {
+          onlyRecommended = value;
+          onlySelected = false;
+          onlyUnavailable = false;
         }),
         onToggle: onToggle ?? (_, _) {},
       )),
@@ -72,6 +83,40 @@ Finder _listScrollable() => find.descendant(
 ).first;
 
 void main() {
+  testWidgets('Recommendations intersect visible apps and never select or invent packages', (tester) async {
+    final changes = <(String, bool)>[];
+    await _pumpRoutes(tester,
+      selected: {'example.mail', 'missing.saved_app'},
+      recommended: {'example.browser', 'missing.saved_app', 'missing.remote_app'},
+      onToggle: (package, selected) => changes.add((package, selected)));
+    await _tap(tester, 'routes_filter_recommended');
+    expect(find.text('Браузер'), findsOneWidget);
+    expect(find.text('Почта'), findsNothing);
+    expect(find.text('missing.saved_app'), findsNothing);
+    expect(find.text('missing.remote_app'), findsNothing);
+    expect(find.text('Исключений: 2'), findsOneWidget);
+    expect(changes, isEmpty);
+    await _tap(tester, 'route_toggle_example.browser');
+    expect(changes, [('example.browser', true)]);
+    expect(tester.widget<SwitchListTile>(
+      find.byKey(const Key('route_toggle_example.browser'))).value, isFalse);
+    await _tap(tester, 'routes_filter_selected');
+    expect(find.text('Почта'), findsOneWidget);
+    final saved = find.byKey(const Key('route_toggle_missing.saved_app'));
+    await tester.scrollUntilVisible(saved, 140, scrollable: _listScrollable());
+    expect(tester.widget<SwitchListTile>(saved).value, isTrue);
+  });
+
+  testWidgets('Empty recommendations keep the full local list available', (tester) async {
+    await _pumpRoutes(tester, selected: {'example.mail'});
+    await _tap(tester, 'routes_filter_recommended');
+    expect(find.textContaining('Среди установленных приложений нет рекомендаций.'), findsOneWidget);
+    expect(find.byType(SwitchListTile), findsNothing);
+    await _tap(tester, 'routes_filter_all');
+    expect(find.text('Почта'), findsOneWidget);
+    expect(find.text('Браузер'), findsOneWidget);
+  });
+
   testWidgets('Search matches labels and packages without changing selections', (tester) async {
     final changes = <String>[];
     await _pumpRoutes(tester, selected: {'example.mail'},

@@ -1,16 +1,5 @@
 {
   "schema_version": 1,
-  "version": 1,
-  "default": "tunnel",
-  "android_bypass_packages": [],
-  "android_examples_not_verified": [
-    "MAX",
-    "ВКонтакте",
-    "СберБанк",
-    "Т-Банк",
-    "Ozon",
-    "Wildberries"
-  ],
-  "ios_excluded_cidrs": [],
-  "notes": "Никогда не превращать названия приложений в идентификаторы пакетов без локальной проверки; обновление правил не заменяет пользовательские решения."
+  "rules_version": 1,
+  "recommended_bypass_packages": []
 }

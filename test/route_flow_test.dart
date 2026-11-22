@@ -17,6 +17,16 @@ class _RoutesBridge {
   void Function()? beforeWrite;
   bool connected = false;
   String? statusState;
+  Map<String, Object?> recommendations = {
+    'rulesVersion': 1,
+    'packages': <String>['example.browser', 'remote.not_installed'],
+    'checkedAtMillis': 1795320000000,
+    'busy': false,
+    'errorCode': null,
+  };
+  Completer<Object?>? nextRecommendationRead;
+  Completer<Object?>? nextRecommendationRefresh;
+  Object? recommendationRefreshError;
 
   List<MethodCall> named(String method) =>
       calls.where((call) => call.method == method).toList();
@@ -24,6 +34,15 @@ class _RoutesBridge {
   Future<Object?> handle(MethodCall call) async {
     calls.add(call);
     switch (call.method) {
+      case 'recommendationStatus':
+        final recommendationRead = nextRecommendationRead;
+        nextRecommendationRead = null;
+        return recommendationRead == null ? recommendations : recommendationRead.future;
+      case 'refreshRecommendations':
+        if (recommendationRefreshError != null) throw recommendationRefreshError!;
+        final refresh = nextRecommendationRefresh;
+        nextRecommendationRefresh = null;
+        return refresh == null ? recommendations : refresh.future;
       case 'installedApps':
         if (appsError != null) throw appsError!;
         return [
@@ -108,14 +127,141 @@ Future<void> _withRoutes(WidgetTester tester, Future<void> Function() body) asyn
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('shop.pushok.flow/app_routes');
+  const recommendationsChannel = MethodChannel('shop.pushok.flow/route_recommendations');
   late _RoutesBridge bridge;
   setUp(() {
     bridge = _RoutesBridge();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, bridge.handle);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(recommendationsChannel, bridge.handle);
   });
-  tearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(channel, null));
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(recommendationsChannel, null);
+  });
+
+  testWidgets('Recommendation refresh needs a tap and preserves every selected route', (tester) async {
+    bridge.selected = {'example.mail', 'missing.saved'};
+    await _withRoutes(tester, () async {
+      expect(bridge.named('recommendationStatus'), hasLength(1));
+      expect(bridge.named('refreshRecommendations'), isEmpty);
+      final filter = find.byKey(const Key('routes_filter_recommended'));
+      await _reveal(tester, filter);
+      await tester.tap(filter);
+      await tester.pumpAndSettle();
+      await _reveal(tester, _toggle('example.browser'));
+      expect(tester.widget<SwitchListTile>(_toggle('example.browser')).value, isFalse);
+      expect(_toggle('remote.not_installed'), findsNothing);
+      expect(_toggle('missing.saved'), findsNothing);
+      bridge.recommendations = {
+        ...bridge.recommendations,
+        'rulesVersion': 2,
+        'packages': <String>['example.mail'],
+      };
+      final refresh = find.byKey(const Key('refresh_recommendations'));
+      await _reveal(tester, refresh);
+      await tester.tap(refresh);
+      await tester.pumpAndSettle();
+      await _reveal(tester, _toggle('example.mail'));
+      expect(tester.widget<SwitchListTile>(_toggle('example.mail')).value, isTrue);
+      expect(_toggle('example.browser'), findsNothing);
+      expect(bridge.selected, {'example.mail', 'missing.saved'});
+      expect(bridge.named('setBypass'), isEmpty);
+      expect(bridge.named('refreshRecommendations'), hasLength(1));
+      expect(bridge.named('installUpdate'), isEmpty);
+      final selected = find.byKey(const Key('routes_filter_selected'));
+      await _reveal(tester, selected);
+      await tester.tap(selected);
+      await tester.pumpAndSettle();
+      await _reveal(tester, _toggle('missing.saved'));
+      expect(tester.widget<SwitchListTile>(_toggle('missing.saved')).value, isTrue);
+    });
+  });
+
+  testWidgets('Failed catalogue refresh keeps recommendations and local route editing available', (tester) async {
+    await _withRoutes(tester, () async {
+      bridge.recommendationRefreshError = PlatformException(
+        code: 'RECOMMENDATIONS_NETWORK_ERROR', message: 'PRIVATE_NATIVE_DETAILS');
+      final refresh = find.byKey(const Key('refresh_recommendations'));
+      await _reveal(tester, refresh);
+      await tester.tap(refresh);
+      await tester.pumpAndSettle();
+      expect(find.text('Версия рекомендаций: 1'), findsOneWidget);
+      expect(find.textContaining('PRIVATE_NATIVE_DETAILS'), findsNothing);
+      expect(find.byKey(const Key('routes_error')), findsNothing);
+      expect(bridge.named('setBypass'), isEmpty);
+      final filter = find.byKey(const Key('routes_filter_recommended'));
+      await _reveal(tester, filter);
+      await tester.tap(filter);
+      await tester.pumpAndSettle();
+      await _reveal(tester, _toggle('example.browser'));
+      expect(tester.widget<SwitchListTile>(_toggle('example.browser')).onChanged, isNotNull);
+      await tester.tap(_toggle('example.browser'));
+      await tester.pumpAndSettle();
+      expect(bridge.selected, {'example.browser', 'example.mail'});
+      expect(bridge.named('setBypass'), hasLength(1));
+    });
+  });
+
+  testWidgets('Late recommendation refresh cannot overwrite cache read after resume', (tester) async {
+    await _withRoutes(tester, () async {
+      final oldRefresh = Completer<Object?>();
+      bridge.nextRecommendationRefresh = oldRefresh;
+      final refresh = find.byKey(const Key('refresh_recommendations'));
+      await _reveal(tester, refresh);
+      await tester.tap(refresh);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      bridge.recommendations = {
+        ...bridge.recommendations,
+        'rulesVersion': 3,
+        'packages': <String>['example.mail'],
+      };
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      oldRefresh.complete({
+        ...bridge.recommendations,
+        'rulesVersion': 2,
+        'packages': <String>['example.browser'],
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('Версия рекомендаций: 3'), findsOneWidget);
+      expect(find.text('Версия рекомендаций: 2'), findsNothing);
+      expect(bridge.named('refreshRecommendations'), hasLength(1));
+      expect(bridge.named('recommendationStatus'), hasLength(2));
+      expect(bridge.named('setBypass'), isEmpty);
+      final filter = find.byKey(const Key('routes_filter_recommended'));
+      await _reveal(tester, filter);
+      await tester.tap(filter);
+      await tester.pumpAndSettle();
+      await _reveal(tester, _toggle('example.mail'));
+      expect(tester.widget<SwitchListTile>(_toggle('example.mail')).value, isTrue);
+      expect(_toggle('example.browser'), findsNothing);
+    });
+  });
+
+  testWidgets('Returning to Routes reads persisted recommendations without a network request', (tester) async {
+    await _withRoutes(tester, () async {
+      await _nav(tester, 'Главная');
+      await tester.pumpAndSettle();
+      bridge.recommendations = {
+        ...bridge.recommendations,
+        'rulesVersion': 2,
+        'packages': <String>[],
+      };
+      await _nav(tester, 'Маршруты');
+      await tester.pumpAndSettle();
+      expect(find.text('Версия рекомендаций: 2'), findsOneWidget);
+      expect(bridge.named('recommendationStatus'), hasLength(2));
+      expect(bridge.named('refreshRecommendations'), isEmpty);
+      expect(bridge.named('setBypass'), isEmpty);
+      expect(bridge.selected, {'example.mail'});
+    });
+  });
 
   testWidgets('route switch saves expected snapshot and waits for native acknowledgement', (tester) async {
     await _withRoutes(tester, () async {

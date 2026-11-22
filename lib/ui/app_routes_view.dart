@@ -11,6 +11,7 @@ class AppRoutesView extends StatefulWidget {
     required this.apps,
     required this.selectedPackages,
     this.unavailablePackages = const {},
+    this.recommendedPackages = const {},
     this.availabilityCurrent = true,
     required this.isAndroid,
     required this.loading,
@@ -20,19 +21,23 @@ class AppRoutesView extends StatefulWidget {
     required this.query,
     required this.onlySelected,
     this.onlyUnavailable = false,
+    this.onlyRecommended = false,
     required this.onQueryChanged,
     required this.onFilterChanged,
     this.onUnavailableFilterChanged,
+    this.onRecommendedFilterChanged,
     required this.onToggle,
     this.error,
     this.disabledReason,
     this.onRefresh,
     this.onClear,
+    this.recommendationsCard,
   });
 
   final List<InstalledApp> apps;
   final Set<String> selectedPackages;
   final Set<String> unavailablePackages;
+  final Set<String> recommendedPackages;
   final bool availabilityCurrent;
   final bool isAndroid;
   final bool loading;
@@ -42,14 +47,17 @@ class AppRoutesView extends StatefulWidget {
   final String query;
   final bool onlySelected;
   final bool onlyUnavailable;
+  final bool onlyRecommended;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<bool> onFilterChanged;
   final ValueChanged<bool>? onUnavailableFilterChanged;
+  final ValueChanged<bool>? onRecommendedFilterChanged;
   final void Function(String packageName, bool selected) onToggle;
   final String? error;
   final String? disabledReason;
   final VoidCallback? onRefresh;
   final VoidCallback? onClear;
+  final Widget? recommendationsCard;
 
   @override
   State<AppRoutesView> createState() => _AppRoutesViewState();
@@ -130,21 +138,27 @@ class _AppRoutesViewState extends State<AppRoutesView> {
           ChoiceChip(
             key: const Key('routes_filter_all'),
             label: const Text('Все'),
-            selected: !widget.onlySelected && !widget.onlyUnavailable,
+            selected: !widget.onlySelected && !widget.onlyUnavailable && !widget.onlyRecommended,
             onSelected: (_) => widget.onFilterChanged(false),
           ),
           ChoiceChip(
             key: const Key('routes_filter_selected'),
             label: const Text('Выбранные'),
-            selected: widget.onlySelected && !widget.onlyUnavailable,
+            selected: widget.onlySelected && !widget.onlyUnavailable && !widget.onlyRecommended,
             onSelected: (_) => widget.onFilterChanged(true),
           ),
           if (widget.unavailablePackages.isNotEmpty || widget.onlyUnavailable) ChoiceChip(
             key: const Key('routes_filter_unavailable'),
             label: const Text('Недоступные'),
-            selected: widget.onlyUnavailable,
+            selected: widget.onlyUnavailable && !widget.onlyRecommended,
             onSelected: widget.onUnavailableFilterChanged == null
                 ? null : (_) => widget.onUnavailableFilterChanged!(true),
+          ),
+          if (widget.onRecommendedFilterChanged != null) ChoiceChip(
+            key: const Key('routes_filter_recommended'),
+            label: const Text('Рекомендованные'),
+            selected: widget.onlyRecommended,
+            onSelected: (_) => widget.onRecommendedFilterChanged!(true),
           ),
         ]),
         const SizedBox(height: 8),
@@ -256,6 +270,10 @@ class _AppRoutesViewState extends State<AppRoutesView> {
     final visible = entries.where((app) =>
       (!widget.onlySelected || widget.selectedPackages.contains(app.packageName)) &&
       (!widget.onlyUnavailable || widget.unavailablePackages.contains(app.packageName)) &&
+      // Recommendations must never fabricate installed apps or hide saved
+      // missing exclusions from the other filters.
+      (!widget.onlyRecommended || (installedPackages.contains(app.packageName) &&
+          widget.recommendedPackages.contains(app.packageName))) &&
       (query.isEmpty || app.label.toLowerCase().contains(query) ||
           app.packageName.toLowerCase().contains(query))).toList();
 
@@ -269,6 +287,9 @@ class _AppRoutesViewState extends State<AppRoutesView> {
             : 'Обновите список, чтобы проверить недоступные исключения.';
       } else if (widget.onlySelected) {
         emptyMessage = 'Исключений пока нет. Выберите приложения в списке «Все».';
+      } else if (widget.onlyRecommended) {
+        emptyMessage = 'Среди установленных приложений нет рекомендаций. '
+            'Обновите рекомендации или выберите приложения в списке «Все».';
       } else {
         emptyMessage = 'В списке пока нет приложений. Попробуйте обновить его.';
       }
@@ -279,6 +300,10 @@ class _AppRoutesViewState extends State<AppRoutesView> {
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       slivers: [
         SliverToBoxAdapter(child: _header()),
+        if (widget.isAndroid && widget.recommendationsCard != null) SliverToBoxAdapter(
+          child: Padding(padding: const EdgeInsets.only(top: 12),
+            child: widget.recommendationsCard),
+        ),
         if (widget.isAndroid && emptyMessage != null) SliverToBoxAdapter(
           child: Padding(padding: const EdgeInsets.only(top: 12),
             child: PushokPanel(child: Text(emptyMessage,
