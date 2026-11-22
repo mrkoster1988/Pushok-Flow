@@ -1,0 +1,135 @@
+{
+  "recordedAtUtc": "2026-11-22T16:46:03.147806+00:00",
+  "versionName": "0.38.0",
+  "versionCode": 38,
+  "sourceCommit": "7106ce056809e9eccc87cf25a7320957be84ceff",
+  "apkSizeBytes": 167714866,
+  "apkSha256": "71b245180d746cb61c7140e9cbde24f1bf81c4973eb688e119eb2b8ce405411a",
+  "nativeSizeBytes": 164998848,
+  "nativeCompressedSizeBytes": 164998848,
+  "nativeByAbi": {
+    "arm64-v8a": 54779048,
+    "armeabi-v7a": 51491432,
+    "x86_64": 58728368
+  },
+  "nativeByLibrary": {
+    "libapp.so": 17664504,
+    "libflutter.so": 32271844,
+    "libgojni.so": 104609300,
+    "libwg-go.so": 10146980,
+    "libwg-quick.so": 84192,
+    "libwg.so": 222028
+  },
+  "nativeEntries": [
+    {
+      "name": "lib/arm64-v8a/libapp.so",
+      "sizeBytes": 5637080,
+      "compressedSizeBytes": 5637080,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/arm64-v8a/libflutter.so",
+      "sizeBytes": 11346352,
+      "compressedSizeBytes": 11346352,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/arm64-v8a/libgojni.so",
+      "sizeBytes": 34318696,
+      "compressedSizeBytes": 34318696,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/arm64-v8a/libwg-go.so",
+      "sizeBytes": 3365264,
+      "compressedSizeBytes": 3365264,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/arm64-v8a/libwg-quick.so",
+      "sizeBytes": 29952,
+      "compressedSizeBytes": 29952,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/arm64-v8a/libwg.so",
+      "sizeBytes": 81704,
+      "compressedSizeBytes": 81704,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/armeabi-v7a/libapp.so",
+      "sizeBytes": 6193736,
+      "compressedSizeBytes": 6193736,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/armeabi-v7a/libflutter.so",
+      "sizeBytes": 8458404,
+      "compressedSizeBytes": 8458404,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/armeabi-v7a/libgojni.so",
+      "sizeBytes": 33594692,
+      "compressedSizeBytes": 33594692,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/armeabi-v7a/libwg-go.so",
+      "sizeBytes": 3174788,
+      "compressedSizeBytes": 3174788,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/armeabi-v7a/libwg-quick.so",
+      "sizeBytes": 22736,
+      "compressedSizeBytes": 22736,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/armeabi-v7a/libwg.so",
+      "sizeBytes": 47076,
+      "compressedSizeBytes": 47076,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/x86_64/libapp.so",
+      "sizeBytes": 5833688,
+      "compressedSizeBytes": 5833688,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/x86_64/libflutter.so",
+      "sizeBytes": 12467088,
+      "compressedSizeBytes": 12467088,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/x86_64/libgojni.so",
+      "sizeBytes": 36695912,
+      "compressedSizeBytes": 36695912,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/x86_64/libwg-go.so",
+      "sizeBytes": 3606928,
+      "compressedSizeBytes": 3606928,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/x86_64/libwg-quick.so",
+      "sizeBytes": 31504,
+      "compressedSizeBytes": 31504,
+      "zipMethod": 0
+    },
+    {
+      "name": "lib/x86_64/libwg.so",
+      "sizeBytes": 93248,
+      "compressedSizeBytes": 93248,
+      "zipMethod": 0
+    }
+  ],
+  "assetsCompressedSizeBytes": 1891957,
+  "scope": "Measured published universal APK contents; no installed-size, runtime or physical-device result is inferred."
+}

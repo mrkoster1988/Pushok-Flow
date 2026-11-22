@@ -12,6 +12,35 @@ UPDATE_REPLACED_RECEIVER = "shop.pushok.flow.UpdateReplacedReceiver"
 QR_ACTIVITY = "shop.pushok.flow.WireGuardQrActivity"
 XRAY_SERVICE = "shop.pushok.flow.XrayVpnService"
 TOOLS_URI = "http://schemas.android.com/tools"
+NATIVE_PACKAGING_START = "// BEGIN PUSHOK_NATIVE_PACKAGING"
+NATIVE_PACKAGING_END = "// END PUSHOK_NATIVE_PACKAGING"
+NATIVE_PACKAGING = f'''{NATIVE_PACKAGING_START}
+// GitHub distributes the universal APK directly; compress all three native ABIs.
+// AGP also sets extractNativeLibs so Android installs the libraries for this device.
+android {{
+    packaging {{
+        jniLibs {{
+            useLegacyPackaging = true
+        }}
+    }}
+}}
+{NATIVE_PACKAGING_END}'''
+
+
+def patch_native_packaging(gradle: str) -> str:
+    """Keep one owned Gradle block; preserve generated and user build settings."""
+    start_count = gradle.count(NATIVE_PACKAGING_START)
+    end_count = gradle.count(NATIVE_PACKAGING_END)
+    if start_count != end_count or start_count > 1:
+        raise ValueError("Invalid Pushok native packaging block")
+    if start_count:
+        pattern = (rf'(?ms)^{re.escape(NATIVE_PACKAGING_START)}\n.*?'
+                   rf'^{re.escape(NATIVE_PACKAGING_END)}(?=\n|$)')
+        gradle, changed = re.subn(pattern, lambda _: NATIVE_PACKAGING, gradle)
+        if changed != 1:
+            raise ValueError("Invalid Pushok native packaging block boundaries")
+        return gradle
+    return gradle.rstrip() + "\n\n" + NATIVE_PACKAGING + "\n"
 
 
 def patch_manifest(path: Path) -> None:
@@ -156,6 +185,9 @@ def patch_manifest(path: Path) -> None:
     # which explicitly enabled Android Auto Backup.
     app.set(ANDROID + "allowBackup", "false")
     app.set(ANDROID + "label", "Pushok Flow")
+    # AGP's useLegacyPackaging owns the merged extraction flag. A stale source
+    # manifest override could otherwise make compressed libraries unloadable.
+    app.attrib.pop(ANDROID + "extractNativeLibs", None)
     ET.indent(tree, space="    ")
     path.write_text(ET.tostring(manifest, encoding="unicode") + "\n", encoding="utf-8")
 
@@ -182,6 +214,7 @@ def patch_project(root: Path) -> None:
     s = re.sub(r'applicationId\s*=\s*"[^"]+"', 'applicationId = "shop.pushok.flow"', s)
     if 'namespace = "shop.pushok.flow"' not in s or 'applicationId = "shop.pushok.flow"' not in s:
         raise SystemExit("Cannot establish Android namespace/applicationId")
+    s = patch_native_packaging(s)
     gradle.write_text(s, encoding="utf-8")
     patch_manifest(root / "android/app/src/main/AndroidManifest.xml")
 

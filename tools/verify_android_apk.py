@@ -17,6 +17,12 @@ QR_ACTIVITY = 'shop.pushok.flow.WireGuardQrActivity'
 XRAY_VERSION_CODE = 36
 XRAY_SERVICE = 'shop.pushok.flow.XrayVpnService'
 AUTO_UPDATE_VERSION_CODE = 37
+COMPACT_NATIVE_VERSION_CODE = 39
+NATIVE_ABIS = ('arm64-v8a', 'armeabi-v7a', 'x86_64')
+REQUIRED_NATIVE_LIBRARIES = (
+    'libflutter.so', 'libapp.so', 'libgojni.so',
+    'libwg-go.so', 'libwg.so', 'libwg-quick.so',
+)
 UPDATE_INSTALL_RECEIVER = 'shop.pushok.flow.UpdateInstallReceiver'
 UPDATE_REPLACED_RECEIVER = 'shop.pushok.flow.UpdateReplacedReceiver'
 UPDATE_PROVIDER = 'shop.pushok.flow.UpdateFileProvider'
@@ -161,6 +167,7 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
     if len(version_codes) != 1 or not re.fullmatch(r'[1-9][0-9]*', version_codes[0]):
         raise ValueError('APK versionCode missing or invalid')
     version_code = int(version_codes[0])
+    debuggable = bool(re.search(r'^application-debuggable\b', result.stdout, re.MULTILINE))
     permissions = subprocess.run([aapt, 'dump', 'permissions', str(path)], capture_output=True, text=True, check=True)
     declared_permissions = set(re.findall(
         r"^uses-permission(?:-sdk-[\w]+)?:\s+name=['\"]([^'\"]+)['\"]",
@@ -204,6 +211,11 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
     if version_code >= AUTO_UPDATE_VERSION_CODE:
         check_update_manifest(manifest.stdout, declared_permissions)
         print('APK private update callbacks, persistent scheduler and install permissions verified')
+    # The separate JIT debug workflow has no AOT libapp.so. The persistent
+    # release verifier independently rejects every debuggable APK.
+    if version_code >= COMPACT_NATIVE_VERSION_CODE and not debuggable:
+        check_compact_native_packaging(path, manifest.stdout)
+        print('APK compressed native libraries, three complete ABIs and extraction flag verified')
     print('APK package, INTERNET and WireGuard VPN service checks passed')
 
 
@@ -319,6 +331,37 @@ def check_xray_libraries(path: Path) -> None:
             except KeyError as error: raise ValueError('Xray redistribution notice missing from APK') from error
             if not notice:
                 raise ValueError('Empty Xray redistribution notice')
+
+
+def check_compact_native_packaging(path: Path, tree: str) -> None:
+    """Require complete compressed native entries and installer extraction metadata."""
+    applications = element_attributes(tree, 'application')
+    if len(applications) != 1:
+        raise ValueError('Expected exactly one application for native extraction')
+    if not is_true_attribute(applications[0], 'extractNativeLibs'):
+        raise ValueError('Compressed native libraries require explicit extractNativeLibs=true')
+
+    with zipfile.ZipFile(path) as apk:
+        entries = apk.infolist()
+        names = {item.filename for item in entries}
+        if len(names) != len(entries):
+            raise ValueError('Duplicate APK ZIP entries are not supported')
+        required = {f'lib/{abi}/{library}'
+                    for abi in NATIVE_ABIS for library in REQUIRED_NATIVE_LIBRARIES}
+        missing = required - names
+        if missing:
+            raise ValueError('Required native library missing: ' + sorted(missing)[0])
+        # Apply the packaging contract to additional native dependencies too;
+        # their introduction must not silently restore uncompressed downloads.
+        for item in entries:
+            if not (item.filename.startswith('lib/') and item.filename.endswith('.so')):
+                continue
+            if item.flag_bits & 1:
+                raise ValueError('Encrypted native libraries cannot be installed')
+            if item.compress_type != zipfile.ZIP_DEFLATED:
+                raise ValueError('Native libraries must use ZIP DEFLATE compression: ' + item.filename)
+            if item.is_dir() or item.file_size <= 0 or item.compress_size <= 0:
+                raise ValueError('Empty native library: ' + item.filename)
 
 
 if __name__ == '__main__':

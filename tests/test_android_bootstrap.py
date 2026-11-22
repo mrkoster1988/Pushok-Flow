@@ -132,6 +132,49 @@ dependencies {
         self.assertEqual(provider.find("meta-data").get(ANDROID + "resource"), "@xml/update_paths")
         self.assertEqual(app.get(ANDROID + "label"), "Pushok Flow")
 
+    def test_native_compression_preserves_other_packaging_and_removes_stale_manifest_flag(self):
+        self.write_manifest(backup='android:extractNativeLibs="false"')
+        unrelated = '''android {
+    packaging {
+        resources { excludes += "META-INF/example-notice.txt" }
+    }
+}
+'''
+        self.gradle.write_text(self.gradle.read_text() + unrelated)
+        app = self.patch().find('application')
+        gradle = self.gradle.read_text()
+        self.assertIn(unrelated, gradle)
+        self.assertIn('implementation("example:existing:1.0")', gradle)
+        self.assertEqual(gradle.count('useLegacyPackaging = true'), 1)
+        self.assertNotIn(ANDROID + 'extractNativeLibs', app.attrib)
+        first = (gradle, self.manifest.read_text())
+        self.patch()
+        self.assertEqual((self.gradle.read_text(), self.manifest.read_text()), first)
+
+    def test_repeated_bootstrap_repairs_the_owned_native_packaging_setting(self):
+        self.write_manifest()
+        self.patch()
+        self.gradle.write_text(self.gradle.read_text().replace(
+            'useLegacyPackaging = true', 'useLegacyPackaging = false'))
+        self.patch()
+        self.assertEqual(self.gradle.read_text().count('useLegacyPackaging = true'), 1)
+        self.assertNotIn('useLegacyPackaging = false', self.gradle.read_text())
+
+    def test_malformed_native_packaging_markers_fail_before_writing_project(self):
+        self.write_manifest()
+        original = self.gradle.read_text()
+        manifest = self.manifest.read_text()
+        for block in (PATCH.NATIVE_PACKAGING_START, PATCH.NATIVE_PACKAGING_END,
+                      PATCH.NATIVE_PACKAGING + '\n' + PATCH.NATIVE_PACKAGING,
+                      PATCH.NATIVE_PACKAGING_END + '\n' + PATCH.NATIVE_PACKAGING_START):
+            with self.subTest(block=block):
+                self.gradle.write_text(original + '\n' + block + '\n')
+                before = self.gradle.read_text()
+                with self.assertRaisesRegex(ValueError, 'native packaging block'):
+                    self.patch()
+                self.assertEqual(self.gradle.read_text(), before)
+                self.assertEqual(self.manifest.read_text(), manifest)
+
     def test_removes_only_legacy_vpn_service_and_disables_existing_backup(self):
         for legacy in (
             f'<service android:exported="true" android:name="{VPN_SERVICE}" />',
