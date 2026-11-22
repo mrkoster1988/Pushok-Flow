@@ -67,10 +67,29 @@ class _AccountBridge {
   }
 }
 
+void _resume(WidgetTester tester) {
+  final binding = tester.binding;
+  if (binding.lifecycleState == AppLifecycleState.paused) {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+  }
+  if (binding.lifecycleState == AppLifecycleState.hidden) {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  }
+  if (binding.lifecycleState != AppLifecycleState.resumed) {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  }
+}
+
+void _pause(WidgetTester tester) {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+}
+
 Future<void> _withCard(WidgetTester tester, Future<void> Function() body,
     {bool isAndroid = true, bool settle = true, double textScale = 1,
       Size size = const Size(390, 844), VoidCallback? onOpenCabinet}) async {
-  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  _resume(tester);
   await tester.binding.setSurfaceSize(size);
   await tester.pumpWidget(MaterialApp(theme: buildPushokTheme(),
     builder: (context, child) => MediaQuery(
@@ -83,7 +102,7 @@ Future<void> _withCard(WidgetTester tester, Future<void> Function() body,
   finally {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    _resume(tester);
     await tester.binding.setSurfaceSize(null);
   }
 }
@@ -206,11 +225,11 @@ void main() {
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpAndSettle();
       expect(bridge.count('pollLogin'), 1);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      _pause(tester);
       await tester.pump(const Duration(seconds: 30));
       expect(bridge.count('pollLogin'), 1);
       bridge.state = _state(state: 'connected');
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      _resume(tester);
       await tester.pumpAndSettle();
       expect(bridge.count('status'), 2);
       expect(find.text('Проверочный аккаунт'), findsOneWidget);
@@ -228,9 +247,9 @@ void main() {
     await _withCard(tester, () async {
       await tester.tap(find.byKey(const Key('begin_flow_login')));
       await tester.pump();
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      _pause(tester);
       bridge.state = _state(state: 'connected');
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      _resume(tester);
       await tester.pumpAndSettle();
       expect(find.text('Проверочный аккаунт'), findsOneWidget);
       gate.complete(_state(state: 'pending'));
