@@ -146,6 +146,10 @@ dependencies {
         self.assertIn(unrelated, gradle)
         self.assertIn('implementation("example:existing:1.0")', gradle)
         self.assertEqual(gradle.count('useLegacyPackaging = true'), 1)
+        self.assertEqual(gradle.count('isUniversalApk = true'), 1)
+        # Splitting remains a CLI decision, so the existing debug/release workflows
+        # keep their standalone universal output without new flags.
+        self.assertNotIn('isEnable = true', gradle)
         self.assertNotIn(ANDROID + 'extractNativeLibs', app.attrib)
         first = (gradle, self.manifest.read_text())
         self.patch()
@@ -155,10 +159,13 @@ dependencies {
         self.write_manifest()
         self.patch()
         self.gradle.write_text(self.gradle.read_text().replace(
-            'useLegacyPackaging = true', 'useLegacyPackaging = false'))
+            'useLegacyPackaging = true', 'useLegacyPackaging = false').replace(
+            'isUniversalApk = true', 'isUniversalApk = false'))
         self.patch()
         self.assertEqual(self.gradle.read_text().count('useLegacyPackaging = true'), 1)
         self.assertNotIn('useLegacyPackaging = false', self.gradle.read_text())
+        self.assertEqual(self.gradle.read_text().count('isUniversalApk = true'), 1)
+        self.assertNotIn('isUniversalApk = false', self.gradle.read_text())
 
     def test_malformed_native_packaging_markers_fail_before_writing_project(self):
         self.write_manifest()

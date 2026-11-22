@@ -20,6 +20,9 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/tests/UpdatePolicyCheck.kt -include-runtime -d "$out/update-tests.jar"
 java -jar "$out/update-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
+  native/android/tests/UpdateAbiPolicyCheck.kt -include-runtime -d "$out/update-abi-tests.jar"
+java -jar "$out/update-abi-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/UpdateAutomationPolicy.kt \
   native/android/tests/UpdateAutomationPolicyCheck.kt -include-runtime -d "$out/update-automation-tests.jar"
 java -jar "$out/update-automation-tests.jar"

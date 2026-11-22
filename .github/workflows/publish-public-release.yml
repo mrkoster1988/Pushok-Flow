@@ -48,16 +48,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Download and restore the exact locally signed public APK
+      - name: Download and restore the exact locally signed public APKs
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_ID: ${{ steps.approved.outputs.artifact_id }}
-          RELEASE_APK: ${{ steps.approved.outputs.release_apk }}
         run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/approved-candidate.zip"
           python3 tools/restore_public_release.py --staging "release-staging/v$RELEASE_VERSION.json" \
-            --candidate-zip "$RUNNER_TEMP/approved-candidate.zip" --output "dist/$RELEASE_APK"
+            --candidate-zip "$RUNNER_TEMP/approved-candidate.zip" --output-dir dist
       - name: Verify signature, exact package and all update assets
         env:
           RELEASE_APK: ${{ steps.approved.outputs.release_apk }}
@@ -68,12 +67,32 @@ jobs:
           test -x "$flow_tools/aapt"
           export PATH="$flow_tools:$PATH"
           export LD_LIBRARY_PATH="$flow_tools/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          "$flow_tools/zipalign" -c -P 16 4 "dist/$RELEASE_APK"
-          python3 verified-source/tools/verify_release_apk.py "dist/$RELEASE_APK" \
-            --pubspec verified-source/pubspec.yaml --expected-certificate-sha256 "$RELEASE_CERTIFICATE" \
-            --output dist/verified-release.json 2>&1 | tee release-diagnostics/apk-validation.log
-          python3 verified-source/tools/create_update_manifest.py --apk "dist/$RELEASE_APK" \
-            --pubspec verified-source/pubspec.yaml --verified dist/verified-release.json --output dist
+          python3 - <<'PY' 2>&1 | tee release-diagnostics/apk-validation.log
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          sys.path.insert(0, 'tools')
+          from restore_public_release import read_staging, release_payloads, verification_name
+          version = os.environ['RELEASE_VERSION']
+          document = read_staging(Path('release-staging') / ('v'+version+'.json'), version)
+          for abi, _, payload in release_payloads(document):
+              apk = Path('dist') / payload['release']['apkName']
+              subprocess.run(['zipalign', '-c', '-P', '16', '4', str(apk)], check=True)
+              command = ['python3', 'verified-source/tools/verify_release_apk.py', str(apk),
+                  '--pubspec', 'verified-source/pubspec.yaml',
+                  '--expected-certificate-sha256', os.environ['RELEASE_CERTIFICATE'],
+                  '--output', str(Path('dist') / verification_name(abi))]
+              if abi is not None:
+                  command.extend(['--abi', abi])
+              subprocess.run(command, check=True)
+          command = ['python3', 'verified-source/tools/create_update_manifest.py',
+              '--apk', 'dist/'+document['release']['apkName'], '--pubspec', 'verified-source/pubspec.yaml',
+              '--verified', 'dist/verified-release.json', '--output', 'dist']
+          if document['schemaVersion'] == 2:
+              command.extend(['--variants-dir', 'dist'])
+          subprocess.run(command, check=True)
+          PY
           python3 tools/publish_public_release.py verify-assets --release-version "$RELEASE_VERSION"
       - name: Preserve verified public files
         uses: actions/upload-artifact@v4
@@ -90,6 +109,8 @@ jobs:
         run: python3 tools/publish_public_release.py verify-public --release-version "$RELEASE_VERSION"
       - name: Verify public release discovery and the version-specific manifest
         run: python3 tools/publish_public_release.py verify-discovery --release-version "$RELEASE_VERSION"
+      - name: Verify every public APK and checksum without credentials
+        run: python3 tools/publish_public_release.py verify-downloads --release-version "$RELEASE_VERSION"
       - name: Preserve publication diagnostics
         if: always()
         uses: actions/upload-artifact@v4

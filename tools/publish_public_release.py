@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Publish only a tracked, locally signed and CI-verified public APK."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import hashlib
 import http.client
@@ -15,7 +16,8 @@ import urllib.parse
 import urllib.request
 
 from restore_public_release import (CERTIFICATE, MANIFEST_URL, REPOSITORY,
-    manifest, read_json, read_staging, require, validate_manifest, version)
+    manifest, public_asset_names, read_json, read_staging, release_payloads,
+    require, validate_manifest, verification_name, version)
 
 API_ROOT = f'https://api.github.com/repos/{REPOSITORY}/'
 API_VERSION = '2026-03-10'
@@ -106,7 +108,7 @@ def public_manifest(observation=None, request_url=MANIFEST_URL):
     return result, raw
 
 
-def public_latest_release(observation):
+def public_latest_release(observation, expected_assets=None):
     """Read the v0.31 discovery endpoint without a token, cookie or session."""
     url = API_ROOT + 'releases/latest'
     observation.update(requestUrl=url, requestedAt=datetime.now(timezone.utc).isoformat())
@@ -136,6 +138,11 @@ def public_latest_release(observation):
         and re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', release['published_at']),
         'The release is not a published stable version')
     observation['observedTag'] = tag
+    if expected_assets is not None:
+        validate_asset_metadata(release.get('assets'), expected_assets, require_urls=True)
+        observation['verifiedAssets'] = [
+            {'name': name, 'sizeBytes': item['size'], 'digest': item['digest']}
+            for name, item in expected_assets.items()]
     return tag
 
 
@@ -198,30 +205,52 @@ def preflight(document, diagnostics):
     print('Both CI runs, source artifact and previous public update channel confirmed.')
 
 
-def validate_assets(release, document, dist):
-    expected = {document['release']['apkName'], document['release']['apkName']+'.sha256', 'update.json'}
-    assets = release.get('assets', [])
-    require(type(assets) is list and len(assets) == 3 and {a.get('name') for a in assets} == expected, 'Release must contain exactly three expected assets')
-    for asset in assets:
-        local = dist/asset['name']
+def asset_expectations(document, dist):
+    result = {}
+    for name in public_asset_names(document):
+        local = dist/name
         with local.open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        require(asset.get('state') == 'uploaded' and asset.get('size') == local.stat().st_size
-                and asset.get('digest') == 'sha256:'+digest, 'Uploaded asset differs from verified bytes')
+        result[name] = {'size': local.stat().st_size, 'digest': 'sha256:'+digest,
+            'browser_download_url': f'https://github.com/{REPOSITORY}/releases/download/' + document['release']['tag'] + '/' + name}
+    return result
+
+
+def validate_asset_metadata(assets, expected, require_urls=False):
+    require(type(assets) is list and all(type(asset) is dict and type(asset.get('name')) is str for asset in assets)
+            and len(assets) == len(expected) and {a.get('name') for a in assets} == set(expected),
+            'Release must contain exactly the expected assets')
+    for asset in assets:
+        reference = expected[asset['name']]
+        require(asset.get('state') == 'uploaded' and type(asset.get('size')) is int
+                and asset['size'] == reference['size'] and asset.get('digest') == reference['digest'],
+                'Uploaded asset differs from verified bytes')
+        if require_urls:
+            require(asset.get('browser_download_url') == reference['browser_download_url'],
+                    'Uploaded asset has an unexpected download URL')
+
+
+def validate_assets(release, document, dist):
+    validate_asset_metadata(release.get('assets'), asset_expectations(document, dist),
+                            require_urls=document['schemaVersion'] == 2)
 
 
 def verify_local_assets(document, dist):
     expected = manifest(document['release'])
     require(read_json(dist/'update.json', 65536) == expected, 'Final update manifest differs from approved staging')
-    verification = read_json(dist/'verified-release.json')
-    for field in ('packageName', 'versionName', 'versionCode', 'minSdk', 'sizeBytes', 'sha256', 'certificateSha256'):
-        require(verification.get(field) == expected[field], 'APK verification report differs: '+field)
-    apk = dist/document['release']['apkName']
-    require(apk.stat().st_size == expected['sizeBytes'], 'APK changed after verification')
-    with apk.open('rb') as stream:
-        require(hashlib.file_digest(stream, 'sha256').hexdigest() == expected['sha256'], 'APK changed after verification')
-    checksum = dist/(apk.name+'.sha256')
-    require(checksum.read_text() == expected['sha256']+'  '+apk.name+'\n', 'APK checksum file differs')
+    for abi, _, payload in release_payloads(document):
+        reference = manifest(payload['release'])
+        verification = read_json(dist/verification_name(abi))
+        require(type(verification) is dict, 'Invalid APK verification report')
+        require(verification.get('abi') == abi, 'APK verification architecture differs')
+        for field in ('packageName', 'versionName', 'versionCode', 'minSdk', 'sizeBytes', 'sha256', 'certificateSha256'):
+            require(verification.get(field) == reference[field], 'APK verification report differs: '+field)
+        apk = dist/payload['release']['apkName']
+        require(apk.stat().st_size == reference['sizeBytes'], 'APK changed after verification')
+        with apk.open('rb') as stream:
+            require(hashlib.file_digest(stream, 'sha256').hexdigest() == reference['sha256'], 'APK changed after verification')
+        checksum = dist/(apk.name+'.sha256')
+        require(checksum.read_text() == reference['sha256']+'  '+apk.name+'\n', 'APK checksum file differs')
 
 
 def upload_asset(url, path):
@@ -269,7 +298,7 @@ def publish(document, dist, diagnostics):
             and release.get('tag_name') == tag, 'Unexpected created draft')
     expected_upload = f'https://uploads.github.com/repos/{REPOSITORY}/releases/{release_id}/assets'
     require(release.get('upload_url') == expected_upload+'{?name,label}', 'Unexpected upload URL')
-    for name in (document['release']['apkName'], document['release']['apkName']+'.sha256', 'update.json'):
+    for name in public_asset_names(document):
         url = expected_upload+'?name='+urllib.parse.quote(name, safe='')
         uploaded = upload_asset(url, dist/name)
         (diagnostics/('uploaded-'+name+'.json')).write_text(json.dumps(uploaded, indent=2)+'\n')
@@ -287,7 +316,7 @@ def publish(document, dist, diagnostics):
             and final.get('draft') is False and final.get('prerelease') is False, 'Publication response differs')
     validate_assets(final, document, dist)
     (diagnostics/'release-published.json').write_text(json.dumps(final, indent=2)+'\n')
-    print(f'Published {tag}; release ID {release_id}; three verified assets retained.')
+    print(f'Published {tag}; release ID {release_id}; {len(public_asset_names(document))} verified assets retained.')
 
 
 def verify_public(document, dist, diagnostics):
@@ -330,10 +359,12 @@ def verify_discovery(document, dist, diagnostics):
     require(json.loads(expected) == manifest(document['release']), 'Expected manifest differs')
     diagnostics.mkdir(parents=True, exist_ok=True)
     report = {'expectedTag': document['release']['tag'], 'attempts': []}
+    expected_assets = asset_expectations(document, dist) if document['schemaVersion'] == 2 else None
     for attempt in range(4):
         observation = {'attempt': attempt+1, 'release': {}, 'manifest': {}, 'matches': False}
         try:
-            tag = public_latest_release(observation['release'])
+            tag = (public_latest_release(observation['release'], expected_assets)
+                   if expected_assets is not None else public_latest_release(observation['release']))
             require(tag == document['release']['tag'], 'Public release selection has not reached this version')
             url = f'https://github.com/{REPOSITORY}/releases/download/{tag}/update.json'
             current, raw = public_manifest(observation['manifest'], request_url=url)
@@ -355,9 +386,63 @@ def verify_discovery(document, dist, diagnostics):
         time.sleep(5)
 
 
+def verify_public_downloads(document, dist, diagnostics):
+    """Hash every public APK and checksum without credentials or retained copies."""
+    verify_local_assets(document, dist)
+    expected = asset_expectations(document, dist)
+    expected.pop('update.json')  # Both manifest discovery paths are checked separately.
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    report = {'expectedTag': document['release']['tag'], 'anonymousRequests': True,
+              'authenticationHeadersSent': False, 'cookieJarUsed': False, 'assets': {}, 'status': 'checking'}
+
+    def fetch(name, reference):
+        observation = {'name': name, 'requestUrl': reference['browser_download_url'],
+            'requestedAt': datetime.now(timezone.utc).isoformat(), 'matches': False}
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            request = urllib.request.Request(reference['browser_download_url'], headers={
+                'User-Agent': 'Pushok-Flow-Public-Check',
+                'Cache-Control': 'no-cache, max-age=0', 'Pragma': 'no-cache'})
+            # Fresh opener has no CookieJar or authentication handler.
+            with urllib.request.build_opener().open(request, timeout=30) as response:
+                observation.update(httpStatus=response.getcode(), finalUrl=_public_url_for_log(response.geturl()))
+                require(response.getcode() == 200, 'Public asset did not return HTTP 200')
+                declared = response.headers.get('Content-Length')
+                if declared is not None:
+                    require(int(declared) == reference['size'], 'Public asset content length differs')
+                while chunk := response.read(min(1024*1024, reference['size']-size+1)):
+                    size += len(chunk)
+                    require(size <= reference['size'], 'Public asset exceeds expected size')
+                    digest.update(chunk)
+            require(size == reference['size'] and 'sha256:'+digest.hexdigest() == reference['digest'],
+                    'Public asset bytes differ')
+            observation['matches'] = True
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            observation['errorType'] = type(error).__name__
+            if isinstance(error, urllib.error.HTTPError):
+                observation['httpStatus'] = error.code
+                observation['finalUrl'] = _public_url_for_log(error.geturl())
+            # Do not stringify network exceptions; they may contain signed URLs.
+        observation.update(completedAt=datetime.now(timezone.utc).isoformat(),
+                           sizeBytes=size, sha256=digest.hexdigest())
+        return observation
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(fetch, name, reference): name for name, reference in expected.items()}
+        for future in as_completed(futures):
+            observation = future.result()
+            report['assets'][futures[future]] = observation
+            print('Public asset observation: '+json.dumps(observation, ensure_ascii=False))
+    report['status'] = 'passed' if all(item['matches'] for item in report['assets'].values()) else 'not_verified'
+    (diagnostics/'public-asset-observations.json').write_text(json.dumps(report, indent=2)+'\n')
+    require(report['status'] == 'passed', 'At least one public APK or checksum could not be verified; inspect public-asset-observations.json')
+    print(f'All {len(expected)} public APK/checksum assets exactly match the verified release, without credentials.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('preflight', 'verify-assets', 'publish', 'verify-public', 'verify-discovery'))
+    parser.add_argument('command', choices=('preflight', 'verify-assets', 'publish', 'verify-public', 'verify-discovery', 'verify-downloads'))
     parser.add_argument('--release-version', required=True)
     parser.add_argument('--dist', type=Path, default=Path('dist'))
     parser.add_argument('--diagnostics', type=Path, default=Path('release-diagnostics'))
@@ -374,8 +459,10 @@ def main():
             publish(document, args.dist, args.diagnostics)
         elif args.command == 'verify-public':
             verify_public(document, args.dist, args.diagnostics)
-        else:
+        elif args.command == 'verify-discovery':
             verify_discovery(document, args.dist, args.diagnostics)
+        else:
+            verify_public_downloads(document, args.dist, args.diagnostics)
     except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as error:
         print(f'Public release stopped: {error}', file=sys.stderr)
         return 1

@@ -15,12 +15,19 @@ TOOLS_URI = "http://schemas.android.com/tools"
 NATIVE_PACKAGING_START = "// BEGIN PUSHOK_NATIVE_PACKAGING"
 NATIVE_PACKAGING_END = "// END PUSHOK_NATIVE_PACKAGING"
 NATIVE_PACKAGING = f'''{NATIVE_PACKAGING_START}
-// GitHub distributes the universal APK directly; compress all three native ABIs.
+// GitHub distributes standalone APKs directly; compress all native libraries.
 // AGP also sets extractNativeLibs so Android installs the libraries for this device.
 android {{
     packaging {{
         jniLibs {{
             useLegacyPackaging = true
+        }}
+    }}
+    // --split-per-abi enables splitting in Flutter before the app DSL is read.
+    // Keep the universal fallback in that same build; normal/debug builds stay unsplit.
+    splits {{
+        abi {{
+            isUniversalApk = true
         }}
     }}
 }}

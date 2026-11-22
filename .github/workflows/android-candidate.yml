@@ -150,58 +150,76 @@ jobs:
           flutter test --reporter expanded --no-pub 2>&1 | tee candidate-diagnostics/flutter-test.log
       - name: Validate app manifest
         run: python3 tools/check_android_manifest.py
-      - name: Build release candidate with a temporary build key
+      - name: Build universal and ABI release candidates with a temporary build key
         run: |
           set -o pipefail
           # This candidate is never published or installed as the trusted release.
           # The generated Flutter template uses its temporary debug signing key.
-          flutter build apk --release --no-pub 2>&1 | tee candidate-diagnostics/flutter-build.log
-      - name: Verify candidate package and preserve exact bytes
+          # GitHub's update channel uses one monotonically increasing versionCode.
+          # Flutter's official flag prevents ABI * 1000 offsets; the app DSL also
+          # enables the universal output in this same build for existing clients.
+          flutter build apk --release --no-pub --split-per-abi \
+            -P force-version-code-ignoring-abi=true 2>&1 | tee candidate-diagnostics/flutter-build.log
+      - name: Verify every candidate package and preserve exact bytes
         run: |
           python3 - <<'PY'
           import hashlib, json, os, shutil, subprocess, sys
           from pathlib import Path
           sys.path.insert(0, 'tools')
-          from verify_android_apk import check_apk
+          from verify_android_apk import NATIVE_ABIS, check_apk
           from verify_release_apk import MAX_APK_BYTES, parse_badging, parse_single_signer_certificate, read_version
-          apk = Path('build/app/outputs/flutter-apk/app-release.apk')
-          if not apk.is_file() or not 0 < apk.stat().st_size <= MAX_APK_BYTES:
-              raise SystemExit('Missing, empty or oversized candidate APK.')
+          build = Path('build/app/outputs/flutter-apk')
+          expected = {'app-release.apk', *(f'app-{abi}-release.apk' for abi in NATIVE_ABIS)}
+          if {path.name for path in build.glob('*.apk')} != expected:
+              raise SystemExit('Expected exactly one universal and three standalone ABI APKs.')
           toolchain = Path(os.environ['PUSHOK_SDK_BUILD_TOOLS'])
           aapt = str(toolchain / 'aapt')
-          check_apk(apk, aapt)
           version, code = read_version(Path('pubspec.yaml'))
-          badging = subprocess.run([aapt, 'dump', 'badging', str(apk)], capture_output=True, text=True)
-          Path('candidate-diagnostics/apk-badging.txt').write_text(badging.stdout)
-          Path('candidate-diagnostics/apk-badging-stderr.txt').write_text(badging.stderr)
-          badging.check_returncode()
-          metadata = parse_badging(badging.stdout, version, code)
-          signature = subprocess.run([str(toolchain / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)],
-                                     capture_output=True, text=True)
-          Path('candidate-diagnostics/apk-signature.txt').write_text(signature.stdout)
-          Path('candidate-diagnostics/apk-signature-stderr.txt').write_text(signature.stderr)
-          signature.check_returncode()
-          temporary_certificate = parse_single_signer_certificate(signature.stdout)
-          subprocess.run([str(toolchain / 'zipalign'), '-c', '-P', '16', '4', str(apk)], check=True)
-          with apk.open('rb') as item:
-              digest = hashlib.file_digest(item, 'sha256').hexdigest()
           output = Path('candidate-dist')
-          name = f'Pushok-Flow-v{version}-candidate.apk'
-          shutil.copyfile(apk, output / name)
-          (output / (name + '.sha256')).write_text(f'{digest}  {name}\n')
-          metadata.update({
-              'kind': 'release-candidate', 'trustedRelease': False,
-              'requiresPersistentSigning': True, 'sourceCommit': os.environ['GITHUB_SHA'],
-              'temporaryCertificateSha256': temporary_certificate,
-              'sha256': digest, 'sizeBytes': apk.stat().st_size,
-          })
-          (output / 'candidate.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          certificates = set()
+          for abi in (None, *NATIVE_ABIS):
+              suffix = f'-{abi}' if abi else ''
+              apk = build / f'app{suffix}-release.apk'
+              if not apk.is_file() or not 0 < apk.stat().st_size <= MAX_APK_BYTES:
+                  raise SystemExit('Missing, empty or oversized candidate APK.')
+              check_apk(apk, aapt, expected_abi=abi)
+              badging = subprocess.run([aapt, 'dump', 'badging', str(apk)], capture_output=True, text=True)
+              Path(f'candidate-diagnostics/apk{suffix}-badging.txt').write_text(badging.stdout)
+              Path(f'candidate-diagnostics/apk{suffix}-badging-stderr.txt').write_text(badging.stderr)
+              badging.check_returncode()
+              # This rejects Flutter's ABI offset if the required flag is ever lost.
+              metadata = parse_badging(badging.stdout, version, code)
+              signature = subprocess.run([str(toolchain / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)],
+                                         capture_output=True, text=True)
+              Path(f'candidate-diagnostics/apk{suffix}-signature.txt').write_text(signature.stdout)
+              Path(f'candidate-diagnostics/apk{suffix}-signature-stderr.txt').write_text(signature.stderr)
+              signature.check_returncode()
+              temporary_certificate = parse_single_signer_certificate(signature.stdout)
+              certificates.add(temporary_certificate)
+              subprocess.run([str(toolchain / 'zipalign'), '-c', '-P', '16', '4', str(apk)], check=True)
+              with apk.open('rb') as item:
+                  digest = hashlib.file_digest(item, 'sha256').hexdigest()
+              name = f'Pushok-Flow-v{version}{suffix}-candidate.apk'
+              shutil.copyfile(apk, output / name)
+              (output / (name + '.sha256')).write_text(f'{digest}  {name}\n')
+              metadata.update({
+                  'kind': 'release-candidate', 'trustedRelease': False,
+                  'requiresPersistentSigning': True, 'sourceCommit': os.environ['GITHUB_SHA'],
+                  'temporaryCertificateSha256': temporary_certificate,
+                  'sha256': digest, 'sizeBytes': apk.stat().st_size,
+              })
+              if abi:
+                  metadata['abi'] = abi
+              (output / f'candidate{suffix}.json').write_text(json.dumps(metadata, indent=2) + '\n')
+              print(f'Release candidate {version} ({code}), {abi or "universal"}: {apk.stat().st_size} bytes, SHA-256 {digest}')
+          if len(certificates) != 1:
+              raise SystemExit('All candidate APKs must share one temporary signing certificate.')
           (output / 'README.txt').write_text(
-              'Build candidate only. Do not publish or install this APK as a Pushok Flow release.\n'
-              'Re-sign with the retained permanent key, run tools/verify_release_apk.py with the expected certificate,\n'
-              'then run tools/create_update_manifest.py before publishing APK, SHA-256 and update.json.\n')
-          print(f'Release-mode candidate {version} ({code}) verified; persistent local signing is still required.')
-          print(f'Candidate SHA-256: {digest}')
+              'Build candidates only. Do not publish or install these APKs as Pushok Flow releases.\n'
+              'The universal APK and three standalone ABI APKs have the same package and versionCode.\n'
+              'Re-sign all four with the retained permanent key and verify the exact intended ABI with --abi.\n'
+              'Preserve the universal APK and legacy update.json for existing clients.\n')
+          print(f'All four candidates {version} ({code}) verified; persistent local signing is still required.')
           PY
       - name: Upload release candidate for persistent local signing
         uses: actions/upload-artifact@v4

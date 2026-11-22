@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.AtomicFile
+import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.ByteArrayOutputStream
@@ -33,6 +34,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.zip.ZipFile
 import javax.net.ssl.HttpsURLConnection
 
 /** Application-owned updater. Activity destruction never cancels its network/file work. */
@@ -258,7 +260,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
             if (build != null && build <= currentBuild) deleteOwnedFile(file)
         }
         latestManifest = try { preferences.getString("latest_manifest", null)?.let {
-            manifestFromJson(parseJson(it.toByteArray(StandardCharsets.UTF_8)))
+            cachedManifestFromJson(parseJson(it.toByteArray(StandardCharsets.UTF_8)))
         } } catch (_: Exception) { null }
         retainedReady = restoreCandidate()
         restored = true
@@ -274,13 +276,18 @@ internal class UpdateCoordinator private constructor(private val context: Contex
         changeState { session.checking("release") }
         try {
             val deadline = boundedDeadline(CHECK_TIMEOUT_MS)
-            val release = UpdatePolicy.publishedRelease(jsonValues(parseJson(readRemoteMetadata(
-                URI(UpdatePolicy.LATEST_RELEASE_URL), deadline, UpdatePolicy.MAX_RELEASE_BYTES, releaseApi = true))))
+            val release = releaseFromJson(parseJson(readRemoteMetadata(
+                URI(UpdatePolicy.LATEST_RELEASE_URL), deadline, UpdatePolicy.MAX_RELEASE_BYTES, releaseApi = true)))
             changeState { session.checking("manifest") }
-            val manifest = manifestFromJson(parseJson(readRemoteMetadata(URI(UpdatePolicy.manifestUrl(release)),
+            val universal = manifestFromJson(parseJson(readRemoteMetadata(URI(UpdatePolicy.manifestUrl(release)),
                 deadline, UpdatePolicy.MAX_METADATA_BYTES, release = release)))
             val current = installedPackage()
+            UpdatePolicy.requireCompatible(universal, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
+            val known = listOfNotNull(prior.manifest, retainedReady?.manifest)
+                .filter { it.versionCode > versionCode(current) }
+            val manifest = UpdatePolicy.selectManifest(universal, release, Build.SUPPORTED_ABIS.toList(), known)
             UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
+            UpdatePolicy.requireDeviceCompatible(manifest, Build.SUPPORTED_ABIS.toList())
             val next = session.complete(release, manifest, current.versionName ?: "0.0.0", System.currentTimeMillis())
             if (!preferences.edit().putString("latest_manifest", JSONObject(UpdatePolicy.manifestFields(manifest)).toString())
                     .putLong("checked_at", next.checkedAtMillis ?: 0).commit()) throw UpdateFailure("UPDATE_STORAGE_ERROR")
@@ -293,6 +300,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
     private fun downloadCandidate(manifest: UpdateManifest) {
         val current = installedPackage()
         UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
+        UpdatePolicy.requireDeviceCompatible(manifest, Build.SUPPORTED_ABIS.toList())
         UpdatePolicy.requireNewer(manifest, versionCode(current))
         if (retainedReady?.manifest == manifest) { changeState { retainedReady!! }; return }
         val directory = updateDirectory()
@@ -307,7 +315,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
         try {
             if (received < manifest.sizeBytes) {
                 val deadline = boundedDeadline(UpdateAutomationPolicy.WORK_BUDGET_MS)
-                withConnection(URI(manifest.apkUrl), manifest.versionName, deadline, offset = received) { remote ->
+                withConnection(URI(manifest.apkUrl), manifest, deadline, offset = received) { remote ->
                     val append = UpdateAutomationPolicy.appendResponse(received, manifest.sizeBytes, remote.responseCode,
                         remote.getHeaderField("Content-Range"), remote.contentLengthLong)
                     if (!append) received = 0L
@@ -697,11 +705,27 @@ internal class UpdateCoordinator private constructor(private val context: Contex
 
     private fun manifestFromJson(json: JSONObject): UpdateManifest = UpdatePolicy.manifest(jsonValues(json))
 
+    private fun cachedManifestFromJson(json: JSONObject): UpdateManifest =
+        UpdatePolicy.cachedManifest(jsonValues(json), Build.SUPPORTED_ABIS.toList())
+
+    private fun releaseFromJson(json: JSONObject): PublishedUpdateRelease {
+        val values = jsonValues(json).toMutableMap()
+        if (json.has("assets")) {
+            val assets = json.get("assets") as? JSONArray ?: throw UpdateFailure("UPDATE_METADATA_INVALID")
+            if (assets.length() > UpdatePolicy.MAX_RELEASE_ASSETS) throw UpdateFailure("UPDATE_METADATA_INVALID")
+            values["assets"] = (0 until assets.length()).map { index ->
+                val asset = assets.get(index) as? JSONObject ?: throw UpdateFailure("UPDATE_METADATA_INVALID")
+                jsonValues(asset)
+            }
+        }
+        return UpdatePolicy.publishedRelease(values)
+    }
+
     private fun remainingTimeout(deadline: Long, limit: Int): Int =
         (deadline - SystemClock.elapsedRealtime()).coerceIn(1, limit.toLong()).toInt()
 
 
-    private fun withConnection(initial: URI, apkVersion: String?, deadline: Long,
+    private fun withConnection(initial: URI, apk: UpdateManifest?, deadline: Long,
         releaseApi: Boolean = false, release: PublishedUpdateRelease? = null, offset: Long = 0,
         consume: (HttpsURLConnection) -> Unit) {
         var uri = initial
@@ -709,7 +733,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
             ensureActive(deadline)
             val allowed = when {
                 releaseApi -> UpdatePolicy.allowedReleaseRequest(uri)
-                apkVersion != null -> UpdatePolicy.allowedRequest(uri, apkVersion)
+                apk != null -> UpdatePolicy.allowedApkRequest(uri, apk)
                 release != null -> UpdatePolicy.allowedManifestRequest(uri, release)
                 else -> false
             }
@@ -723,10 +747,10 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                 remote.readTimeout = remainingTimeout(deadline, 20_000)
                 remote.useCaches = false
                 remote.setRequestProperty("Accept-Encoding", "identity")
-                if (offset > 0 && apkVersion != null) remote.setRequestProperty("Range", "bytes=$offset-")
+                if (offset > 0 && apk != null) remote.setRequestProperty("Range", "bytes=$offset-")
                 remote.setRequestProperty("Accept", if (releaseApi) "application/vnd.github+json" else "application/octet-stream")
                 remote.setRequestProperty("User-Agent", "Pushok-Flow-Updater")
-                if (apkVersion == null) {
+                if (apk == null) {
                     // Request revalidation; these headers do not prove global CDN freshness.
                     remote.setRequestProperty("Cache-Control", "no-cache, max-age=0")
                     remote.setRequestProperty("Pragma", "no-cache")
@@ -749,8 +773,8 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                     }
                     if (status == 404 && releaseApi) throw UpdateFailure("UPDATE_UNAVAILABLE")
                     if (status == 404 && release != null) throw UpdateFailure("UPDATE_METADATA_STALE")
-                    if (status != 200 && !(status == 206 && apkVersion != null && offset > 0)) {
-                        if (status == 416 && apkVersion != null) throw UpdateFailure("UPDATE_CHECKSUM_MISMATCH")
+                    if (status != 200 && !(status == 206 && apk != null && offset > 0)) {
+                        if (status == 416 && apk != null) throw UpdateFailure("UPDATE_CHECKSUM_MISMATCH")
                         throw UpdateFailure("UPDATE_NETWORK_ERROR")
                     }
                     val encoding = remote.contentEncoding
@@ -836,7 +860,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
             if (record.keys().asSequence().toSet() != setOf("manifest", "fileName")) {
                 throw UpdateFailure("UPDATE_METADATA_INVALID")
             }
-            val manifest = manifestFromJson(record.getJSONObject("manifest"))
+            val manifest = cachedManifestFromJson(record.getJSONObject("manifest"))
             val name = record.get("fileName") as? String ?: throw UpdateFailure("UPDATE_APK_INVALID")
             UpdatePolicy.requireCandidateFileName(name, manifest)
             val file = File(updateDirectory(), name)
@@ -923,6 +947,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
             ensureOwnedFile(file)
             val current = installedPackage()
             UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
+            UpdatePolicy.requireDeviceCompatible(manifest, Build.SUPPORTED_ABIS.toList())
             UpdatePolicy.requireNewer(manifest, versionCode(current))
             val archive = context.packageManager.getPackageArchiveInfo(file.path,
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES
@@ -933,6 +958,9 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                 !archive.splitNames.isNullOrEmpty()) throw UpdateFailure("UPDATE_APK_INVALID")
             if (signerDigests(archive) != setOf(manifest.certificateSha256)) {
                 throw UpdateFailure("UPDATE_SIGNATURE_MISMATCH")
+            }
+            if (UpdatePolicy.apkAbi(manifest) != null) ZipFile(file).use { zip ->
+                UpdatePolicy.requireArchiveAbi(manifest, zip.entries().asSequence().map { it.name to it.size })
             }
         } catch (failure: UpdateFailure) {
             throw failure

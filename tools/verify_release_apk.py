@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 
-from verify_android_apk import check_apk, find_aapt
+from verify_android_apk import NATIVE_ABIS, check_apk, find_aapt
 
 
 PACKAGE = "shop.pushok.flow"
@@ -95,12 +95,16 @@ def find_apksigner() -> str:
     raise FileNotFoundError("Android SDK apksigner is missing")
 
 
-def verify(apk: Path, pubspec: Path, expected_certificate: str) -> dict[str, str | int]:
+def verify(apk: Path, pubspec: Path, expected_certificate: str,
+           expected_abi: str | None = None) -> dict[str, str | int]:
     if not apk.is_file() or not 0 < apk.stat().st_size <= MAX_APK_BYTES:
         raise ValueError("Missing, empty or oversized release APK")
     version, code = read_version(pubspec)
     aapt = find_aapt()
-    check_apk(apk, aapt)
+    if expected_abi is None:
+        check_apk(apk, aapt)
+    else:
+        check_apk(apk, aapt, expected_abi=expected_abi)
     badging = subprocess.run([aapt, "dump", "badging", str(apk)],
                              capture_output=True, text=True, check=True)
     metadata = parse_badging(badging.stdout, version, code)
@@ -110,6 +114,8 @@ def verify(apk: Path, pubspec: Path, expected_certificate: str) -> dict[str, str
     with apk.open("rb") as source:
         metadata["sha256"] = hashlib.file_digest(source, "sha256").hexdigest()
     metadata["sizeBytes"] = apk.stat().st_size
+    if expected_abi is not None:
+        metadata["abi"] = expected_abi
     return metadata
 
 
@@ -119,9 +125,11 @@ def main() -> int:
     parser.add_argument("--pubspec", type=Path, default=Path("pubspec.yaml"))
     parser.add_argument("--expected-certificate-sha256", default=os.environ.get("PUSHOK_ANDROID_CERTIFICATE_SHA256", ""))
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--abi", choices=NATIVE_ABIS,
+                        help="Explicit standalone APK ABI; omitted requires the universal APK")
     args = parser.parse_args()
     try:
-        metadata = verify(args.apk, args.pubspec, args.expected_certificate_sha256)
+        metadata = verify(args.apk, args.pubspec, args.expected_certificate_sha256, args.abi)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     except (ValueError, OSError, subprocess.SubprocessError) as error:

@@ -14,7 +14,8 @@ import zlib
 
 from create_update_manifest import build_manifest
 from restore_public_release import (REPOSITORY, MAX_APK_BYTES, MAX_LITERAL_BYTES,
-    MAX_STAGING_BYTES, candidate_bytes, read_json, require, restore_bytes, validate_staging)
+    MAX_STAGING_BYTES, ABIS, apk_name, candidate_bytes, read_json, require,
+    restore_bytes, validate_staging, verification_name)
 
 SIGNATURE = re.compile(r'META-INF/(?:MANIFEST\.MF|[^/]+\.(?:SF|RSA|DSA|EC))', re.IGNORECASE)
 
@@ -92,6 +93,25 @@ def create(args):
         'candidate': {'sizeBytes': len(candidate), 'sha256': hashlib.sha256(candidate).hexdigest()},
         'release': release, 'previousManifest': read_json(args.previous_manifest, 65536),
         'notes': args.notes.read_text(encoding='utf-8'), 'operations': operations, 'literals': literals}
+    variants_dir = getattr(args, 'variants_dir', None)
+    if variants_dir is not None:
+        document.update(schemaVersion=2, variants={})
+        for abi in ABIS:
+            variant_apk = variants_dir / apk_name(v, abi)
+            variant_verified = read_json(variants_dir / verification_name(abi))
+            variant_update = build_manifest(variant_apk, variant_verified, args.pubspec, abi)
+            variant_release = {key: variant_update[key] for key in (
+                'packageName', 'versionName', 'versionCode', 'minSdk', 'sha256', 'sizeBytes', 'certificateSha256')}
+            variant_release.update(tag='v'+v, apkName=apk_name(v, abi))
+            entry_name = apk_name(v, abi, candidate=True)
+            variant_candidate = candidate_bytes(args.candidate_zip, {**artifact, 'entryName': entry_name})
+            variant_signed = variant_apk.read_bytes()
+            variant_operations, variant_literals = make_delta(variant_candidate, variant_signed)
+            variant = {'entryName': entry_name,
+                'candidate': {'sizeBytes': len(variant_candidate), 'sha256': hashlib.sha256(variant_candidate).hexdigest()},
+                'release': variant_release, 'operations': variant_operations, 'literals': variant_literals}
+            require(restore_bytes(variant_candidate, variant) == variant_signed, 'Variant delta round-trip differs')
+            document['variants'][abi] = variant
     validate_staging(document, v)
     require(restore_bytes(candidate, document) == signed, 'Local delta round-trip differs')
     encoded = (json.dumps(document, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
@@ -99,7 +119,8 @@ def create(args):
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('xb') as stream:
         stream.write(encoded)
-    print(f'Created public v{v} delta: {len(operations)} operations, {len(encoded)} JSON bytes; no private signing material read')
+    count = 4 if document['schemaVersion'] == 2 else 1
+    print(f'Created public v{v} delta for {count} APK(s): {len(encoded)} JSON bytes; no private signing material read')
 
 
 def main():
@@ -110,6 +131,8 @@ def main():
         parser.add_argument('--'+name, type=int, required=True)
     for name in ('source-commit', 'artifact-sha256'):
         parser.add_argument('--'+name, required=True)
+    parser.add_argument('--variants-dir', type=Path,
+                        help='All three signed ABI APKs and verified-release-<abi>.json reports')
     try:
         create(parser.parse_args())
     except (ValueError, OSError, KeyError, TypeError, zipfile.BadZipFile, zlib.error) as error:

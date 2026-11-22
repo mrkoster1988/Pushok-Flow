@@ -17,7 +17,18 @@ internal data class UpdateManifest(
     val certificateSha256: String,
 )
 
-internal data class PublishedUpdateRelease(val id: Long, val versionName: String)
+internal data class PublishedUpdateApk(
+    val abi: String?,
+    val apkUrl: String,
+    val sha256: String,
+    val sizeBytes: Long,
+)
+
+internal data class PublishedUpdateRelease(
+    val id: Long,
+    val versionName: String,
+    val apks: List<PublishedUpdateApk> = emptyList(),
+)
 
 internal data class UpdateState(
     val phase: String,
@@ -87,7 +98,13 @@ internal object UpdatePolicy {
     const val LATEST_RELEASE_URL = "https://api.github.com/repos/mrkoster1988/Pushok-Flow/releases/latest"
     const val MAX_METADATA_BYTES = 64 * 1024
     const val MAX_RELEASE_BYTES = 256 * 1024
+    const val MAX_RELEASE_ASSETS = 64
+    const val MAX_ARCHIVE_ENTRIES = 10000
     const val MAX_APK_BYTES = 200L * 1024 * 1024
+    private const val FIRST_ABI_BUILD = 40L
+    private val apkAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+    private val nativeLibraries = setOf("libflutter.so", "libapp.so", "libgojni.so",
+        "libwg-go.so", "libwg.so", "libwg-quick.so")
     private const val REPO_PATH = "/mrkoster1988/Pushok-Flow/releases"
     private val versionPattern = Regex("(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)")
     private val digestPattern = Regex("[0-9a-f]{64}")
@@ -108,7 +125,76 @@ internal object UpdatePolicy {
             !versionPattern.matches(version) || raw["draft"] != false ||
             raw["prerelease"] != false ||
             !Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z").matches(published)) invalid()
-        return PublishedUpdateRelease(id, version)
+        val apks = if (raw.containsKey("assets")) releaseApks(raw["assets"], version) else emptyList()
+        return PublishedUpdateRelease(id, version, apks)
+    }
+
+    private fun apkUrl(version: String, abi: String? = null): String =
+        "$RELEASE_ROOT/download/v$version/Pushok-Flow-v$version${abi?.let { "-$it" }.orEmpty()}.apk"
+
+    /** Missing ABI assets means a legacy release. A partially present or ambiguous set is not a fallback. */
+    private fun releaseApks(value: Any?, version: String): List<PublishedUpdateApk> {
+        fun invalid(): Nothing = throw UpdateFailure("UPDATE_METADATA_INVALID")
+        val assets = value as? List<*> ?: invalid()
+        if (assets.size > MAX_RELEASE_ASSETS) invalid()
+        val byName = mutableMapOf<String, Map<*, *>>()
+        for (item in assets) {
+            val asset = item as? Map<*, *> ?: invalid()
+            val name = asset["name"] as? String ?: invalid()
+            if (name.length !in 1..255 || byName.put(name, asset) != null) invalid()
+        }
+        val names = apkAbis.associateWith { apkUrl(version, it).substringAfterLast('/') }
+        if (names.values.none { byName.containsKey(it) }) return emptyList()
+        return (listOf<String?>(null) + apkAbis).map { abi ->
+            val url = apkUrl(version, abi)
+            val asset = byName[url.substringAfterLast('/')] ?: invalid()
+            val size = when (val rawSize = asset["size"]) {
+                is Int -> rawSize.toLong()
+                is Long -> rawSize
+                else -> invalid()
+            }
+            val digest = asset["digest"] as? String ?: invalid()
+            if (asset["state"] != "uploaded" || asset["browser_download_url"] != url ||
+                size !in 1..MAX_APK_BYTES || !digest.startsWith("sha256:") ||
+                !digestPattern.matches(digest.removePrefix("sha256:"))) invalid()
+            PublishedUpdateApk(abi, url, digest.removePrefix("sha256:"), size)
+        }
+    }
+
+    /** Select a standalone APK for the next installation, not for the current process's bitness. */
+    fun selectManifest(universal: UpdateManifest, release: PublishedUpdateRelease,
+        supportedAbis: List<String>, known: List<UpdateManifest> = emptyList()): UpdateManifest {
+        if (universal.versionName != release.versionName) throw UpdateFailure("UPDATE_METADATA_STALE")
+        if (universal.apkUrl != apkUrl(universal.versionName)) throw UpdateFailure("UPDATE_METADATA_INVALID")
+        val alternatives = mutableListOf(universal)
+        if (release.apks.isNotEmpty()) {
+            if (universal.versionCode < FIRST_ABI_BUILD) throw UpdateFailure("UPDATE_METADATA_INVALID")
+            val base = release.apks.singleOrNull { it.abi == null }
+                ?: throw UpdateFailure("UPDATE_METADATA_INVALID")
+            if (base.apkUrl != universal.apkUrl || base.sha256 != universal.sha256 ||
+                base.sizeBytes != universal.sizeBytes) throw UpdateFailure("UPDATE_METADATA_STALE")
+            val variants = release.apks.filter { it.abi != null }
+            if (variants.size != apkAbis.size || variants.map { it.abi }.toSet() != apkAbis.toSet()) {
+                throw UpdateFailure("UPDATE_METADATA_INVALID")
+            }
+            for (asset in variants) {
+                if (asset.abi in supportedAbis) alternatives.add(universal.copy(apkUrl = asset.apkUrl,
+                    sha256 = asset.sha256, sizeBytes = asset.sizeBytes))
+            }
+        }
+        // Keep an already discovered or downloaded exact payload. Switching variants for the same
+        // build must not look like an allowed mutation of its hash or discard a verified cache.
+        val retained = known.filter {
+            it.versionCode == universal.versionCode || it.versionName == universal.versionName
+        }
+        if (retained.any { it !in alternatives } || retained.distinct().size > 1) {
+            throw UpdateFailure("UPDATE_METADATA_STALE")
+        }
+        retained.firstOrNull()?.let { return it }
+        for (abi in supportedAbis.distinct()) {
+            alternatives.firstOrNull { it.apkUrl == apkUrl(universal.versionName, abi) }?.let { return it }
+        }
+        return universal
     }
 
     fun manifestUrl(release: PublishedUpdateRelease): String =
@@ -144,7 +230,13 @@ internal object UpdatePolicy {
         allowedRequest(uri, null) && (uri.host?.lowercase(Locale.ROOT) != "github.com" ||
             uri.path == "/mrkoster1988/Pushok-Flow/releases/download/v${release.versionName}/update.json")
 
-    fun manifest(raw: Map<String, Any?>): UpdateManifest {
+    fun manifest(raw: Map<String, Any?>): UpdateManifest = parseManifest(raw, allowVariant = false)
+
+    /** Private persisted metadata uses the same nine fields; remote update.json stays universal-only. */
+    fun cachedManifest(raw: Map<String, Any?>, supportedAbis: List<String>): UpdateManifest =
+        parseManifest(raw, allowVariant = true).also { requireDeviceCompatible(it, supportedAbis) }
+
+    private fun parseManifest(raw: Map<String, Any?>, allowVariant: Boolean): UpdateManifest {
         fun invalid(): Nothing = throw UpdateFailure("UPDATE_METADATA_INVALID")
         fun string(name: String): String = raw[name] as? String ?: invalid()
         fun integer(name: String): Long = when (val value = raw[name]) {
@@ -165,8 +257,39 @@ internal object UpdatePolicy {
             build !in 1..Int.MAX_VALUE.toLong() || minSdk !in 24..Int.MAX_VALUE.toLong() ||
             size !in 1..MAX_APK_BYTES || !digestPattern.matches(sha) ||
             !digestPattern.matches(certificate) ||
-            url != "$RELEASE_ROOT/download/v$version/Pushok-Flow-v$version.apk") invalid()
+            (url != apkUrl(version) && !(allowVariant && build >= FIRST_ABI_BUILD &&
+                apkAbis.any { url == apkUrl(version, it) }))) invalid()
         return UpdateManifest(version, build, minSdk.toInt(), url, sha, size, certificate)
+    }
+
+    fun apkAbi(manifest: UpdateManifest): String? {
+        if (manifest.apkUrl == apkUrl(manifest.versionName)) return null
+        return apkAbis.firstOrNull { manifest.versionCode >= FIRST_ABI_BUILD &&
+            manifest.apkUrl == apkUrl(manifest.versionName, it) }
+            ?: throw UpdateFailure("UPDATE_METADATA_INVALID")
+    }
+
+    fun requireDeviceCompatible(manifest: UpdateManifest, supportedAbis: List<String>) {
+        val abi = apkAbi(manifest)
+        if (abi != null && abi !in supportedAbis) throw UpdateFailure("UPDATE_INCOMPATIBLE")
+    }
+
+    /** ZIP structure is checked in addition to the unchanged signed package/version/hash gates. */
+    fun requireArchiveAbi(manifest: UpdateManifest, entries: Sequence<Pair<String, Long>>) {
+        val abi = apkAbi(manifest) ?: return
+        fun invalid(): Nothing = throw UpdateFailure("UPDATE_APK_INVALID")
+        val names = mutableSetOf<String>()
+        val libraries = mutableSetOf<String>()
+        var count = 0
+        for ((name, size) in entries) {
+            if (++count > MAX_ARCHIVE_ENTRIES || !names.add(name)) invalid()
+            if (name.startsWith("lib/") && name.endsWith(".so")) {
+                val parts = name.split('/')
+                if (parts.size != 3 || parts[1] != abi || parts[2].isEmpty() || size <= 0) invalid()
+                libraries.add(parts[2])
+            }
+        }
+        if (!libraries.containsAll(nativeLibraries)) invalid()
     }
 
     fun requireCompatible(manifest: UpdateManifest, installedPackage: String,
@@ -224,6 +347,14 @@ internal object UpdatePolicy {
                 uri.rawPath?.startsWith("/github-production-release-asset-2e65be/") == true
             else -> false
         }
+    }
+
+    fun allowedApkRequest(uri: URI, manifest: UpdateManifest): Boolean {
+        if (!safeUri(uri) || !versionPattern.matches(manifest.versionName)) return false
+        try { apkAbi(manifest) } catch (_: UpdateFailure) { return false }
+        return if (uri.host?.lowercase(Locale.ROOT) == "github.com") {
+            uri.rawQuery == null && uri.path == URI(manifest.apkUrl).path
+        } else allowedRequest(uri, manifest.versionName)
     }
 
     private fun safeUri(uri: URI): Boolean = uri.toString().length <= 8192 && uri.scheme == "https" &&

@@ -18,6 +18,7 @@ XRAY_VERSION_CODE = 36
 XRAY_SERVICE = 'shop.pushok.flow.XrayVpnService'
 AUTO_UPDATE_VERSION_CODE = 37
 COMPACT_NATIVE_VERSION_CODE = 39
+ABI_VARIANT_VERSION_CODE = 40
 NATIVE_ABIS = ('arm64-v8a', 'armeabi-v7a', 'x86_64')
 REQUIRED_NATIVE_LIBRARIES = (
     'libflutter.so', 'libapp.so', 'libgojni.so',
@@ -155,7 +156,17 @@ def check_qr_import_manifest(tree: str, permissions: set[str]) -> None:
             raise ValueError(f'Expected one optional camera hardware feature: {name}')
 
 
-def check_apk(path: Path, aapt: str | None = None) -> None:
+def expected_native_abis(expected_abi: str | None = None) -> tuple[str, ...]:
+    """Single-ABI checks must be explicitly requested, never inferred from a damaged APK."""
+    if expected_abi is None:
+        return NATIVE_ABIS
+    if not isinstance(expected_abi, str) or expected_abi not in NATIVE_ABIS:
+        raise ValueError('Unsupported expected native ABI')
+    return (expected_abi,)
+
+
+def check_apk(path: Path, aapt: str | None = None, expected_abi: str | None = None) -> None:
+    expected_native_abis(expected_abi)
     if not path.is_file() or path.stat().st_size == 0:
         raise ValueError('Missing/empty APK')
     aapt = aapt or find_aapt()
@@ -168,6 +179,11 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
         raise ValueError('APK versionCode missing or invalid')
     version_code = int(version_codes[0])
     debuggable = bool(re.search(r'^application-debuggable\b', result.stdout, re.MULTILINE))
+    if expected_abi is not None:
+        if version_code < ABI_VARIANT_VERSION_CODE or debuggable:
+            raise ValueError('ABI-specific APK requires a non-debuggable release with versionCode >= 40')
+        if re.search(r"\bsplit='[^']+'", package[0][1]):
+            raise ValueError('An ABI-specific APK must be standalone, not an install-time split')
     permissions = subprocess.run([aapt, 'dump', 'permissions', str(path)], capture_output=True, text=True, check=True)
     declared_permissions = set(re.findall(
         r"^uses-permission(?:-sdk-[\w]+)?:\s+name=['\"]([^'\"]+)['\"]",
@@ -175,6 +191,8 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
     if 'android.permission.INTERNET' not in declared_permissions:
         raise ValueError('INTERNET permission not declared in APK')
     manifest = subprocess.run([aapt, 'dump', 'xmltree', str(path), 'AndroidManifest.xml'], capture_output=True, text=True, check=True)
+    if expected_abi is not None and element_attributes(manifest.stdout, 'uses-split'):
+        raise ValueError('An ABI-specific APK must not require another split APK')
     NAME = 'com.wireguard.android.backend.GoBackend$VpnService'
     if NAME not in manifest.stdout:
         raise ValueError('WireGuard VPN service absent from merged manifest')
@@ -206,16 +224,22 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
         print('APK private QR scanner, camera permission and optional hardware checks passed')
     if version_code >= XRAY_VERSION_CODE:
         check_xray_manifest(manifest.stdout, declared_permissions)
-        check_xray_libraries(path)
-        print('APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified')
+        if expected_abi is None:
+            check_xray_libraries(path)
+        else:
+            check_xray_libraries(path, expected_abi)
+        print('APK isolated Xray service, required native ABIs, ELF 16 KiB pages and licenses verified')
     if version_code >= AUTO_UPDATE_VERSION_CODE:
         check_update_manifest(manifest.stdout, declared_permissions)
         print('APK private update callbacks, persistent scheduler and install permissions verified')
     # The separate JIT debug workflow has no AOT libapp.so. The persistent
     # release verifier independently rejects every debuggable APK.
     if version_code >= COMPACT_NATIVE_VERSION_CODE and not debuggable:
-        check_compact_native_packaging(path, manifest.stdout)
-        print('APK compressed native libraries, three complete ABIs and extraction flag verified')
+        if expected_abi is None:
+            check_compact_native_packaging(path, manifest.stdout)
+        else:
+            check_compact_native_packaging(path, manifest.stdout, expected_abi)
+        print('APK compressed native libraries, exact expected ABIs and extraction flag verified')
     print('APK package, INTERNET and WireGuard VPN service checks passed')
 
 
@@ -319,9 +343,9 @@ def check_xray_manifest(tree: str, permissions: set[str]) -> None:
         raise ValueError('Xray foreground or network permissions missing')
 
 
-def check_xray_libraries(path: Path) -> None:
+def check_xray_libraries(path: Path, expected_abi: str | None = None) -> None:
     with zipfile.ZipFile(path) as apk:
-        for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64'):
+        for abi in expected_native_abis(expected_abi):
             name = f'lib/{abi}/libgojni.so'
             try: data = apk.read(name)
             except KeyError as error: raise ValueError(f'Xray native library missing for {abi}') from error
@@ -333,8 +357,9 @@ def check_xray_libraries(path: Path) -> None:
                 raise ValueError('Empty Xray redistribution notice')
 
 
-def check_compact_native_packaging(path: Path, tree: str) -> None:
+def check_compact_native_packaging(path: Path, tree: str, expected_abi: str | None = None) -> None:
     """Require complete compressed native entries and installer extraction metadata."""
+    abis = expected_native_abis(expected_abi)
     applications = element_attributes(tree, 'application')
     if len(applications) != 1:
         raise ValueError('Expected exactly one application for native extraction')
@@ -347,29 +372,38 @@ def check_compact_native_packaging(path: Path, tree: str) -> None:
         if len(names) != len(entries):
             raise ValueError('Duplicate APK ZIP entries are not supported')
         required = {f'lib/{abi}/{library}'
-                    for abi in NATIVE_ABIS for library in REQUIRED_NATIVE_LIBRARIES}
+                    for abi in abis for library in REQUIRED_NATIVE_LIBRARIES}
         missing = required - names
         if missing:
             raise ValueError('Required native library missing: ' + sorted(missing)[0])
+        actual_abis = set()
         # Apply the packaging contract to additional native dependencies too;
         # their introduction must not silently restore uncompressed downloads.
         for item in entries:
             if not (item.filename.startswith('lib/') and item.filename.endswith('.so')):
                 continue
+            parts = item.filename.split('/')
+            if len(parts) != 3:
+                raise ValueError('Unexpected native library path: ' + item.filename)
+            actual_abis.add(parts[1])
             if item.flag_bits & 1:
                 raise ValueError('Encrypted native libraries cannot be installed')
             if item.compress_type != zipfile.ZIP_DEFLATED:
                 raise ValueError('Native libraries must use ZIP DEFLATE compression: ' + item.filename)
             if item.is_dir() or item.file_size <= 0 or item.compress_size <= 0:
                 raise ValueError('Empty native library: ' + item.filename)
+        if actual_abis != set(abis):
+            raise ValueError('APK native ABI set differs from the explicitly expected architectures')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('apk', type=Path)
+    parser.add_argument('--abi', choices=NATIVE_ABIS,
+                        help='Explicit standalone APK ABI; omitted requires the universal APK')
     args = parser.parse_args()
     try:
-        check_apk(args.apk)
+        check_apk(args.apk, expected_abi=args.abi)
     except (ValueError, OSError, subprocess.CalledProcessError) as err:
         print(f'APK validation failed: {err}', file=sys.stderr)
         sys.exit(1)
