@@ -1,0 +1,132 @@
+{
+  "recordedAtUtc": "2026-11-22T16:58:05.076086+00:00",
+  "status": "verified_signed_ready_for_authorized_publication",
+  "apkSourceCommit": "147e6e89b247bd00b255e5d04f798d76a7b39c77",
+  "stagingDocument": "release-staging/v0.39.0.json",
+  "stagingDocumentSha256": "34e5a7e4b25f5aaa51f2f6cb5f34b1dffc53ac8b629196b2736b9071ff5db790",
+  "verifiedSignedApk": {
+    "packageName": "shop.pushok.flow",
+    "versionName": "0.39.0",
+    "versionCode": 39,
+    "minSdk": 24,
+    "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+    "sha256": "42814cb310a312c831a09a9f220d8dd5df037a4feb88068de4c1863142f21b7f",
+    "sizeBytes": 66629682
+  },
+  "sourceChecks": {
+    "runId": 45045748271,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45045748271",
+    "conclusion": "success",
+    "pythonTests": 223,
+    "flutterTests": 249,
+    "analyzer": "No issues found"
+  },
+  "androidCandidate": {
+    "runId": 45045748243,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45045748243",
+    "conclusion": "success",
+    "runUpdatedAtUtc": "2026-11-22T16:55:07Z",
+    "runAttempt": 1,
+    "jobId": 137279860701,
+    "kotlinSuites": 15,
+    "flutterTests": 249,
+    "artifactId": 14763438345,
+    "artifactSizeBytes": 66222994,
+    "artifactSha256": "1b69b9726a5416331205fce6669b0f9e6492ad56f70b7f2ef7894679b23bee2a",
+    "verifiedLogMarkers": [
+      "2026-11-22T16:48:16.9199050Z Ran 223 tests in 18.868s",
+      "2026-11-22T16:48:16.9218888Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9219533Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9221389Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9222565Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9223774Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9226008Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9229317Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9231046Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9231784Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9233504Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9234111Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9235888Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9236456Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9237109Z APK compressed native libraries, three complete ABIs and extraction flag verified",
+      "2026-11-22T16:48:16.9238825Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9239421Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9240765Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9241403Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9242569Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9243192Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9243803Z APK compressed native libraries, three complete ABIs and extraction flag verified",
+      "2026-11-22T16:48:16.9245492Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9246262Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9247928Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9248646Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9249847Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9250754Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:48:16.9252510Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:48:16.9253088Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:50:09.9202298Z No issues found! (ran in 8.9s)",
+      "2026-11-22T16:50:53.9067080Z 00:32 +249: All tests passed!",
+      "2026-11-22T16:54:56.4732283Z ✓ Built build/app/outputs/flutter-apk/app-release.apk (66.6MB)",
+      "2026-11-22T16:54:57.5011026Z APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified",
+      "2026-11-22T16:54:57.5011677Z APK private update callbacks, persistent scheduler and install permissions verified",
+      "2026-11-22T16:54:57.5012262Z APK compressed native libraries, three complete ABIs and extraction flag verified"
+    ],
+    "candidateApkSha256": "a45763d516920e7f3d6cdbd02a70070142c8fb0bf56a49a521db5fe24ef807d0",
+    "candidateApkSizeBytes": 66615839
+  },
+  "officialSdkTools": {
+    "id": 14763239306,
+    "sizeBytes": 21273869,
+    "sha256": "53e705d5a106957d17698d9f0b512ea6c3766426a7bf5585c1fe41dee95f3551",
+    "buildToolsVersion": "37.0.0",
+    "verifiedFiles": 12
+  },
+  "updateManifest": {
+    "sizeBytes": 431,
+    "sha256": "99fdfac5d2a4621f60662c6a0cec842018f97d6f9014a70893ad78fd6d67fdb2"
+  },
+  "checksumAsset": {
+    "sizeBytes": 90,
+    "sha256": "bec577f54b23fa322ca005d96860842c7e12ab9f65ec01f59248905e0bc6f332"
+  },
+  "localVerification": {
+    "persistentCertificateMatchesPreviousRelease": true,
+    "apkPayloadUnchangedBySigning": true,
+    "publicDeltaExactRoundTrip": true,
+    "zipalign16KiB": "passed",
+    "packageVersionMinSdkNonDebuggable": "passed",
+    "privateUpdateCallbacksAndPersistentScheduler": "passed",
+    "all18NativeLibrariesAcrossThreeAbis": "passed",
+    "allNativeLibrariesDeflatedNonEmptyAndUnencrypted": "passed",
+    "manifestExtractNativeLibsTrue": "passed",
+    "noDuplicateZipEntries": "passed"
+  },
+  "sizeComparison": {
+    "path": "docs/development-checks/apk-size-v039.json",
+    "after_MiB": 63.543016,
+    "after_decimal_MB": 66.629682,
+    "before_MiB": 159.94536,
+    "before_decimal_MB": 167.714866,
+    "bytes": 101085184,
+    "percent": 60.272048,
+    "xrayFlutterWireguardRawContentUnchanged": true,
+    "installedSizeMeasured": false,
+    "ramMeasured": false
+  },
+  "publication": {
+    "status": "authorized_ready_for_workflow",
+    "workflowDispatched": false,
+    "latestPublishedTag": "v0.38.0",
+    "latestPublishedReleaseId": 454572407,
+    "authorization": "Standing user instruction to publish completed Pushok Flow updates, recorded in AGENTS.md on 2026-11-22."
+  },
+  "physicalDeviceAcceptance": {
+    "status": "pending",
+    "scope": [
+      "actual update and profile preservation on a physical Android device",
+      "real connection with compressed native library packaging",
+      "background download and automatic-install eligibility on a physical device",
+      "installed storage, installation time, startup and RAM"
+    ]
+  }
+}

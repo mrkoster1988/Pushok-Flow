@@ -1,0 +1,395 @@
+{
+  "after": {
+    "apk_bytes": 66629682,
+    "apk_sha256": "42814cb310a312c831a09a9f220d8dd5df037a4feb88068de4c1863142f21b7f",
+    "by_abi": {
+      "arm64-v8a": {
+        "compression_methods": {
+          "DEFLATED": 6
+        },
+        "entry_count": 6,
+        "packed_bytes": 20832390,
+        "raw_bytes": 54779048
+      },
+      "armeabi-v7a": {
+        "compression_methods": {
+          "DEFLATED": 6
+        },
+        "entry_count": 6,
+        "packed_bytes": 21026648,
+        "raw_bytes": 51491432
+      },
+      "x86_64": {
+        "compression_methods": {
+          "DEFLATED": 6
+        },
+        "entry_count": 6,
+        "packed_bytes": 22198476,
+        "raw_bytes": 58728368
+      }
+    },
+    "file_name": "Pushok-Flow-v0.39.0.apk",
+    "missing_expected_native_entries": [],
+    "native_compression_saving_percent": 61.176993,
+    "native_entry_count": 18,
+    "native_packed_bytes": 64057514,
+    "native_raw_bytes": 164998848,
+    "other_entries_and_zip_signing_overhead_bytes": 2572168,
+    "unexpected_native_entries": []
+  },
+  "before": {
+    "apk_bytes": 167714866,
+    "apk_sha256": "71b245180d746cb61c7140e9cbde24f1bf81c4973eb688e119eb2b8ce405411a",
+    "by_abi": {
+      "arm64-v8a": {
+        "compression_methods": {
+          "STORED": 6
+        },
+        "entry_count": 6,
+        "packed_bytes": 54779048,
+        "raw_bytes": 54779048
+      },
+      "armeabi-v7a": {
+        "compression_methods": {
+          "STORED": 6
+        },
+        "entry_count": 6,
+        "packed_bytes": 51491432,
+        "raw_bytes": 51491432
+      },
+      "x86_64": {
+        "compression_methods": {
+          "STORED": 6
+        },
+        "entry_count": 6,
+        "packed_bytes": 58728368,
+        "raw_bytes": 58728368
+      }
+    },
+    "file_name": "Pushok-Flow-v0.38.0.apk",
+    "missing_expected_native_entries": [],
+    "native_compression_saving_percent": 0.0,
+    "native_entry_count": 18,
+    "native_packed_bytes": 164998848,
+    "native_raw_bytes": 164998848,
+    "other_entries_and_zip_signing_overhead_bytes": 2716018,
+    "unexpected_native_entries": []
+  },
+  "download_saving": {
+    "after_MiB": 63.543016,
+    "after_decimal_MB": 66.629682,
+    "before_MiB": 159.94536,
+    "before_decimal_MB": 167.714866,
+    "bytes": 101085184,
+    "percent": 60.272048
+  },
+  "engines": {
+    "Flutter": {
+      "all_expected_entries_present_in_both": true,
+      "all_raw_bytes_identical": true,
+      "changed_or_missing_entries": [],
+      "expected_entry_count": 3
+    },
+    "WireGuard": {
+      "all_expected_entries_present_in_both": true,
+      "all_raw_bytes_identical": true,
+      "changed_or_missing_entries": [],
+      "expected_entry_count": 9
+    },
+    "Xray": {
+      "all_expected_entries_present_in_both": true,
+      "all_raw_bytes_identical": true,
+      "changed_or_missing_entries": [],
+      "expected_entry_count": 3
+    },
+    "app": {
+      "all_expected_entries_present_in_both": true,
+      "all_raw_bytes_identical": false,
+      "changed_or_missing_entries": [
+        "lib/arm64-v8a/libapp.so",
+        "lib/armeabi-v7a/libapp.so",
+        "lib/x86_64/libapp.so"
+      ],
+      "expected_entry_count": 3
+    }
+  },
+  "libraries": {
+    "lib/arm64-v8a/libapp.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 2229931,
+        "raw_bytes": 5637080,
+        "sha256_raw": "30e1ed4cad7ad0a77955928f4db4cba854732b1d4b992092317a3f260732ad26"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 5637080,
+        "raw_bytes": 5637080,
+        "sha256_raw": "2b1c5a8b54f240ee50760b0521d5e5a527d440ac437f9a1e014178b7ca7a70bd"
+      },
+      "raw_bytes_identical": false
+    },
+    "lib/arm64-v8a/libflutter.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 5405033,
+        "raw_bytes": 11346352,
+        "sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 11346352,
+        "raw_bytes": 11346352,
+        "sha256_raw": "897269cb58e4ae58e67be458235a15180eee37dd8a0fd648bfc095798bf1a005"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/arm64-v8a/libgojni.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 11811539,
+        "raw_bytes": 34318696,
+        "sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 34318696,
+        "raw_bytes": 34318696,
+        "sha256_raw": "48f3169c2a1787ff88b6c61069be216264cf1397a0621cecc260485a5e4a9b34"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/arm64-v8a/libwg-go.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 1329201,
+        "raw_bytes": 3365264,
+        "sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 3365264,
+        "raw_bytes": 3365264,
+        "sha256_raw": "68730e8c81b613113249574e22838fd6ce9b1c4da2be2f5fe7c71d651e32b005"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/arm64-v8a/libwg-quick.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 13288,
+        "raw_bytes": 29952,
+        "sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 29952,
+        "raw_bytes": 29952,
+        "sha256_raw": "a032456fbd3b8e577f6b4026ae049c4e7c9056cb7511f77c059e059394cb9092"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/arm64-v8a/libwg.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 43398,
+        "raw_bytes": 81704,
+        "sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 81704,
+        "raw_bytes": 81704,
+        "sha256_raw": "f68dfc2c95e0326e04bf427b055f729f3a51e840f78c8ad177259d42ab2722bc"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/armeabi-v7a/libapp.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 2451701,
+        "raw_bytes": 6193736,
+        "sha256_raw": "135bf39d556fc1ec1d5583d7e4d7614a86882a00efe566a3ff48777fdbff1780"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 6193736,
+        "raw_bytes": 6193736,
+        "sha256_raw": "d40471893d32aaf54666c2ece6f7e7c3e21e8f14e630f27e6acbfb1a52f2a6d4"
+      },
+      "raw_bytes_identical": false
+    },
+    "lib/armeabi-v7a/libflutter.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 4746089,
+        "raw_bytes": 8458404,
+        "sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 8458404,
+        "raw_bytes": 8458404,
+        "sha256_raw": "d5e7b4070acc3aa661a44bcf12fe160a9c57a0d3b077b517d5a6bf9e422164ec"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/armeabi-v7a/libgojni.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 12434632,
+        "raw_bytes": 33594692,
+        "sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 33594692,
+        "raw_bytes": 33594692,
+        "sha256_raw": "0b8a998bf73542747ea4421e152cb2fd8e119dba648879ac06a90359880556a4"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/armeabi-v7a/libwg-go.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 1353374,
+        "raw_bytes": 3174788,
+        "sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 3174788,
+        "raw_bytes": 3174788,
+        "sha256_raw": "2a6570004148c338337d945342326d4c42e71684d36bb2ee999a5d7863408680"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/armeabi-v7a/libwg-quick.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 11898,
+        "raw_bytes": 22736,
+        "sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 22736,
+        "raw_bytes": 22736,
+        "sha256_raw": "59277d78315487b5b53d2569131427d1ce9178a5e01f9655d6664cf224242a7a"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/armeabi-v7a/libwg.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 28954,
+        "raw_bytes": 47076,
+        "sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 47076,
+        "raw_bytes": 47076,
+        "sha256_raw": "8450177309a4884247736579d22fc84242990d3359bd15cc71a66971258b5ad2"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/x86_64/libapp.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 2265786,
+        "raw_bytes": 5833688,
+        "sha256_raw": "256fc53c9f041959a62cc433e35e4665933d32f59f0a13c494c40fa46036bda1"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 5833688,
+        "raw_bytes": 5833688,
+        "sha256_raw": "384e89248d5d40c6fa1b1b09acb99f7b42449c570c81248accddc832092ee861"
+      },
+      "raw_bytes_identical": false
+    },
+    "lib/x86_64/libflutter.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 5599594,
+        "raw_bytes": 12467088,
+        "sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 12467088,
+        "raw_bytes": 12467088,
+        "sha256_raw": "dee9d6ee522b4024edc002953307dca92c731cad84dad2a9e66a329cc2e6436c"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/x86_64/libgojni.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 12857578,
+        "raw_bytes": 36695912,
+        "sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 36695912,
+        "raw_bytes": 36695912,
+        "sha256_raw": "2dd31fa6c0758cc44ee2de1baf82c57fda57539f041a688471f91224b7cd1f5b"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/x86_64/libwg-go.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 1420083,
+        "raw_bytes": 3606928,
+        "sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 3606928,
+        "raw_bytes": 3606928,
+        "sha256_raw": "2793e254ac34ec4df86450866fd924a26b9b9e96cc7ba5f6379badd432da1e76"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/x86_64/libwg-quick.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 13449,
+        "raw_bytes": 31504,
+        "sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 31504,
+        "raw_bytes": 31504,
+        "sha256_raw": "980dcb7125ba08787643a466daaf862113f7338e679bf336da2515fefea85ccd"
+      },
+      "raw_bytes_identical": true
+    },
+    "lib/x86_64/libwg.so": {
+      "after": {
+        "method": "DEFLATED",
+        "packed_bytes": 41986,
+        "raw_bytes": 93248,
+        "sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d"
+      },
+      "before": {
+        "method": "STORED",
+        "packed_bytes": 93248,
+        "raw_bytes": 93248,
+        "sha256_raw": "3852466c726ffe7e0da0d575d3c5f38309ec49c4877b40600e406c5c644b0c9d"
+      },
+      "raw_bytes_identical": true
+    }
+  },
+  "measurement_scope": {
+    "apk_size": "Exact complete ZIP/APK file bytes, including signing overhead.",
+    "app_library": "libapp.so may change because app code/version changes; its differences are reported.",
+    "installed_size": "Not measured; APK size does not include extracted JNI, ART or app data.",
+    "ram_usage": "Not measured; APK compression is not a RAM usage measurement.",
+    "raw_library_identity": "SHA-256 of each decompressed native entry; no files extracted."
+  }
+}
