@@ -1,6 +1,14 @@
 # Pushok Flow: сборка, подпись и проверка Android
 
-## Опубликованный v0.32.0 — 22.11.2026
+## Опубликованный v0.33.0 — 22.11.2026
+
+[Release](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.33.0), точный источник APK `c38e1fe932eb1286e70c231ef8bcc603a15e0beb`, версия `0.33.0+33`. Успешны [Source checks 44985191762](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44985191762), [Android candidate 44985191807](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44985191807) и [публикация 44985728979](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44985728979). Проверки: 143 Python, 175 Flutter, девять Kotlin-наборов, анализатор и полная release-сборка Android.
+
+Точный кандидат подписан постоянным ключом. Проверены `shop.pushok.flow`, версия, minSDK 24, отсутствие debug-флага, подписи v2/v3 и выравнивание. APK — 62 565 248 байт, SHA-256 `faabb6dc8d93ad212aa241a1e79cfe6a083acf03735abe00ccda1f71d723a2f2`. При публикации повторной сборки не было.
+
+Общий манифест обновлений в CI совпал с новым выпуском на 19-й попытке, после 18 старых ответов. Затем прошёл новый путь API → манифест версии. В 07:37 МСК оба пути проверены независимо без авторизации, публичный APK полностью скачан и сверен. [Подробности](RELEASE-v0.33.0.md) · [Наблюдения](release-checks/v0.33.0-public-check.json).
+
+## Предыдущий опубликованный v0.32.0 — 22.11.2026
 
 [Release](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.32.0), исходный коммит APK `c745556a8ac1427527181f546a5386b2a3312a78`, версия `0.32.0+32`. [Source checks 44983226714](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44983226714) и [Android candidate 44983226709](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/44983226709) завершились успешно: 141 Python, 165 Flutter, восемь Kotlin-наборов, анализ Dart и полная сборка Android.
 
