@@ -1,0 +1,847 @@
+{
+  "schema_version": 1,
+  "flow_version": "0.45.0",
+  "recorded_at_utc": "2026-11-22T22:56:25.213499+00:00",
+  "server_release": {
+    "repository": "mrkoster1988/mtproxy-pushok",
+    "version": "1.122",
+    "verified_at_utc": "2026-11-22 22:53:56 UTC",
+    "ref": "refs/heads/release/stable",
+    "before_sha": "0ac83e5832731b456bf8039552098fc956951f7d",
+    "after_sha": "abafe8f23b49c3f4672701a5a1d4858cf626ffa9",
+    "force": false,
+    "lease_checked": true,
+    "ancestry_verified_locally": true,
+    "head_tree": "12934cbeaadeac2adfcc46e12d6e3d930986c816",
+    "released_database_tree_unchanged": "9173c3c767e80ee5e85b486fe28c1fdea3718c26"
+  },
+  "ci": {
+    "repository": "mrkoster1988/mtproxy-pushok",
+    "run_id": 45079335185,
+    "run_url": "https://github.com/mrkoster1988/mtproxy-pushok/actions/runs/45079335185",
+    "workflow": "API and PostgreSQL checks",
+    "run_attempt": 1,
+    "event": "push",
+    "head_branch": "main",
+    "exact_commit": "abafe8f23b49c3f4672701a5a1d4858cf626ffa9",
+    "tree": "12934cbeaadeac2adfcc46e12d6e3d930986c816",
+    "parents": [
+      "ccc0cd28da8660422df2efb051ff41b495f0a100"
+    ],
+    "created_at": "2026-11-22T22:43:52Z",
+    "final_updated_at": "2026-11-22T22:52:41Z",
+    "status": "completed",
+    "conclusion": "success",
+    "all_four_required_gates_success": true,
+    "gates": {
+      "cabinet-preview": {
+        "id": 137383711197,
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-22T22:43:54Z",
+        "completed_at": "2026-11-22T22:52:41Z",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-22T22:43:55Z",
+            "completed_at": "2026-11-22T22:43:55Z"
+          },
+          {
+            "name": "Initialize containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-22T22:43:55Z",
+            "completed_at": "2026-11-22T22:44:06Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-22T22:44:06Z",
+            "completed_at": "2026-11-22T22:44:07Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-22T22:44:07Z",
+            "completed_at": "2026-11-22T22:44:07Z"
+          },
+          {
+            "name": "Install isolated browser dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-22T22:44:07Z",
+            "completed_at": "2026-11-22T22:44:20Z"
+          },
+          {
+            "name": "Verify forms and capture pages using real API and disposable PostgreSQL",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-22T22:44:20Z",
+            "completed_at": "2026-11-22T22:52:37Z"
+          },
+          {
+            "name": "Attach test desktop and mobile interface screenshots",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-22T22:52:37Z",
+            "completed_at": "2026-11-22T22:52:39Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12,
+            "started_at": "2026-11-22T22:52:39Z",
+            "completed_at": "2026-11-22T22:52:39Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13,
+            "started_at": "2026-11-22T22:52:39Z",
+            "completed_at": "2026-11-22T22:52:39Z"
+          },
+          {
+            "name": "Stop containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14,
+            "started_at": "2026-11-22T22:52:39Z",
+            "completed_at": "2026-11-22T22:52:40Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 15,
+            "started_at": "2026-11-22T22:52:40Z",
+            "completed_at": "2026-11-22T22:52:40Z"
+          }
+        ]
+      },
+      "rust-core": {
+        "id": 137383711379,
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-22T22:43:54Z",
+        "completed_at": "2026-11-22T22:49:49Z",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-22T22:43:55Z",
+            "completed_at": "2026-11-22T22:43:56Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-22T22:43:56Z",
+            "completed_at": "2026-11-22T22:43:57Z"
+          },
+          {
+            "name": "Install stable Rust",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-22T22:43:57Z",
+            "completed_at": "2026-11-22T22:43:58Z"
+          },
+          {
+            "name": "Fetch exact upstream source with license validation",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-22T22:43:58Z",
+            "completed_at": "2026-11-22T22:43:59Z"
+          },
+          {
+            "name": "Check pinned Rust patch without changing source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-22T22:43:59Z",
+            "completed_at": "2026-11-22T22:43:59Z"
+          },
+          {
+            "name": "Build modified Rust core, run module tests and verify offline CLI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-22T22:43:59Z",
+            "completed_at": "2026-11-22T22:49:43Z"
+          },
+          {
+            "name": "Verify resulting artifact checksum",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-22T22:49:43Z",
+            "completed_at": "2026-11-22T22:49:43Z"
+          },
+          {
+            "name": "Verify offline CLI, stage the candidate and roll back the marker",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-22T22:49:43Z",
+            "completed_at": "2026-11-22T22:49:44Z"
+          },
+          {
+            "name": "Stage a loopback-only, no-network real TCP listener in disposable Docker",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-22T22:49:44Z",
+            "completed_at": "2026-11-22T22:49:47Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-22T22:49:47Z",
+            "completed_at": "2026-11-22T22:49:47Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 19,
+            "started_at": "2026-11-22T22:49:47Z",
+            "completed_at": "2026-11-22T22:49:47Z"
+          }
+        ]
+      },
+      "test": {
+        "id": 137383711382,
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-22T22:43:54Z",
+        "completed_at": "2026-11-22T22:46:07Z",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-22T22:43:55Z",
+            "completed_at": "2026-11-22T22:43:57Z"
+          },
+          {
+            "name": "Initialize containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-22T22:43:57Z",
+            "completed_at": "2026-11-22T22:44:09Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-22T22:44:09Z",
+            "completed_at": "2026-11-22T22:44:14Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-22T22:44:14Z",
+            "completed_at": "2026-11-22T22:44:14Z"
+          },
+          {
+            "name": "Offline repository preflight (no network or secrets)",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-22T22:44:14Z",
+            "completed_at": "2026-11-22T22:44:15Z"
+          },
+          {
+            "name": "Verify release sources without network or database",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-22T22:44:15Z",
+            "completed_at": "2026-11-22T22:44:17Z"
+          },
+          {
+            "name": "Run pip install -r api/requirements-dev.txt",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-22T22:44:17Z",
+            "completed_at": "2026-11-22T22:44:26Z"
+          },
+          {
+            "name": "Install optional Telegram owner SDK for offline authentication tests",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-22T22:44:26Z",
+            "completed_at": "2026-11-22T22:44:31Z"
+          },
+          {
+            "name": "Install HAProxy for real loopback routing tests",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-22T22:44:31Z",
+            "completed_at": "2026-11-22T22:44:52Z"
+          },
+          {
+            "name": "Run python -m unittest discover -s tests -v",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-22T22:44:52Z",
+            "completed_at": "2026-11-22T22:46:05Z"
+          },
+          {
+            "name": "Run pytest-native payment regressions",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11,
+            "started_at": "2026-11-22T22:46:05Z",
+            "completed_at": "2026-11-22T22:46:05Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 20,
+            "started_at": "2026-11-22T22:46:05Z",
+            "completed_at": "2026-11-22T22:46:06Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 21,
+            "started_at": "2026-11-22T22:46:06Z",
+            "completed_at": "2026-11-22T22:46:06Z"
+          },
+          {
+            "name": "Stop containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 22,
+            "started_at": "2026-11-22T22:46:06Z",
+            "completed_at": "2026-11-22T22:46:06Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 23,
+            "started_at": "2026-11-22T22:46:06Z",
+            "completed_at": "2026-11-22T22:46:06Z"
+          }
+        ]
+      },
+      "compose-smoke": {
+        "id": 137384344077,
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-22T22:46:09Z",
+        "completed_at": "2026-11-22T22:48:18Z",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-22T22:46:10Z",
+            "completed_at": "2026-11-22T22:46:11Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-22T22:46:11Z",
+            "completed_at": "2026-11-22T22:46:12Z"
+          },
+          {
+            "name": "Run bash -n setup.sh",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-22T22:46:12Z",
+            "completed_at": "2026-11-22T22:46:12Z"
+          },
+          {
+            "name": "Run bash -n install_official_docker.sh",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-22T22:46:12Z",
+            "completed_at": "2026-11-22T22:46:12Z"
+          },
+          {
+            "name": "Validate isolated official MTProxy Compose without pulling image",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-22T22:46:12Z",
+            "completed_at": "2026-11-22T22:46:13Z"
+          },
+          {
+            "name": "Run bash -n scripts/staging_preflight.sh",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-22T22:46:13Z",
+            "completed_at": "2026-11-22T22:46:13Z"
+          },
+          {
+            "name": "Check staging preflight with real Compose and synthetic secrets",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-22T22:46:13Z",
+            "completed_at": "2026-11-22T22:46:14Z"
+          },
+          {
+            "name": "Run bash -n scripts/smoke.sh",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-22T22:46:14Z",
+            "completed_at": "2026-11-22T22:46:14Z"
+          },
+          {
+            "name": "Run sh -n scripts/check_backup_restore.sh",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-22T22:46:14Z",
+            "completed_at": "2026-11-22T22:46:14Z"
+          },
+          {
+            "name": "Run sh -n scripts/compose_checks.sh",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-22T22:46:14Z",
+            "completed_at": "2026-11-22T22:46:14Z"
+          },
+          {
+            "name": "Check installer backup, restore and migration rollback in disposable PostgreSQL",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11,
+            "started_at": "2026-11-22T22:46:14Z",
+            "completed_at": "2026-11-22T22:46:31Z"
+          },
+          {
+            "name": "Verify complete cabinet backup and isolated restore drill",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12,
+            "started_at": "2026-11-22T22:46:31Z",
+            "completed_at": "2026-11-22T22:46:50Z"
+          },
+          {
+            "name": "Build private checkout sources and run imports as UID 10001",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13,
+            "started_at": "2026-11-22T22:46:50Z",
+            "completed_at": "2026-11-22T22:47:14Z"
+          },
+          {
+            "name": "Run bash scripts/smoke.sh",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14,
+            "started_at": "2026-11-22T22:47:14Z",
+            "completed_at": "2026-11-22T22:48:16Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 28,
+            "started_at": "2026-11-22T22:48:16Z",
+            "completed_at": "2026-11-22T22:48:16Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 29,
+            "started_at": "2026-11-22T22:48:16Z",
+            "completed_at": "2026-11-22T22:48:16Z"
+          }
+        ]
+      }
+    },
+    "verified_log_results": {
+      "test": {
+        "unittest": {
+          "total": 1325,
+          "seconds": 70.476,
+          "skipped": 9,
+          "passed": 1316
+        },
+        "pytest_payment_regressions_passed": 54,
+        "flow_account_tests_passed": 21,
+        "flow_bot_tests_passed": 5,
+        "expected_unittest_skips": [
+          "test_complete_copy_restores_database_files_and_preserves_service_state (test_cabinet_backup_compose.CabinetBackupComposeTests.test_complete_copy_restores_database_files_and_preserves_service_state) ... skipped 'opt-in isolated cabinet backup/drill'",
+          "test_deleted_api_image_falls_back_and_restores_real_proofs (test_cabinet_backup_compose.CabinetBackupComposeTests.test_deleted_api_image_falls_back_and_restores_real_proofs) ... skipped 'opt-in isolated cabinet backup/drill'",
+          "test_unsafe_proof_aborts_copy_and_restarts_original_writers (test_cabinet_backup_compose.CabinetBackupComposeTests.test_unsafe_proof_aborts_copy_and_restarts_original_writers) ... skipped 'opt-in isolated cabinet backup/drill'",
+          "test_private_checkout_runs_as_nonroot_and_navigation_stays_private (test_image_permissions.ImagePermissionsTests.test_private_checkout_runs_as_nonroot_and_navigation_stays_private) ... skipped 'opt-in isolated Docker image permissions regression'",
+          "test_private_backup_restores_data_and_failed_migration_rolls_back (test_installer_compose.InstallerComposeTests.test_private_backup_restores_data_and_failed_migration_rolls_back) ... skipped 'opt-in disposable installer database'",
+          "test_database_exposure_blocked (test_staging_compose.StagingComposeTests.test_database_exposure_blocked) ... skipped 'opt-in real Compose configuration test'",
+          "test_deferred_telegram_matches_compose_defaults (test_staging_compose.StagingComposeTests.test_deferred_telegram_matches_compose_defaults) ... skipped 'opt-in real Compose configuration test'",
+          "test_installer_config_and_caddy_override (test_staging_compose.StagingComposeTests.test_installer_config_and_caddy_override) ... skipped 'opt-in real Compose configuration test'",
+          "test_secret_override_blocked (test_staging_compose.StagingComposeTests.test_secret_override_blocked) ... skipped 'opt-in real Compose configuration test'"
+        ]
+      },
+      "compose-smoke": {
+        "unit_blocks": [
+          {
+            "total": 4,
+            "seconds": 0.819,
+            "skipped": 0
+          },
+          {
+            "total": 1,
+            "seconds": 16.857,
+            "skipped": 0
+          },
+          {
+            "total": 3,
+            "seconds": 19.659,
+            "skipped": 0
+          },
+          {
+            "total": 1,
+            "seconds": 24.002,
+            "skipped": 0
+          },
+          {
+            "total": 1325,
+            "seconds": 6.878,
+            "skipped": 407
+          }
+        ],
+        "final_smoke_result": "SMOKE OK: миграции, backup/restore, restart, HTTP API, цикл кампании.",
+        "full_smoke_skip_reasons": {
+          "'Нужен отдельный тестовый PostgreSQL'": 264,
+          "'Нужен тестовый PostgreSQL'": 39,
+          "'opt-in isolated cabinet backup/drill'": 3,
+          "'Нужен отдельный PostgreSQL'": 19,
+          "'host-only Git integration; runs in the main CI job'": 1,
+          "'Отдельный тестовый PostgreSQL'": 9,
+          "'opt-in isolated Docker image permissions regression'": 1,
+          "'opt-in disposable installer database'": 1,
+          "'Нужна закреплённая версия Telethon'": 12,
+          "'Только тестовый PostgreSQL с PUSHOK_TEST_DB_ALLOWED=1 и TEST_ADMIN_DSN'": 49,
+          "'Нужен HAProxy для loopback smoke'": 1,
+          "'git отсутствует в минимальном smoke-контейнере'": 1,
+          "'opt-in real Compose configuration test'": 4,
+          "'CLI integration requires Git; runs on the host CI runner'": 1,
+          "'Optional SDK required: scripts/requirements-telegram-owner.txt'": 1,
+          "'Отдельная проверка с Telethon==1.45.0'": 1
+        },
+        "skip_interpretation": "The nine primary opt-in skips run here as 4+1+3+1 successful tests. The final standalone smoke unittest pass omits opt-in PostgreSQL/optional SDK/Compose cases; the primary job ran real PostgreSQL and optional owner SDK tests."
+      },
+      "cabinet-preview": {
+        "real_api_and_disposable_postgresql": true,
+        "required_full_log_markers": [
+          "PASS: delayed /me cannot pair one identity with another cabinet bearer",
+          "PASS: newer Widget login and logout discard late authentication responses",
+          "PASS: initial expired sessions retain only an unbound public Flow intent",
+          "PASS: reload re-reviews the same bounded intent; a new or invalid URL replaces it safely",
+          "PASS: malformed, expired, future and identity-bearing stored intents are discarded",
+          "PASS: unavailable Widget retains an explicit public-code bot/Mini App confirmation path",
+          "PASS: real API/SQL forms, roles, lifecycle, upload/download, reports, routing and mobile widths"
+        ]
+      },
+      "rust-core": {
+        "module_tests": {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        "optimized_build": true,
+        "artifact_checksum_verified": true,
+        "records": {
+          "verified_offline": {
+            "binary_version": "0.027",
+            "checksum_verified": true,
+            "cli_verified": true,
+            "license_verified": true,
+            "runtime_started": false,
+            "sha256": "8169233b20abcec311926670baa73466f7fee98a0b31d98a00755889aa8ae067",
+            "source_commit": "66708d2866f3f3a4541c4fa67984d408e71a8af4",
+            "sponsor_tested": false,
+            "status": "verified_offline",
+            "tcp_tested": false,
+            "telegram_tested": false
+          },
+          "staging_candidate_marked": {
+            "active": true,
+            "marker_only": true,
+            "runtime_changed": false,
+            "status": "staging_candidate_marked"
+          },
+          "staging_marker_rolled_back": {
+            "active": false,
+            "marker_only": true,
+            "runtime_changed": false,
+            "status": "staging_marker_rolled_back"
+          },
+          "isolated_invalid_handshake_survived": {
+            "container_removed": true,
+            "host_runtime_changed": false,
+            "invalid_header_bytes": 64,
+            "listener_survived_malformed_header": true,
+            "mtproxy_handshake_verified": false,
+            "mtproxy_valid_handshake_verified": false,
+            "network_mode": "none",
+            "public_ports": 0,
+            "reconnect_after_malformed_header": true,
+            "rollback_type": "automatic_process_termination",
+            "sponsor_verified": false,
+            "status": "isolated_invalid_handshake_survived",
+            "telegram_verified": false
+          }
+        }
+      }
+    },
+    "artifacts": [
+      {
+        "id": 14776283458,
+        "name": "pushok-cabinet-pages",
+        "size_in_bytes": 23753838,
+        "digest": "sha256:792f7296f5f68c7bfc11ba36032b0b15d540e06c8a728e22f1f593389a094a96",
+        "created_at": "2026-11-22T22:52:39Z",
+        "expires_at": "2026-12-06T22:52:37Z",
+        "workflow_run": {
+          "id": 45079335185,
+          "repository_id": 1448595768,
+          "head_repository_id": 1448595768,
+          "head_branch": "main",
+          "head_sha": "abafe8f23b49c3f4672701a5a1d4858cf626ffa9"
+        }
+      }
+    ],
+    "raw_full_logs_saved": [
+      "cabinet-preview-job-137383711197.log",
+      "rust-core-job-137383711379.log",
+      "test-job-137383711382.log",
+      "compose-smoke-job-137384344077.log"
+    ],
+    "scope_limits": [
+      "Synthetic accounts, isolated databases and loopback-only Rust smoke.",
+      "CI does not independently prove production installation, real Telegram login or physical Android acceptance."
+    ]
+  },
+  "ci_verification": {
+    "root_independently_retrieved_run_and_jobs": true,
+    "all_jobs_exact_head_sha": true,
+    "all_steps_success": true,
+    "full_log_checksums": {
+      "cabinet-preview-job-137383711197.log": {
+        "bytes": 50367,
+        "sha256": "10a5fd8c0a3821d9c7cc2732cc019992e9f57b03cc90f85a6b96bbca5bbe0049"
+      },
+      "rust-core-job-137383711379.log": {
+        "bytes": 62642,
+        "sha256": "1318c3030a6fcefaff30d4424793707a0bd53b7eb9d25fbc7ece1b2d44be8b63"
+      },
+      "test-job-137383711382.log": {
+        "bytes": 330394,
+        "sha256": "33020e65e969cb80ca64a125d667007541dfd52ee330703e55cff2ad37a8dc61"
+      },
+      "compose-smoke-job-137384344077.log": {
+        "bytes": 370701,
+        "sha256": "85596cbf732aa761478541b17f7c35f2f06d37b9f32b2328307f961fb7e20393"
+      }
+    }
+  },
+  "production": {
+    "origin": "https://pushok.shop",
+    "captured_at_utc": "2026-11-22T22:54:44.776707+00:00",
+    "label": "poststable-2",
+    "expected_version": "1.122",
+    "requests": {
+      "/": {
+        "url": "https://pushok.shop/",
+        "method": "GET",
+        "authorization_sent": false,
+        "cookies_sent": false,
+        "observed_at_utc": "2026-11-22T22:54:40.864957+00:00",
+        "body_limit_bytes": 131072,
+        "status": 200,
+        "headers": {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+          "date": "Sun, 22 Nov 2026 22:54:43 GMT",
+          "etag": "\"a157217603d30bf796e2d09e7367937d\"",
+          "last-modified": "Sun, 22 Nov 2026 22:05:59 GMT"
+        },
+        "truncated": false,
+        "captured_body_bytes": 38489,
+        "captured_body_sha256": "b9c37514ea5cda13ee26771c8d269998152841cccbd87ef8c28b476f43c1cae5",
+        "public_body_projection": {
+          "footer_text": "✳ puShok MTProxy Сделано с заботой о вашем канале · v1.121"
+        },
+        "footer_versions": [
+          "1.121"
+        ],
+        "duration_seconds": 3.911
+      },
+      "/api/v1/flow/capabilities": {
+        "url": "https://pushok.shop/api/v1/flow/capabilities",
+        "method": "GET",
+        "authorization_sent": false,
+        "cookies_sent": false,
+        "observed_at_utc": "2026-11-22T22:54:40.865791+00:00",
+        "body_limit_bytes": 8192,
+        "status": 200,
+        "headers": {
+          "content-type": "application/json",
+          "cache-control": "private, no-store",
+          "referrer-policy": "no-referrer",
+          "date": "Sun, 22 Nov 2026 22:54:44 GMT"
+        },
+        "truncated": false,
+        "captured_body_bytes": 90,
+        "captured_body_sha256": "b31824e2370ab282e540b06441341db6f9cbcabfc9a31160cee7555ddfd54e77",
+        "public_body_projection": {
+          "protocol_version": 1,
+          "scopes": [
+            "profile:read",
+            "wallet:read"
+          ],
+          "session_ttl_seconds": 43200
+        },
+        "matches_flow_v1_contract": true,
+        "duration_seconds": 3.826
+      },
+      "/api/v1/public-config": {
+        "url": "https://pushok.shop/api/v1/public-config",
+        "method": "GET",
+        "authorization_sent": false,
+        "cookies_sent": false,
+        "observed_at_utc": "2026-11-22T22:54:40.866220+00:00",
+        "body_limit_bytes": 8192,
+        "status": 200,
+        "headers": {
+          "content-type": "application/json",
+          "date": "Sun, 22 Nov 2026 22:54:43 GMT"
+        },
+        "truncated": false,
+        "captured_body_bytes": 309,
+        "captured_body_sha256": "424c244f158366fd01e4360b48404473b24a2027784548130ec2f2de78813ffd",
+        "public_body_projection": {
+          "telegram_bot_username": "mtproxy_pushok_bot",
+          "proxy_url_present": true,
+          "home_title": "Твой интернет. Твои правила.",
+          "home_subtitle": "Бесплатный доступ в телеграмм (без ВПН)"
+        },
+        "duration_seconds": 3.675
+      },
+      "/api/v1/flow/me": {
+        "url": "https://pushok.shop/api/v1/flow/me",
+        "method": "GET",
+        "authorization_sent": false,
+        "cookies_sent": false,
+        "observed_at_utc": "2026-11-22T22:54:40.866632+00:00",
+        "body_limit_bytes": 8192,
+        "status": 401,
+        "headers": {
+          "content-type": "application/json",
+          "cache-control": "private, no-store",
+          "referrer-policy": "no-referrer",
+          "date": "Sun, 22 Nov 2026 22:54:43 GMT",
+          "www-authenticate": "Bearer"
+        },
+        "truncated": false,
+        "captured_body_bytes": 24,
+        "captured_body_sha256": "782eeaa7f1915f6783146f8180751785584f0f24bd4e503165c7fc4a597da600",
+        "public_body_projection": {
+          "error": "unauthorized"
+        },
+        "duration_seconds": 3.699
+      }
+    },
+    "checks": {
+      "root_http_200": true,
+      "expected_footer_version": false,
+      "flow_capabilities_v1": true,
+      "flow_capabilities_no_store": true,
+      "flow_unauthenticated_me_401": true,
+      "flow_unauthenticated_me_no_store": true,
+      "existing_telegram_bot": true,
+      "root_no_referrer": true
+    },
+    "limits": [
+      "Capabilities alone is static and does not prove that migration 075 ran.",
+      "Unauthenticated /flow/me reaches the Flow database rate/cleanup gate before rejecting absent credentials; 401 is the expected public readiness signal, while 503 is inconclusive/unavailable.",
+      "These anonymous observations do not prove every schema constraint, explicit consent, token exchange, wallet read or real Telegram login.",
+      "A footer version and API behavior do not independently attest the exact deployed Git commit."
+    ],
+    "public_readiness_checks_passed": false
+  },
+  "previous_postpublication_observation": {
+    "captured_at_utc": "2026-11-22T22:54:04.138536+00:00",
+    "footer_versions": [
+      "1.121"
+    ],
+    "checks": {
+      "root_http_200": true,
+      "expected_footer_version": false,
+      "flow_capabilities_v1": true,
+      "flow_capabilities_no_store": true,
+      "flow_unauthenticated_me_401": true,
+      "flow_unauthenticated_me_no_store": true,
+      "existing_telegram_bot": true,
+      "root_no_referrer": true
+    }
+  },
+  "public_miniapp_observation": {
+    "url": "https://pushok.shop/api/v1/miniapp/config",
+    "status": 200,
+    "observed_at_utc": "2026-11-22T22:43:07.642889+00:00",
+    "authorization_sent": false,
+    "cookies_sent": false,
+    "enabled": true,
+    "cache_control": "no-store",
+    "body_sha256": "b26c9f57b41e1fa7343c8daa889ec623d0349727c8689c93f5d004ee4918d309"
+  },
+  "rollout": {
+    "source_published_to_stable": true,
+    "observed_live_version": "1.121",
+    "flow_protocol_v1_public_api_compatible": true,
+    "full_v1_122_deployment_observed": false,
+    "remaining_server_action": "Install MTProxy v1.122 through the existing administrator cabinet and verify the live version.",
+    "administrator_session_available_in_release_environment": false,
+    "real_telegram_and_physical_android_acceptance": "pending",
+    "exact_user_qr_payload_available": false
+  }
+}
