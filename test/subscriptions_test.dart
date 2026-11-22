@@ -86,7 +86,7 @@ void main() {
       if (call.method == 'takePendingLink') {
         return {'url': 'https://example.invalid/sub/PRIVATE_TOKEN'};
       }
-      if (call.method == 'openPushokAccount') return null;
+      if (call.method == 'openPushokAccount') return true;
       return _status();
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));

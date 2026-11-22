@@ -13,6 +13,7 @@ class _Bridge {
   bool connected = false;
   bool imported = false;
   bool protectionAvailable = true;
+  Object? subscriptionStatusError;
   Map<String, Object?>? pending = {'url': _privateUrl, 'name': 'Магазин'};
   final calls = <String>[];
   final leases = <String>{};
@@ -53,6 +54,9 @@ class _Bridge {
   Future<Object?> subscription(MethodCall call) async {
     calls.add(call.method);
     switch (call.method) {
+      case 'status':
+        if (subscriptionStatusError != null) throw subscriptionStatusError!;
+        return subscriptions;
       case 'takePendingLink':
         final value = pending;
         pending = null;
@@ -64,7 +68,7 @@ class _Bridge {
         return subscriptions;
       case 'openPushokAccount':
         expect(call.arguments, isNull);
-        return null;
+        return true;
       default: return subscriptions;
     }
   }
@@ -153,6 +157,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(bridge.calls.where((call) => call == 'openPushokAccount').length, 1);
     expect(bridge.calls, isNot(contains('importSubscription')));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Unavailable subscriptions leave manual server controls usable', (tester) async {
+    final bridge = _Bridge()
+      ..pending = null
+      ..subscriptionStatusError = MissingPluginException('PRIVATE_NATIVE_DETAILS');
+    await _pump(tester, bridge);
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('subscriptions_error')), findsOneWidget);
+    expect(find.textContaining('PRIVATE_NATIVE_DETAILS'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    final edit = find.byKey(const ValueKey('edit_wireguard_profile_$_manualId'));
+    await tester.ensureVisible(edit);
+    expect(tester.widget<OutlinedButton>(edit).onPressed, isNotNull);
+    expect(bridge.calls, isNot(contains('importSubscription')));
+    expect(bridge.calls, isNot(contains('refreshDue')));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

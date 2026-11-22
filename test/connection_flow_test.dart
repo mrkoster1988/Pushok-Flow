@@ -91,6 +91,10 @@ class _AndroidBridge {
   Future<Object?> handle(MethodCall call) async {
     calls.add(call);
     switch (call.method) {
+      case 'status':
+        return {'subscriptions': <Object?>[], 'automaticUpdatesEnabled': true};
+      case 'takePendingLink':
+        return null;
       case 'installedApps':
         return [{'packageName': 'example.browser', 'label': 'Test browser'}];
       case 'getBypass':
@@ -228,6 +232,10 @@ Future<void> _openServers(WidgetTester tester) async {
     of: find.byType(NavigationBar), matching: find.text('Серверы'),
   ));
   await tester.pumpAndSettle();
+  // The subscriptions card precedes the manual profiles. These scenarios
+  // inspect the existing profile controls after bringing that section into view.
+  await tester.ensureVisible(find.byKey(const Key('wireguard_profiles_card')));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _openProfileEditor(WidgetTester tester) async {
@@ -267,6 +275,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('shop.pushok.flow/app_routes');
   const privacyChannel = MethodChannel('shop.pushok.flow/profile_privacy');
+  const subscriptionsChannel = MethodChannel('shop.pushok.flow/subscriptions');
   late _AndroidBridge bridge;
 
   setUp(() {
@@ -275,12 +284,16 @@ void main() {
         .setMockMethodCallHandler(channel, bridge.handle);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(privacyChannel, bridge.handlePrivacy);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(subscriptionsChannel, bridge.handle);
   });
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(privacyChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(subscriptionsChannel, null);
   });
 
   testWidgets('Unavailable exclusion failure offers route repair without dropping saved apps', (tester) async {

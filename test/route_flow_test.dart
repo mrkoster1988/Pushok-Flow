@@ -38,6 +38,10 @@ class _RoutesBridge {
   Future<Object?> handle(MethodCall call) async {
     calls.add(call);
     switch (call.method) {
+      case 'status':
+        return {'subscriptions': <Object?>[], 'automaticUpdatesEnabled': true};
+      case 'takePendingLink':
+        return null;
       case 'recommendationStatus':
         final recommendationRead = nextRecommendationRead;
         nextRecommendationRead = null;
@@ -152,6 +156,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('shop.pushok.flow/app_routes');
   const recommendationsChannel = MethodChannel('shop.pushok.flow/route_recommendations');
+  const subscriptionsChannel = MethodChannel('shop.pushok.flow/subscriptions');
   late _RoutesBridge bridge;
   setUp(() {
     bridge = _RoutesBridge();
@@ -159,12 +164,16 @@ void main() {
         .setMockMethodCallHandler(channel, bridge.handle);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(recommendationsChannel, bridge.handle);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(subscriptionsChannel, bridge.handle);
   });
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(recommendationsChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(subscriptionsChannel, null);
   });
 
   testWidgets('Recommendation refresh needs a tap and preserves every selected route', (tester) async {
