@@ -15,11 +15,13 @@ Map<String, Object?> _status({
   String? error,
   int? checkedAt,
   String? checkStage,
+  bool automatic = true,
+  String? waitingReason,
 }) => {
   'installedVersion': '0.24.0',
   'installedBuild': 24,
   'phase': phase,
-  if (['available', 'downloading', 'ready'].contains(phase)) ...{
+  if (['available', 'downloading', 'ready', 'installing'].contains(phase)) ...{
     'availableVersion': '0.25.0',
     'availableBuild': 25,
   },
@@ -29,6 +31,8 @@ Map<String, Object?> _status({
   'errorCode': error,
   'checkedAtMillis': checkedAt,
   'checkStage': checkStage,
+  'automaticUpdatesEnabled': automatic,
+  'installWaitingReason': waitingReason,
 };
 
 class _UpdatesBridge {
@@ -37,7 +41,10 @@ class _UpdatesBridge {
   Completer<Map<String, Object?>>? checkGate;
   Completer<Map<String, Object?>>? downloadGate;
   Completer<Map<String, Object?>>? statusGate;
+  Completer<void>? automaticGate;
   PlatformException? checkError;
+  PlatformException? automaticError;
+  final automaticArguments = <Object?>[];
 
   int count(String method) => calls.where((call) => call == method).length;
 
@@ -56,13 +63,22 @@ class _UpdatesBridge {
         state = {...state, 'phase': 'checking', 'checkStage': 'release',
           'errorCode': null};
         state = checkGate == null
-            ? _status(phase: 'available') : await checkGate!.future;
+            ? _status(phase: 'available', automatic: state['automaticUpdatesEnabled'] as bool)
+            : await checkGate!.future;
         return state;
       case 'downloadUpdate':
-        state = _status(phase: 'downloading', total: 4096);
+        state = _status(phase: 'downloading', total: 4096,
+          automatic: state['automaticUpdatesEnabled'] as bool);
         state = downloadGate == null
-            ? _status(phase: 'ready') : await downloadGate!.future;
+            ? _status(phase: 'ready', automatic: state['automaticUpdatesEnabled'] as bool)
+            : await downloadGate!.future;
         return state;
+      case 'setAutomaticUpdates':
+        automaticArguments.add(call.arguments);
+        if (automaticGate != null) await automaticGate!.future;
+        if (automaticError != null) throw automaticError!;
+        state = {...state, 'automaticUpdatesEnabled': (call.arguments as Map)['enabled']};
+        return Map<String, Object?>.of(state);
       case 'openInstallPermission':
       case 'installUpdate':
         return Map<String, Object?>.of(state);
@@ -142,6 +158,15 @@ void main() {
       {..._status(phase: 'ready'), 'availableBuild': 23},
       {..._status(phase: 'ready'), 'availableVersion': 'https://SECRET.example'},
       {..._status(), 'installPermissionGranted': 'true'},
+      {..._status()}..remove('automaticUpdatesEnabled'),
+      {..._status(), 'automaticUpdatesEnabled': 'true'},
+      {..._status(), 'automaticUpdatesEnabled': null},
+      {..._status(), 'automaticUpdatesEnabled': 1},
+      {..._status()}..remove('installWaitingReason'),
+      {..._status(), 'installWaitingReason': 'SECRET_NATIVE_DETAIL'},
+      {..._status(), 'installWaitingReason': 1},
+      {..._status(), 'phase': 'installing'},
+      {..._status(phase: 'installing'), 'availableBuild': 24},
       {..._status(), 'totalBytes': -1},
       {..._status(), 'checkedAtMillis': '1000'},
       {..._status(), 'checkedAtMillis': 0},
@@ -155,6 +180,47 @@ void main() {
       expect(() => UpdateStatus.fromMap(data), throwsFormatException);
     }
     expect(() => UpdateStatus.fromMap(null), throwsFormatException);
+  });
+
+  test('Automatic updates default on and installation never changes the reported installed version', () {
+    final initial = UpdateStatus.fromMap(_status());
+    expect(initial.automaticUpdatesEnabled, isTrue);
+    expect(initial.installWaitingReason, isNull);
+    final installing = UpdateStatus.fromMap(_status(phase: 'installing'));
+    expect(installing.phase, UpdatePhase.installing);
+    expect(installing.installedVersion, '0.24.0');
+    expect(installing.installedBuild, 24);
+    expect(installing.availableVersion, '0.25.0');
+    final disabled = UpdateStatus.fromMap(_status(automatic: false));
+    expect(disabled.withPhase(UpdatePhase.checking).automaticUpdatesEnabled, isFalse);
+    expect(disabled.withPhase(UpdatePhase.error,
+      errorCode: 'UPDATE_NETWORK_ERROR').automaticUpdatesEnabled, isFalse);
+    for (final reason in ['permission', 'confirmation', 'connection', 'foreground', 'unsupported']) {
+      for (final phase in ['ready', 'checking', 'downloading']) {
+        expect(UpdateStatus.fromMap(_status(phase: phase,
+          waitingReason: reason)).installWaitingReason, reason);
+      }
+    }
+    for (final code in ['UPDATE_INSTALL_FAILED', 'UPDATE_SCHEDULER_UNAVAILABLE']) {
+      expect(UpdateStatus.fromMap(_status(phase: 'error', error: code)).errorCode, code);
+    }
+  });
+
+  test('A late poll cannot restore automatic updates after a durable opt-out', () async {
+    final updates = AppUpdates(isAndroid: true);
+    await updates.updateStatus();
+    final oldRead = Completer<Map<String, Object?>>();
+    bridge.statusGate = oldRead;
+    final oldResponse = updates.updateStatus();
+    await Future<void>.delayed(Duration.zero);
+    expect((await updates.setAutomaticUpdates(false)).automaticUpdatesEnabled, isFalse);
+    expect(bridge.automaticArguments, [{'enabled': false}]);
+    oldRead.complete(_status(automatic: true));
+    await oldResponse;
+    bridge.checkError = PlatformException(code: 'UPDATE_NETWORK_ERROR');
+    expect((await updates.checkForUpdates()).automaticUpdatesEnabled, isFalse);
+    expect(bridge.count('installUpdate'), 0);
+    expect(bridge.count('openInstallPermission'), 0);
   });
 
   test('Unknown error codes are normalized without retaining exception text', () {
@@ -214,6 +280,7 @@ void main() {
       updates.downloadUpdate(),
       updates.openInstallPermission(),
       updates.installUpdate(),
+      updates.setAutomaticUpdates(false),
     ])) {
       expect(status.phase, UpdatePhase.unavailable);
       expect(status.errorCode, 'UNSUPPORTED_PLATFORM');
@@ -233,7 +300,184 @@ void main() {
     expect(invalid.errorCode, 'UPDATE_STATUS_INVALID');
   });
 
-  testWidgets('Checking, downloading, permission and installation require separate taps', (tester) async {
+  testWidgets('Automatic updates start enabled and permission setup always needs an explicit tap', (tester) async {
+    await _withCard(tester, () async {
+      final automatic = find.byKey(const Key('automatic_app_updates'));
+      expect(tester.widget<SwitchListTile>(automatic).value, isTrue);
+      expect(find.text('Проверка и загрузка в фоне'), findsOneWidget);
+      expect(find.byKey(const Key('allow_app_update_install')), findsOneWidget);
+      expect(bridge.calls, ['updateStatus']);
+      await tester.tap(find.byKey(const Key('allow_app_update_install')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('openInstallPermission'), 1);
+      expect(bridge.count('downloadUpdate'), 0);
+      expect(bridge.count('installUpdate'), 0);
+      expect(bridge.count('setAutomaticUpdates'), 0);
+      await tester.tap(find.byKey(const Key('info_automatic_app_updates')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('примерно раз в 6 часов'), findsOneWidget);
+      expect(find.textContaining('включая мобильную сеть'), findsOneWidget);
+      expect(find.textContaining('если Android позволяет'), findsOneWidget);
+      await tester.tap(find.text('Понятно'));
+      await tester.pumpAndSettle();
+    });
+  });
+
+  testWidgets('Disabling automatic updates waits for saved settings and preserves manual updates', (tester) async {
+    await _withCard(tester, () async {
+      final automatic = find.byKey(const Key('automatic_app_updates'));
+      bridge.automaticGate = Completer<void>();
+      await tester.tap(automatic);
+      await tester.pump();
+      expect(bridge.automaticArguments, [{'enabled': false}]);
+      expect(tester.widget<SwitchListTile>(automatic).value, isTrue);
+      expect(tester.widget<SwitchListTile>(automatic).onChanged, isNull);
+      bridge.automaticGate!.complete();
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      expect(find.text('Обновления по кнопке'), findsOneWidget);
+      expect(find.byKey(const Key('allow_app_update_install')), findsNothing);
+      final readsAfterDisable = bridge.count('updateStatus');
+      await tester.pump(const Duration(seconds: 5));
+      expect(bridge.count('updateStatus'), readsAfterDisable);
+      await tester.tap(find.byKey(const Key('check_app_updates')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('download_app_update')), findsOneWidget);
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      expect(bridge.count('checkForUpdates'), 1);
+      expect(bridge.count('installUpdate'), 0);
+    });
+  });
+
+  testWidgets('Failed automatic setting write preserves the prior setting and hides native details', (tester) async {
+    bridge.automaticError = PlatformException(code: 'UPDATE_STORAGE_ERROR',
+      message: 'SECRET_NATIVE_DETAIL');
+    await _withCard(tester, () async {
+      final automatic = find.byKey(const Key('automatic_app_updates'));
+      await tester.tap(automatic);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(automatic).value, isTrue);
+      expect(find.byKey(const Key('app_update_error')), findsOneWidget);
+      expect(find.textContaining('SECRET'), findsNothing);
+      expect(find.byKey(const Key('check_app_updates')), findsOneWidget);
+      expect(bridge.count('installUpdate'), 0);
+      expect(bridge.count('openInstallPermission'), 0);
+    });
+  });
+
+  testWidgets('Opt-out during a pending download cannot be undone by its late result', (tester) async {
+    bridge.state = _status(phase: 'available', permission: true);
+    final response = Completer<Map<String, Object?>>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'downloadUpdate') {
+        bridge.calls.add(call.method);
+        bridge.state = _status(phase: 'downloading', permission: true, total: 4096);
+        return response.future;
+      }
+      return bridge.handle(call);
+    });
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('download_app_update')));
+      await tester.pump();
+      final automatic = find.byKey(const Key('automatic_app_updates'));
+      expect(tester.widget<SwitchListTile>(automatic).onChanged, isNotNull);
+      await tester.tap(automatic);
+      await tester.pump();
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      bridge.state = _status(phase: 'ready', permission: true, automatic: false);
+      response.complete(_status(phase: 'ready', permission: true, automatic: true));
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+      expect(find.byKey(const Key('install_app_update')), findsOneWidget);
+      expect(bridge.automaticArguments, [{'enabled': false}]);
+      expect(bridge.count('downloadUpdate'), 1);
+      expect(bridge.count('installUpdate'), 0);
+    });
+  });
+
+  testWidgets('Installing polls the actual package version without claiming an early success', (tester) async {
+    bridge.state = _status(phase: 'installing', permission: true);
+    await _withCard(tester, () async {
+      expect(find.text('Установлена версия 0.24.0'), findsOneWidget);
+      expect(find.text('Устанавливаем версию 0.25.0…'), findsOneWidget);
+      expect(find.text('Установлена версия 0.25.0'), findsNothing);
+      expect(find.byKey(const Key('install_app_update')), findsNothing);
+      expect(find.byKey(const Key('check_app_updates')), findsNothing);
+      final initialReads = bridge.count('updateStatus');
+      bridge.state = {..._status(phase: 'current', permission: true),
+        'installedVersion': '0.25.0', 'installedBuild': 25};
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(bridge.count('updateStatus'), initialReads + 1);
+      expect(find.text('Установлена версия 0.25.0'), findsOneWidget);
+      expect(find.byKey(const Key('app_update_installing')), findsNothing);
+      await tester.pump(const Duration(seconds: 3));
+      expect(bridge.count('updateStatus'), initialReads + 1);
+      expect(bridge.count('installUpdate'), 0);
+      expect(bridge.count('openInstallPermission'), 0);
+    }, settle: false);
+  });
+
+  testWidgets('An idle card observes background download through slow local polling without a tap', (tester) async {
+    await _withCard(tester, () async {
+      final initialReads = bridge.count('updateStatus');
+      bridge.state = _status(phase: 'downloading', downloaded: 1024, total: 4096);
+      await tester.pump(const Duration(seconds: 4));
+      expect(bridge.count('updateStatus'), initialReads);
+      expect(find.byKey(const Key('app_update_progress')), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(bridge.count('updateStatus'), initialReads + 1);
+      expect(tester.widget<LinearProgressIndicator>(
+        find.byKey(const Key('app_update_progress'))).value, .25);
+      bridge.state = _status(phase: 'downloading', downloaded: 2048, total: 4096);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(bridge.count('updateStatus'), initialReads + 2);
+      expect(tester.widget<LinearProgressIndicator>(
+        find.byKey(const Key('app_update_progress'))).value, .5);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      final pausedReads = bridge.count('updateStatus');
+      await tester.pump(const Duration(seconds: 10));
+      expect(bridge.count('updateStatus'), pausedReads);
+      expect(bridge.count('checkForUpdates'), 0);
+      expect(bridge.count('downloadUpdate'), 0);
+      expect(bridge.count('installUpdate'), 0);
+      expect(bridge.count('openInstallPermission'), 0);
+    });
+  });
+
+  const waitingMessages = {
+    'permission': 'Один раз разрешите установку обновлений',
+    'confirmation': 'Android ждёт вашего подтверждения',
+    'connection': 'Установка ждёт отключения активного подключения',
+    'foreground': 'когда вы свернёте Pushok Flow',
+    'unsupported': 'Эта версия Android требует подтверждения',
+  };
+  for (final entry in waitingMessages.entries) {
+    testWidgets('Ready update explains ${entry.key} without launching Android UI', (tester) async {
+      bridge.state = _status(phase: 'ready', permission: entry.key != 'permission',
+        waitingReason: entry.key);
+      await _withCard(tester, () async {
+        expect(find.textContaining(entry.value), findsOneWidget);
+        expect(find.text('Установлена версия 0.24.0'), findsOneWidget);
+        expect(find.text('Установлена версия 0.25.0'), findsNothing);
+        expect(find.byKey(const Key('app_update_installing')), findsNothing);
+        if (entry.key == 'permission') {
+          expect(find.byKey(const Key('allow_app_update_install')), findsOneWidget);
+          expect(find.byKey(const Key('install_app_update')), findsNothing);
+        } else if (entry.key == 'connection') {
+          expect(find.byKey(const Key('install_app_update')), findsNothing);
+        } else {
+          expect(find.byKey(const Key('install_app_update')), findsOneWidget);
+        }
+        expect(bridge.calls, ['updateStatus']);
+      });
+    });
+  }
+
+  testWidgets('Manual checking, downloading, permission and installation remain separate actions', (tester) async {
     await _withCard(tester, () async {
       expect(find.text('Установлена версия 0.24.0'), findsOneWidget);
       expect(bridge.calls, ['updateStatus']);
@@ -281,7 +525,7 @@ void main() {
     });
   });
 
-  testWidgets('Download polling pauses in background and stops when the APK is ready', (tester) async {
+  testWidgets('Download polling pauses in background and slows when the APK is ready', (tester) async {
     bridge.state = _status(phase: 'downloading', downloaded: 1024, total: 4096);
     await _withCard(tester, () async {
       final firstReads = bridge.count('updateStatus');
@@ -303,7 +547,8 @@ void main() {
       expect(find.byKey(const Key('install_app_update')), findsOneWidget);
       final completedReads = bridge.count('updateStatus');
       await tester.pump(const Duration(seconds: 5));
-      expect(bridge.count('updateStatus'), completedReads);
+      await tester.pump();
+      expect(bridge.count('updateStatus'), completedReads + 1);
       expect(bridge.count('downloadUpdate'), 0);
       expect(bridge.count('installUpdate'), 0);
     });
@@ -525,7 +770,7 @@ void main() {
     });
   });
 
-  for (final phase in ['checking', 'available', 'ready']) {
+  for (final phase in ['checking', 'available', 'ready', 'installing']) {
     testWidgets('The $phase card fits 320 pixels with enlarged text', (tester) async {
       bridge.state = _status(phase: phase, permission: true,
           checkedAt: DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch,
@@ -533,7 +778,7 @@ void main() {
           error: phase == 'ready' ? 'UPDATE_METADATA_STALE' : null);
       await _withCard(tester, () async {
         expect(find.byKey(const Key('app_update_checked_at')), findsOneWidget);
-        if (phase != 'checking') {
+        if (phase != 'checking' && phase != 'installing') {
           final check = find.byKey(const Key('check_app_updates'));
           await tester.ensureVisible(check);
           await tester.pumpAndSettle();
@@ -541,7 +786,8 @@ void main() {
         }
         expect(tester.takeException(), isNull);
         expect(bridge.count('checkForUpdates'), 0);
-      }, settle: phase != 'checking', textScale: 2, size: const Size(320, 568));
+      }, settle: phase != 'checking' && phase != 'installing',
+        textScale: 2, size: const Size(320, 568));
     });
   }
 

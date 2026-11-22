@@ -19,6 +19,10 @@ java -jar "$out/connection-session-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/tests/UpdatePolicyCheck.kt -include-runtime -d "$out/update-tests.jar"
 java -jar "$out/update-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/UpdateAutomationPolicy.kt \
+  native/android/tests/UpdateAutomationPolicyCheck.kt -include-runtime -d "$out/update-automation-tests.jar"
+java -jar "$out/update-automation-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileProtectionPolicy.kt \
   native/android/tests/ProfileProtectionPolicyCheck.kt -include-runtime -d "$out/profile-protection-tests.jar"
 java -jar "$out/profile-protection-tests.jar"

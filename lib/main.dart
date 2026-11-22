@@ -156,6 +156,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'Запрос разрешения VPN прерван. Повторите подключение.';
         case 'VPN_BUSY':
           return 'Подключение уже изменяется. Дождитесь завершения.';
+        case 'UPDATE_INSTALLING':
+          return 'Android завершает обновление Pushok Flow. Подключитесь после установки.';
         case 'VPN_STATE_UNAVAILABLE':
           return 'Не удалось уточнить состояние туннеля. Обновите диагностику и повторите действие.';
         case 'INVALID_CONFIG':

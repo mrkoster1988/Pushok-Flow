@@ -20,6 +20,8 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
   UpdateStatus? _status;
   Timer? _pollTimer;
   bool _operationPending = false;
+  bool _automaticSettingPending = false;
+  int _automaticSettingRevision = 0;
   int? _activeRefresh;
   int _refreshSequence = 0;
   bool _refreshAgain = false;
@@ -60,11 +62,15 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
 
   void _schedulePoll() {
     _pollTimer?.cancel();
-    if (!mounted || !_foreground ||
-        !{UpdatePhase.checking, UpdatePhase.downloading}.contains(_status?.phase)) {
-      return;
-    }
-    _pollTimer = Timer(const Duration(seconds: 1), () {
+    final status = _status;
+    if (!mounted || !_foreground || status == null) return;
+    final active = {UpdatePhase.checking, UpdatePhase.downloading, UpdatePhase.installing}
+        .contains(status.phase);
+    if (!active && !status.automaticUpdatesEnabled &&
+        !(status.phase == UpdatePhase.ready && status.installWaitingReason == 'connection')) return;
+    // Observe native background work without starting it from the presentation
+    // layer. Idle polling is slower; all polling stops when the app loses focus.
+    _pollTimer = Timer(Duration(seconds: active ? 1 : 5), () {
       unawaited(_refreshStatus());
     });
   }
@@ -100,8 +106,9 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
 
   Future<void> _run(Future<UpdateStatus> Function() action,
       {UpdatePhase? pendingPhase}) async {
-    if (_operationPending || !mounted || !_foreground) return;
+    if (_operationPending || _automaticSettingPending || !mounted || !_foreground) return;
     final lifecycleRevision = _lifecycleRevision;
+    final settingRevision = _automaticSettingRevision;
     _revision++;
     _pollTimer?.cancel();
     _activeRefresh = null;
@@ -117,7 +124,8 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
     _revision++;
     _activeRefresh = null;
     _refreshAgain = false;
-    if (!_foreground || lifecycleRevision != _lifecycleRevision) {
+    if (!_foreground || lifecycleRevision != _lifecycleRevision ||
+        settingRevision != _automaticSettingRevision) {
       // Native work may finish while Android's permission/installer UI is in
       // front, or after a pause/resume. Obtain a new snapshot on return.
       _operationPending = false;
@@ -129,6 +137,60 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
       _status = status;
     });
     _schedulePoll();
+  }
+
+  Future<void> _setAutomaticUpdates(bool enabled) async {
+    if (!mounted || !_foreground || _automaticSettingPending || _status == null ||
+        enabled == _status!.automaticUpdatesEnabled) return;
+    final lifecycleRevision = _lifecycleRevision;
+    final settingRevision = ++_automaticSettingRevision;
+    _revision++;
+    _pollTimer?.cancel();
+    _activeRefresh = null;
+    _refreshAgain = false;
+    setState(() => _automaticSettingPending = true);
+    final status = await _updates.setAutomaticUpdates(enabled);
+    if (!mounted || settingRevision != _automaticSettingRevision) return;
+    _revision++;
+    _activeRefresh = null;
+    _refreshAgain = false;
+    if (!_foreground || lifecycleRevision != _lifecycleRevision) {
+      _automaticSettingPending = false;
+      if (_foreground) unawaited(_refreshStatus());
+      return;
+    }
+    setState(() {
+      _automaticSettingPending = false;
+      _status = status;
+    });
+    _schedulePoll();
+  }
+
+  void _showAutomaticUpdateHelp() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Автообновление'),
+        scrollable: true,
+        content: const Text(
+          'Pushok Flow проверяет новые версии в фоне примерно раз в 6 часов '
+          'и загружает их при доступном интернете, включая мобильную сеть. '
+          'Android выбирает время запуска, поэтому проверка может произойти позже.\n\n'
+          'Проверенный файл устанавливается автоматически, если Android позволяет. '
+          'Установка ждёт отключения активного подключения и выхода из Pushok Flow. '
+          'На некоторых устройствах потребуется ваше подтверждение.\n\n'
+          'Один раз разрешите установку обновлений для Pushok Flow в настройках Android. '
+          'Они откроются только по кнопке «Разрешить установку». '
+          'Удалять приложение не нужно.\n\n'
+          'Если автообновление выключено, проверить, скачать и установить новую '
+          'версию можно вручную в этом разделе.',
+        ),
+        actions: [TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Понятно'),
+        )],
+      ),
+    );
   }
 
   String _errorMessage(String? code) {
@@ -154,6 +216,10 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
         return 'Файл обновления не прошёл проверку. Скачайте его заново.';
       case 'UPDATE_STORAGE_ERROR':
         return 'Не удалось сохранить обновление. Проверьте свободное место и попробуйте снова.';
+      case 'UPDATE_INSTALL_FAILED':
+        return 'Android не установил обновление. Попробуйте установить его ещё раз.';
+      case 'UPDATE_SCHEDULER_UNAVAILABLE':
+        return 'Не удалось настроить фоновые обновления. Попробуйте ещё раз или обновите приложение вручную.';
       case 'UPDATE_NOT_READY':
         return 'Обновление ещё не готово к установке. Скачайте его заново.';
       case 'UPDATE_INTERRUPTED':
@@ -184,11 +250,27 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
       required IconData icon, required Future<UpdateStatus> Function() action,
       UpdatePhase? pendingPhase}) => FilledButton.icon(
     key: key,
-    onPressed: _operationPending || !_foreground ? null
+    onPressed: _operationPending || _automaticSettingPending || !_foreground ? null
         : () => _run(action, pendingPhase: pendingPhase),
     icon: Icon(icon),
     label: Text(label, textAlign: TextAlign.center),
   );
+
+  String _readyMessage(UpdateStatus status) {
+    if (!status.installPermissionGranted || status.installWaitingReason == 'permission') {
+      return 'Файл проверен. Один раз разрешите установку обновлений для Pushok Flow '
+          'в настройках Android, затем вернитесь сюда.';
+    }
+    return switch (status.installWaitingReason) {
+      'confirmation' => 'Файл проверен. Android ждёт вашего подтверждения установки.',
+      'connection' => 'Файл проверен. Установка ждёт отключения активного подключения.',
+      'foreground' => 'Файл проверен. Автоустановка продолжится, когда вы свернёте Pushok Flow.',
+      'unsupported' => 'Файл проверен. Эта версия Android требует подтверждения установки.',
+      _ => status.automaticUpdatesEnabled
+          ? 'Файл проверен. Обновление установится автоматически, если Android позволяет.'
+          : 'Файл проверен. Можно установить обновление поверх текущей версии.',
+    };
+  }
 
   List<Widget> _body(UpdateStatus status) {
     final body = <Widget>[];
@@ -196,8 +278,10 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
         status.errorCode == 'UPDATE_INCOMPATIBLE';
     switch (status.phase) {
       case UpdatePhase.idle:
-        body.add(const Text('Новые версии можно скачать и установить здесь.',
-            style: TextStyle(color: PushokPalette.muted)));
+        body.add(Text(status.automaticUpdatesEnabled
+            ? 'Новые версии проверяются и загружаются в фоне.'
+            : 'Новые версии можно скачать и установить здесь.',
+            style: const TextStyle(color: PushokPalette.muted)));
         break;
       case UpdatePhase.checking:
         body.add(Row(children: [
@@ -250,11 +334,20 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
               style: const TextStyle(color: PushokPalette.mint,
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-          Text(status.installPermissionGranted
-              ? 'Android попросит подтвердить обновление. Удалять приложение не нужно.'
-              : 'Разрешите установку обновлений для Pushok Flow в настройках Android, затем вернитесь сюда.',
+          Text(_readyMessage(status), key: const Key('app_update_install_waiting'),
               style: const TextStyle(color: PushokPalette.muted)),
         ]);
+        break;
+      case UpdatePhase.installing:
+        body.add(Row(children: [
+          const SizedBox(width: 18, height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 12),
+          Expanded(child: Semantics(liveRegion: true, child: Text(
+            'Устанавливаем версию ${status.availableVersion}…',
+            key: const Key('app_update_installing'),
+          ))),
+        ]));
         break;
       case UpdatePhase.unavailable:
         if (!unavailableError) {
@@ -290,21 +383,41 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
       )));
     }
 
+    if (status.automaticUpdatesEnabled && !status.installPermissionGranted &&
+        {UpdatePhase.idle, UpdatePhase.current, UpdatePhase.available}.contains(status.phase)) {
+      body.addAll([
+        const SizedBox(height: 12),
+        const Text('Для установки нужно один раз разрешить её в Android.',
+            style: TextStyle(color: PushokPalette.muted)),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('allow_app_update_install'),
+          onPressed: _operationPending || _automaticSettingPending || !_foreground
+              ? null : () => _run(_updates.openInstallPermission),
+          icon: const Icon(Icons.settings_outlined),
+          label: const Text('Разрешить установку', textAlign: TextAlign.center),
+        ),
+      ]);
+    }
+
     Widget? action;
     if (status.phase == UpdatePhase.available) {
       action = _button(key: const Key('download_app_update'), label: 'Скачать',
           icon: Icons.download_outlined, action: _updates.downloadUpdate,
           pendingPhase: UpdatePhase.downloading);
-    } else if (status.phase == UpdatePhase.ready) {
+    } else if (status.phase == UpdatePhase.ready && status.installWaitingReason != 'connection') {
       action = status.installPermissionGranted
           ? _button(key: const Key('install_app_update'),
-              label: 'Установить обновление', icon: Icons.system_update_alt,
+              label: status.installWaitingReason == 'confirmation'
+                  ? 'Подтвердить установку' : 'Установить обновление',
+              icon: Icons.system_update_alt,
               action: _updates.installUpdate)
           : _button(key: const Key('allow_app_update_install'),
               label: 'Разрешить установку', icon: Icons.settings_outlined,
               action: _updates.openInstallPermission);
     } else if (status.phase != UpdatePhase.downloading &&
         status.phase != UpdatePhase.checking &&
+        status.phase != UpdatePhase.installing && status.phase != UpdatePhase.ready &&
         status.errorCode != 'UNSUPPORTED_PLATFORM' &&
         status.errorCode != 'UPDATES_UNAVAILABLE') {
       action = _button(key: const Key('check_app_updates'),
@@ -317,7 +430,7 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
         const SizedBox(height: 8),
         OutlinedButton.icon(
           key: const Key('check_app_updates'),
-          onPressed: _operationPending || !_foreground ? null
+          onPressed: _operationPending || _automaticSettingPending || !_foreground ? null
               : () => _run(_updates.checkForUpdates,
                   pendingPhase: UpdatePhase.checking),
           icon: const Icon(Icons.refresh),
@@ -331,11 +444,17 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
   @override
   Widget build(BuildContext context) => PushokPanel(
     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      const Row(children: [
-        Icon(Icons.system_update_alt),
-        SizedBox(width: 12),
-        Expanded(child: Text('Версия и обновления',
+      Row(children: [
+        const Icon(Icons.system_update_alt),
+        const SizedBox(width: 12),
+        const Expanded(child: Text('Версия и обновления',
             style: TextStyle(fontWeight: FontWeight.w700))),
+        IconButton(
+          key: const Key('info_automatic_app_updates'),
+          tooltip: 'Об автообновлении',
+          onPressed: _showAutomaticUpdateHelp,
+          icon: const Icon(Icons.info_outline),
+        ),
       ]),
       const SizedBox(height: 12),
       if (_status == null)
@@ -345,6 +464,18 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
         if (_status!.installedVersion.isNotEmpty && _status!.installedBuild > 0) ...[
           Text('Установлена версия ${_status!.installedVersion}',
               key: const Key('installed_app_version')),
+          SwitchListTile.adaptive(
+            key: const Key('automatic_app_updates'),
+            contentPadding: EdgeInsets.zero,
+            value: _status!.automaticUpdatesEnabled,
+            onChanged: _automaticSettingPending || !_foreground
+                ? null : _setAutomaticUpdates,
+            title: const Text('Автообновление'),
+            subtitle: Text(_automaticSettingPending ? 'Сохраняем настройку…'
+                : _status!.automaticUpdatesEnabled ? 'Проверка и загрузка в фоне'
+                : 'Обновления по кнопке',
+                style: const TextStyle(color: PushokPalette.muted)),
+          ),
           const SizedBox(height: 12),
         ],
         ..._body(_status!),

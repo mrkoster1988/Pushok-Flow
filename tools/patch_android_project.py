@@ -7,6 +7,8 @@ ANDROID_URI = "http://schemas.android.com/apk/res/android"
 ANDROID = "{" + ANDROID_URI + "}"
 VPN_SERVICE = "com.wireguard.android.backend.GoBackend$VpnService"
 UPDATE_PROVIDER = "shop.pushok.flow.UpdateFileProvider"
+UPDATE_INSTALL_RECEIVER = "shop.pushok.flow.UpdateInstallReceiver"
+UPDATE_REPLACED_RECEIVER = "shop.pushok.flow.UpdateReplacedReceiver"
 QR_ACTIVITY = "shop.pushok.flow.WireGuardQrActivity"
 XRAY_SERVICE = "shop.pushok.flow.XrayVpnService"
 TOOLS_URI = "http://schemas.android.com/tools"
@@ -30,8 +32,9 @@ def patch_manifest(path: Path) -> None:
         if service.get(ANDROID + "name") == VPN_SERVICE:
             app.remove(service)
 
-    # VPN/update downloads and Android's user-confirmed package installer.
+    # Self-updates still require Android's per-source install authorization.
     for permission_name in ("android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
+                            "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION",
                             "android.permission.CAMERA", "android.permission.ACCESS_NETWORK_STATE",
                             "android.permission.FOREGROUND_SERVICE",
                             "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"):
@@ -116,6 +119,23 @@ def patch_manifest(path: Path) -> None:
     path_metadata.set(ANDROID + "name", "android.support.FILE_PROVIDER_PATHS")
     path_metadata.set(ANDROID + "resource", "@xml/update_paths")
 
+    # The installer callback is explicit; only Android can deliver the protected
+    # package-replaced event. Keep both in the coordinator's default process.
+    for name, action in ((UPDATE_INSTALL_RECEIVER, None),
+                         (UPDATE_REPLACED_RECEIVER, "android.intent.action.MY_PACKAGE_REPLACED")):
+        short_name = name.rsplit(".", 1)[1]
+        receivers = [item for item in app.findall("receiver")
+                     if item.get(ANDROID + "name") in (name, "." + short_name, short_name)]
+        receiver = receivers[0] if receivers else ET.SubElement(app, "receiver")
+        for duplicate in receivers[1:]:
+            app.remove(duplicate)
+        receiver.clear()
+        receiver.set(ANDROID + "name", name)
+        receiver.set(ANDROID + "exported", "false")
+        if action is not None:
+            intent_filter = ET.SubElement(receiver, "intent-filter")
+            ET.SubElement(intent_filter, "action", {ANDROID + "name": action})
+
     # Flutter already adds PROCESS_TEXT queries. Merge launcher visibility into
     # that block rather than treating any existing queries as sufficient.
     queries = manifest.findall("queries")
@@ -147,6 +167,7 @@ def patch_project(root: Path) -> None:
     s = gradle.read_text(encoding="utf-8")
     for dep in ('implementation("com.wireguard.android:tunnel:1.0.20260102")',
                 'implementation("androidx.core:core:1.17.0")',
+                'implementation("androidx.work:work-runtime:2.11.2")',
                 'implementation("com.journeyapps:zxing-android-embedded:4.3.0")',
                 'implementation("com.google.zxing:core:3.5.4")',
                 'implementation(files("libs/libXray-v26.11.9.aar"))'):

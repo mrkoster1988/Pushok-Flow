@@ -115,7 +115,8 @@ dependencies {
         self.assertEqual(sorted(p.get(ANDROID + "name") for p in manifest.findall("uses-permission")),
                          ["android.permission.ACCESS_NETWORK_STATE", "android.permission.CAMERA",
                           "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
-                          "android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"])
+                          "android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
+                          "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION"])
 
     def test_update_provider_is_private_and_preserves_other_providers(self):
         self.write_manifest(services='''<provider android:name="shop.pushok.flow.UpdateFileProvider"
@@ -143,6 +144,75 @@ dependencies {
                 self.assertEqual(app.get(ANDROID + "allowBackup"), "false")
                 self.assertEqual([service.get(ANDROID + "name") for service in app.findall("service")],
                                  [".OtherService", PATCH.XRAY_SERVICE])
+
+    def test_update_receivers_are_private_deduplicated_and_keep_unrelated_receiver(self):
+        self.write_manifest(services='''<receiver android:name=".UpdateInstallReceiver"
+            android:exported="true" android:process=":old"><intent-filter /></receiver>
+            <receiver android:name="shop.pushok.flow.UpdateInstallReceiver" />
+            <receiver android:name=".UpdateReplacedReceiver" android:exported="true">
+                <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+            </receiver><receiver android:name="example.OtherReceiver" android:exported="false" />''')
+        app = self.patch().find('application')
+        receivers = {item.get(ANDROID + 'name'): item for item in app.findall('receiver')}
+        self.assertEqual(len(receivers), 3)
+        self.assertIn('example.OtherReceiver', receivers)
+        install = receivers[PATCH.UPDATE_INSTALL_RECEIVER]
+        replaced = receivers[PATCH.UPDATE_REPLACED_RECEIVER]
+        for receiver in (install, replaced):
+            self.assertEqual(receiver.get(ANDROID + 'exported'), 'false')
+            self.assertIsNone(receiver.get(ANDROID + 'process'))
+        self.assertEqual(install.findall('intent-filter'), [])
+        self.assertEqual([item.get(ANDROID + 'name') for item in replaced.findall('intent-filter/action')],
+                         ['android.intent.action.MY_PACKAGE_REPLACED'])
+        MANIFEST_CHECK.validate(self.manifest)
+
+    def test_source_gate_rejects_unsafe_update_receivers(self):
+        for name in (PATCH.UPDATE_INSTALL_RECEIVER, PATCH.UPDATE_REPLACED_RECEIVER):
+            for mode in ('missing', 'duplicate', 'exported', 'process', 'filter'):
+                with self.subTest(name=name, mode=mode):
+                    self.write_manifest()
+                    manifest = self.patch()
+                    app = manifest.find('application')
+                    receiver = next(item for item in app.findall('receiver')
+                                    if item.get(ANDROID + 'name') == name)
+                    if mode == 'missing':
+                        app.remove(receiver)
+                    elif mode == 'duplicate':
+                        ET.SubElement(app, 'receiver', {ANDROID + 'name': '.' + name.rsplit('.', 1)[1],
+                                                       ANDROID + 'exported': 'false'})
+                    elif mode == 'filter':
+                        extra = ET.SubElement(receiver, 'intent-filter')
+                        ET.SubElement(extra, 'action', {ANDROID + 'name': 'example.unsafe'})
+                    else:
+                        receiver.set(ANDROID + mode, 'true' if mode == 'exported' else ':other')
+                    ET.ElementTree(manifest).write(self.manifest)
+                    with self.assertRaisesRegex(ValueError, 'Update'):
+                        MANIFEST_CHECK.validate(self.manifest)
+
+    def test_source_gate_requires_update_install_permissions(self):
+        for name in ('android.permission.REQUEST_INSTALL_PACKAGES',
+                     'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION'):
+            with self.subTest(name=name):
+                self.write_manifest()
+                manifest = self.patch()
+                manifest.remove(next(item for item in manifest.findall('uses-permission')
+                                     if item.get(ANDROID + 'name') == name))
+                ET.ElementTree(manifest).write(self.manifest)
+                with self.assertRaisesRegex(ValueError, 'Background update'):
+                    MANIFEST_CHECK.validate(self.manifest)
+
+    def test_source_gate_rejects_exposed_or_wrong_update_provider(self):
+        for attribute, value in (('exported', 'true'), ('grantUriPermissions', 'false'),
+                                 ('authorities', 'example.updates')):
+            with self.subTest(attribute=attribute):
+                self.write_manifest()
+                manifest = self.patch()
+                provider = next(item for item in manifest.findall('application/provider')
+                                if item.get(ANDROID + 'name') == PATCH.UPDATE_PROVIDER)
+                provider.set(ANDROID + attribute, value)
+                ET.ElementTree(manifest).write(self.manifest)
+                with self.assertRaisesRegex(ValueError, 'Update FileProvider'):
+                    MANIFEST_CHECK.validate(self.manifest)
 
     def test_repeated_bootstrap_is_byte_for_byte_idempotent(self):
         self.write_manifest(queries=PROCESS_TEXT, backup='android:allowBackup="true"')
@@ -190,7 +260,8 @@ dependencies {
         self.assertEqual(list(generic[0]), [])
         self.patch()
         gradle = self.gradle.read_text()
-        for dependency in ('com.journeyapps:zxing-android-embedded:4.3.0', 'com.google.zxing:core:3.5.4'):
+        for dependency in ('com.journeyapps:zxing-android-embedded:4.3.0', 'com.google.zxing:core:3.5.4',
+                           'androidx.work:work-runtime:2.11.2'):
             self.assertEqual(gradle.count(f'implementation("{dependency}")'), 1)
         MANIFEST_CHECK.validate(self.manifest)
 
@@ -282,6 +353,8 @@ class BootstrapScriptTests(unittest.TestCase):
             "MainActivity.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
             "XrayConfig.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
+            "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",
+            "UpdateAutomationPolicy.kt",
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportReader.kt", "ProfileQrDecoder.kt",
             "ProfileQrImageReader.kt", "ProfileQrSession.kt", "WireGuardQrActivity.kt",
@@ -295,7 +368,7 @@ class BootstrapScriptTests(unittest.TestCase):
         native_resources = self.project / "native/android/app/src/main/res/xml"
         native_resources.mkdir(parents=True)
         (native_resources / "update_paths.xml").write_text(
-            '<paths><cache-path name="updates" path="updates/" /></paths>\n', encoding="utf-8")
+            '<paths><files-path name="updates" path="updates/" /></paths>\n', encoding="utf-8")
 
         # The fake executable emits Android files plus the real create command's
         # unrelated app/test templates. The bootstrap must copy only Android.
@@ -383,7 +456,7 @@ sys.exit(int(os.environ.get("FLOW_STUB_EXIT", "0")))
         self.assertTrue((android / "gradle/wrapper/gradle-wrapper.properties").exists())
         self.assertFalse((android / "app/src/main/kotlin/shop/pushok/pushok_flow/MainActivity.kt").exists())
         self.assertEqual((android / "app/src/main/res/xml/update_paths.xml").read_text(),
-                         '<paths><cache-path name="updates" path="updates/" /></paths>\n')
+                         '<paths><files-path name="updates" path="updates/" /></paths>\n')
         for name in self.native_names:
             self.assertEqual((android / "app/src/main/kotlin/shop/pushok/flow" / name).read_text(),
                              f"// Pushok native {name}\n")

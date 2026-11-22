@@ -26,7 +26,10 @@ class SessionSafetyTests(TestCase):
     def test_mutually_exclusive_connect_disconnect(self):
         src = ACTIVITY.read_text()
         self.assertGreaterEqual(src.count('Session.operationInProgress.acquire()'), 3)
-        self.assertGreaterEqual(src.count('Session.operationInProgress.release(token)'), 3)
+        self.assertGreaterEqual(src.count('releaseOperation(token)'), 3)
+        release = src.split('private fun releaseOperation(', 1)[1].split('private fun stopTunnels(', 1)[0]
+        self.assertIn('Session.operationInProgress.release(token)', release)
+        self.assertIn('appUpdates.endConnection(token)', release)
 
     def test_route_changes_blocked_during_transition(self):
         src = ACTIVITY.read_text()
@@ -41,7 +44,7 @@ class SessionSafetyTests(TestCase):
         self.assertIn('if (state.connected) throw RouteSettingsFailure("VPN_ACTIVE")', routes)
         self.assertLess(routes.index('if (!state.known)'), routes.index('routeStore.replace(request)'))
         self.assertLess(routes.index('if (state.connected)'), routes.index('routeStore.replace(request)'))
-        self.assertIn('Session.operationInProgress.release(token)', routes)
+        self.assertIn('releaseOperation(token)', routes)
 
     def test_error_does_not_leak_profile_to_ui(self):
         src = ACTIVITY.read_text()

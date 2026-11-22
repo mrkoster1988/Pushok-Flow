@@ -16,6 +16,17 @@ QR_IMPORT_VERSION_CODE = 35
 QR_ACTIVITY = 'shop.pushok.flow.WireGuardQrActivity'
 XRAY_VERSION_CODE = 36
 XRAY_SERVICE = 'shop.pushok.flow.XrayVpnService'
+AUTO_UPDATE_VERSION_CODE = 37
+UPDATE_INSTALL_RECEIVER = 'shop.pushok.flow.UpdateInstallReceiver'
+UPDATE_REPLACED_RECEIVER = 'shop.pushok.flow.UpdateReplacedReceiver'
+UPDATE_PROVIDER = 'shop.pushok.flow.UpdateFileProvider'
+WORK_JOB_SERVICE = 'androidx.work.impl.background.systemjob.SystemJobService'
+WORK_INITIALIZER_PROVIDER = 'androidx.startup.InitializationProvider'
+UPDATE_PERMISSIONS = {
+    'android.permission.REQUEST_INSTALL_PACKAGES',
+    'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION',
+    'android.permission.ACCESS_NETWORK_STATE',
+}
 STORAGE_PERMISSIONS = {
     'android.permission.READ_EXTERNAL_STORAGE',
     'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -53,6 +64,30 @@ def element_attributes(tree: str, tag: str) -> list[str]:
     return ['\n'.join(attributes) for attributes in result]
 
 
+def element_blocks(tree: str, tag: str) -> list[str]:
+    """Keep children within their own aapt xmltree element, excluding siblings."""
+    lines = tree.splitlines()
+    result = []
+    for index, line in enumerate(lines):
+        element = re.match(rf'^(\s*)E: {re.escape(tag)}(?:\s|$)', line)
+        if not element:
+            continue
+        indent = len(element[1])
+        block = [line]
+        for following in lines[index + 1:]:
+            next_element = re.match(r'^(\s*)E: ', following)
+            if next_element and len(next_element[1]) <= indent:
+                break
+            block.append(following)
+        result.append('\n'.join(block))
+    return result
+
+
+def has_attribute(attributes: str, name: str) -> bool:
+    return bool(re.search(rf'^\s*A: android:{re.escape(name)}(?:\([^)]*\))?=',
+                          attributes, re.MULTILINE))
+
+
 def attribute_value(attributes: str, name: str) -> str | None:
     matches = re.findall(
         rf'^\s*A: android:{re.escape(name)}(?:\([^)]*\))?=(.*)$',
@@ -69,6 +104,11 @@ def string_attribute(attributes: str, name: str) -> str | None:
 def is_false_attribute(attributes: str, name: str) -> bool:
     value = attribute_value(attributes, name)
     return bool(re.match(r'^\(type 0x12\)0x0\b', value or ''))
+
+
+def is_true_attribute(attributes: str, name: str) -> bool:
+    value = attribute_value(attributes, name)
+    return bool(re.match(r'^\(type 0x12\)0x(?:ffffffff|1)\b', value or ''))
 
 
 def check_qr_import_manifest(tree: str, permissions: set[str]) -> None:
@@ -161,7 +201,93 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
         check_xray_manifest(manifest.stdout, declared_permissions)
         check_xray_libraries(path)
         print('APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified')
+    if version_code >= AUTO_UPDATE_VERSION_CODE:
+        check_update_manifest(manifest.stdout, declared_permissions)
+        print('APK private update callbacks, persistent scheduler and install permissions verified')
     print('APK package, INTERNET and WireGuard VPN service checks passed')
+
+
+def check_update_manifest(tree: str, permissions: set[str]) -> None:
+    """Gate the app's update surface and the essential merged WorkManager entry points."""
+    if not UPDATE_PERMISSIONS <= permissions:
+        raise ValueError('Automatic update permissions missing')
+    declarations = element_attributes(tree, 'uses-permission')
+    for name in sorted(UPDATE_PERMISSIONS):
+        matches = [item for item in declarations if string_attribute(item, 'name') == name]
+        if len(matches) != 1 or has_attribute(matches[0], 'maxSdkVersion'):
+            raise ValueError('Update permission must be declared once without maxSdkVersion')
+
+    def main_process(attributes: str, description: str) -> None:
+        if (has_attribute(attributes, 'process') and
+                string_attribute(attributes, 'process') != 'shop.pushok.flow'):
+            raise ValueError(f'{description} must use the default app process')
+        if has_attribute(attributes, 'enabled') and not is_true_attribute(attributes, 'enabled'):
+            raise ValueError(f'{description} must not be disabled')
+
+    applications = element_attributes(tree, 'application')
+    if len(applications) != 1:
+        raise ValueError('Expected exactly one application for updater')
+    main_process(applications[0], 'Update application')
+
+    def component(tag: str, name: str) -> tuple[str, str]:
+        names = {name}
+        if name.startswith('shop.pushok.flow.'):
+            short = name.removeprefix('shop.pushok.flow.')
+            names.update({short, '.' + short})
+        matches = []
+        for block in element_blocks(tree, tag):
+            attributes = element_attributes(block, tag)[0]
+            if string_attribute(attributes, 'name') in names:
+                matches.append((block, attributes))
+        if len(matches) != 1:
+            raise ValueError(f'Expected exactly one {name}')
+        main_process(matches[0][1], name)
+        return matches[0]
+
+    callback, attributes = component('receiver', UPDATE_INSTALL_RECEIVER)
+    if not is_false_attribute(attributes, 'exported'):
+        raise ValueError('Update install receiver must be explicitly exported=false')
+    if element_blocks(callback, 'intent-filter'):
+        raise ValueError('Update install callback must not have intent filters')
+
+    replaced, attributes = component('receiver', UPDATE_REPLACED_RECEIVER)
+    if not is_false_attribute(attributes, 'exported'):
+        raise ValueError('Update replaced receiver must be explicitly exported=false')
+    filters = element_blocks(replaced, 'intent-filter')
+    if len(filters) != 1:
+        raise ValueError('Update replaced receiver must have one MY_PACKAGE_REPLACED filter')
+    actions = element_attributes(filters[0], 'action')
+    children = re.findall(r'^\s*E: ([\w-]+)(?:\s|$)', filters[0], re.MULTILINE)
+    if (children != ['intent-filter', 'action'] or len(actions) != 1 or
+            string_attribute(actions[0], 'name') != 'android.intent.action.MY_PACKAGE_REPLACED'):
+        raise ValueError('Update replaced receiver must handle only MY_PACKAGE_REPLACED')
+
+    _, provider = component('provider', UPDATE_PROVIDER)
+    if (not is_false_attribute(provider, 'exported') or
+            not is_true_attribute(provider, 'grantUriPermissions') or
+            string_attribute(provider, 'authorities') != 'shop.pushok.flow.updates'):
+        raise ValueError('Update FileProvider must be private with explicit URI grants and own authority')
+
+    # Check the stable trust boundaries, not every AndroidX service/receiver or
+    # their resource-valued enabled flags. WorkManager manages those flags itself.
+    job_blocks = [block for block in element_blocks(tree, 'service')
+                  if string_attribute(element_attributes(block, 'service')[0], 'name') == WORK_JOB_SERVICE]
+    if len(job_blocks) != 1:
+        raise ValueError('Expected exactly one WorkManager SystemJobService')
+    job = element_attributes(job_blocks[0], 'service')[0]
+    if (not is_true_attribute(job, 'exported') or
+            string_attribute(job, 'permission') != 'android.permission.BIND_JOB_SERVICE' or
+            (has_attribute(job, 'process') and string_attribute(job, 'process') != 'shop.pushok.flow')):
+        raise ValueError('WorkManager SystemJobService must be protected by BIND_JOB_SERVICE in app process')
+
+    initializer, attributes = component('provider', WORK_INITIALIZER_PROVIDER)
+    if (not is_false_attribute(attributes, 'exported') or
+            string_attribute(attributes, 'authorities') != 'shop.pushok.flow.androidx-startup'):
+        raise ValueError('WorkManager initializer provider must be private with own authority')
+    metadata = [item for item in element_attributes(initializer, 'meta-data')
+                if string_attribute(item, 'name') == 'androidx.work.WorkManagerInitializer']
+    if len(metadata) != 1 or string_attribute(metadata[0], 'value') != 'androidx.startup':
+        raise ValueError('WorkManager default initializer missing or duplicated')
 
 
 def check_xray_manifest(tree: str, permissions: set[str]) -> None:

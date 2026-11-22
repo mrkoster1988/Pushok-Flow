@@ -10,6 +10,9 @@ NAME = 'com.wireguard.android.backend.GoBackend$VpnService'
 SCANNER = 'shop.pushok.flow.WireGuardQrActivity'
 GENERIC_SCANNER = 'com.journeyapps.barcodescanner.CaptureActivity'
 XRAY_SERVICE = 'shop.pushok.flow.XrayVpnService'
+UPDATE_PROVIDER = 'shop.pushok.flow.UpdateFileProvider'
+UPDATE_INSTALL_RECEIVER = 'shop.pushok.flow.UpdateInstallReceiver'
+UPDATE_REPLACED_RECEIVER = 'shop.pushok.flow.UpdateReplacedReceiver'
 TOOLS = '{http://schemas.android.com/tools}'
 MEDIA_PERMISSIONS = {
     'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -42,6 +45,35 @@ def validate(path: Path) -> None:
         raise ValueError('QR scanner requires the CAMERA permission declaration')
     if permissions & MEDIA_PERMISSIONS:
         raise ValueError('QR image import must use the document picker without broad media permissions')
+    if not {'android.permission.REQUEST_INSTALL_PACKAGES',
+            'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION',
+            'android.permission.ACCESS_NETWORK_STATE'} <= permissions:
+        raise ValueError('Background update installation or network permission missing')
+    for name, expected_action in ((UPDATE_INSTALL_RECEIVER, None),
+                                   (UPDATE_REPLACED_RECEIVER, 'android.intent.action.MY_PACKAGE_REPLACED')):
+        receivers = [item for item in app.findall('receiver')
+                     if activity_name(item.get(ANDROID + 'name', '')) == name]
+        if len(receivers) != 1 or receivers[0].get(ANDROID + 'exported') != 'false' or \
+                receivers[0].get(ANDROID + 'process') not in (None, 'shop.pushok.flow'):
+            raise ValueError('Update receivers must be single, private and in the default process')
+        filters = receivers[0].findall('intent-filter')
+        if expected_action is None:
+            if filters:
+                raise ValueError('Update installer callback must not expose an intent filter')
+        elif len(filters) != 1 or len(list(filters[0])) != 1 or \
+                filters[0][0].tag != 'action' or \
+                filters[0][0].get(ANDROID + 'name') != expected_action:
+            raise ValueError('Update replacement receiver must accept only MY_PACKAGE_REPLACED')
+    providers = [item for item in app.findall('provider')
+                 if activity_name(item.get(ANDROID + 'name', '')) == UPDATE_PROVIDER]
+    if len(providers) != 1 or providers[0].get(ANDROID + 'exported') != 'false' or \
+            providers[0].get(ANDROID + 'grantUriPermissions') != 'true' or \
+            providers[0].get(ANDROID + 'authorities') != '${applicationId}.updates':
+        raise ValueError('Update FileProvider must be private and scoped to the application')
+    paths = providers[0].findall('meta-data')
+    if sum(item.get(ANDROID + 'name') == 'android.support.FILE_PROVIDER_PATHS' and
+           item.get(ANDROID + 'resource') == '@xml/update_paths' for item in paths) != 1:
+        raise ValueError('Update FileProvider must use the restricted update paths')
     xray = [item for item in app.findall('service')
             if activity_name(item.get(ANDROID + 'name', '')) == XRAY_SERVICE]
     if len(xray) != 1 or xray[0].get(ANDROID + 'exported') != 'false' or \

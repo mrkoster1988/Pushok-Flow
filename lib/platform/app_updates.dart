@@ -9,6 +9,7 @@ enum UpdatePhase {
   current,
   downloading,
   ready,
+  installing,
   error,
   unavailable,
 }
@@ -27,6 +28,8 @@ const _knownErrorCodes = <String>{
   'UPDATE_CHECKSUM_MISMATCH',
   'UPDATE_APK_INVALID',
   'UPDATE_STORAGE_ERROR',
+  'UPDATE_INSTALL_FAILED',
+  'UPDATE_SCHEDULER_UNAVAILABLE',
   'UPDATE_NOT_READY',
   'UPDATE_INTERRUPTED',
   'UPDATE_UNAVAILABLE',
@@ -52,6 +55,8 @@ class UpdateStatus {
     this.totalBytes = 0,
     this.errorCode,
     this.installPermissionGranted = false,
+    this.automaticUpdatesEnabled = true,
+    this.installWaitingReason,
     this.checkedAtMillis,
     this.checkStage,
   });
@@ -65,6 +70,8 @@ class UpdateStatus {
         downloadedBytes = 0,
         totalBytes = 0,
         installPermissionGranted = false,
+        automaticUpdatesEnabled = false,
+        installWaitingReason = null,
         checkedAtMillis = null,
         checkStage = null;
 
@@ -77,6 +84,8 @@ class UpdateStatus {
   final int totalBytes;
   final String? errorCode;
   final bool installPermissionGranted;
+  final bool automaticUpdatesEnabled;
+  final String? installWaitingReason;
   /// The last successful native verification, never the start of a request.
   final int? checkedAtMillis;
   final String? checkStage;
@@ -120,7 +129,8 @@ class UpdateStatus {
     final availableVersion = version(data['availableVersion']);
     final availableBuild = data['availableBuild'] == null
         ? null : number(data['availableBuild']);
-    if ({UpdatePhase.available, UpdatePhase.downloading, UpdatePhase.ready}
+    if ({UpdatePhase.available, UpdatePhase.downloading, UpdatePhase.ready,
+        UpdatePhase.installing}
         .contains(phase) &&
         (availableVersion == null || availableBuild == null ||
             availableBuild <= installedBuild)) {
@@ -129,6 +139,17 @@ class UpdateStatus {
     final permission = data['installPermissionGranted'];
     if (permission != null && permission is! bool) {
       throw const FormatException('Invalid install permission');
+    }
+    final automaticUpdatesEnabled = data['automaticUpdatesEnabled'];
+    if (automaticUpdatesEnabled is! bool) {
+      throw const FormatException('Invalid automatic update setting');
+    }
+    final installWaitingReason = data['installWaitingReason'];
+    if (!data.containsKey('installWaitingReason') ||
+        (installWaitingReason != null && (installWaitingReason is! String ||
+            !const {'permission', 'confirmation', 'connection', 'foreground',
+              'unsupported'}.contains(installWaitingReason)))) {
+      throw const FormatException('Invalid installation waiting reason');
     }
     final checkedAtMillis = data['checkedAtMillis'] == null
         ? null : number(data['checkedAtMillis']);
@@ -153,6 +174,8 @@ class UpdateStatus {
       totalBytes: number(data['totalBytes'], fallback: 0),
       errorCode: data['errorCode'] == null ? null : _safeErrorCode(data['errorCode']),
       installPermissionGranted: permission == true,
+      automaticUpdatesEnabled: automaticUpdatesEnabled,
+      installWaitingReason: installWaitingReason as String?,
       checkedAtMillis: checkedAtMillis,
       checkStage: checkStage as String?,
     );
@@ -169,6 +192,8 @@ class UpdateStatus {
         totalBytes: totalBytes,
         errorCode: errorCode,
         installPermissionGranted: installPermissionGranted,
+        automaticUpdatesEnabled: automaticUpdatesEnabled,
+        installWaitingReason: nextPhase == UpdatePhase.ready ? installWaitingReason : null,
         checkedAtMillis: checkedAtMillis,
         checkStage: nextPhase == UpdatePhase.checking &&
             phase == UpdatePhase.checking ? checkStage : null,
@@ -195,11 +220,14 @@ class AppUpdates {
   Future<UpdateStatus> downloadUpdate() => _operation('downloadUpdate');
   Future<UpdateStatus> openInstallPermission() => _operation('openInstallPermission');
   Future<UpdateStatus> installUpdate() => _operation('installUpdate');
+  Future<UpdateStatus> setAutomaticUpdates(bool enabled) =>
+      _operation('setAutomaticUpdates', arguments: {'enabled': enabled});
 
-  Future<UpdateStatus> _operation(String method) async {
+  Future<UpdateStatus> _operation(String method,
+      {Map<String, Object?>? arguments}) async {
     final revision = ++_operationRevision;
     try {
-      return await _invoke(method,
+      return await _invoke(method, arguments: arguments,
           accept: () => revision == _operationRevision);
     } finally {
       // A late poll from this operation must not become the fallback for a
@@ -209,10 +237,10 @@ class AppUpdates {
   }
 
   Future<UpdateStatus> _invoke(String method,
-      {required bool Function() accept}) async {
+      {required bool Function() accept, Map<String, Object?>? arguments}) async {
     if (!_isAndroid) return const UpdateStatus.unavailable();
     try {
-      final data = await _channel.invokeMapMethod<Object?, Object?>(method);
+      final data = await _channel.invokeMapMethod<Object?, Object?>(method, arguments);
       final status = UpdateStatus.fromMap(data);
       if (accept()) _lastStatus = status;
       return status;

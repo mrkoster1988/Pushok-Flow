@@ -43,13 +43,25 @@ class MainActivity : FlutterActivity() {
         get() = Session.xray ?: XrayTunnelClient(applicationContext).also { Session.xray = it }
 
     private fun readTunnelState(): Boolean {
-        val wireGuardUp = backend?.getState(tunnel) == Tunnel.State.UP
-        val xrayUp = xray.isUp()
-        // Ambiguous service state must not authorize profile/route mutations.
-        if (wireGuardUp && xrayUp) throw IllegalStateException("VPN_STATE_UNAVAILABLE")
-        if (wireGuardUp) Session.protocol = TunnelConnectionSession.Protocol.WIREGUARD
-        if (xrayUp) Session.protocol = TunnelConnectionSession.Protocol.VLESS
-        return wireGuardUp || xrayUp
+        try {
+            val wireGuardUp = backend?.getState(tunnel) == Tunnel.State.UP
+            val xrayUp = xray.isUp()
+            // Ambiguous service state must not authorize profile/route mutations or an automatic APK install.
+            if (wireGuardUp && xrayUp) throw IllegalStateException("VPN_STATE_UNAVAILABLE")
+            if (wireGuardUp) Session.protocol = TunnelConnectionSession.Protocol.WIREGUARD
+            if (xrayUp) Session.protocol = TunnelConnectionSession.Protocol.VLESS
+            val active = wireGuardUp || xrayUp
+            appUpdates.observeTunnel(active)
+            return active
+        } catch (error: Exception) {
+            appUpdates.observeTunnel(true)
+            throw error
+        }
+    }
+
+    private fun releaseOperation(token: Long) {
+        Session.operationInProgress.release(token)
+        appUpdates.endConnection(token)
     }
 
     private fun stopTunnels(): Boolean {
@@ -103,7 +115,7 @@ class MainActivity : FlutterActivity() {
         val item = pending ?: return
         pending = null
         if (resultCode != Activity.RESULT_OK) {
-            Session.operationInProgress.release(item.token)
+            releaseOperation(item.token)
             item.result.error("VPN_DENIED", "Разрешение VPN не предоставлено", null)
         } else {
             startTunnel(item.call, item.result, item.token)
@@ -114,12 +126,12 @@ class MainActivity : FlutterActivity() {
         val raw = call.argument<String>("config")
         val expectedProfileId = (call.arguments as? Map<*, *>)?.get("expectedProfileId")
         if (raw.isNullOrBlank() || raw.length > 65536) {
-            Session.operationInProgress.release(token)
+            releaseOperation(token)
             result.error("INVALID_CONFIG", "Нужен профиль подключения", null)
             return
         }
         if (expectedProfileId != null && expectedProfileId !is String) {
-            Session.operationInProgress.release(token)
+            releaseOperation(token)
             result.error("PROFILE_CHANGED", "Выбранный профиль изменился", null)
             return
         }
@@ -133,7 +145,7 @@ class MainActivity : FlutterActivity() {
                     // Both the ID and exact configuration must still match.
                     secureStore.validateActive(expectedProfileId as String, raw)
                 } catch (error: Exception) {
-                    Session.operationInProgress.release(token)
+                    releaseOperation(token)
                     runOnUiThread { result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"),
                         "Не удалось подтвердить выбранный профиль. Повторите подключение.", null) }
                     return@execute
@@ -142,7 +154,7 @@ class MainActivity : FlutterActivity() {
             // A route read/latch failure happens before any backend mutation. Preserve
             // the existing tunnel state rather than reporting a failed reconnect as DOWN.
             val exclusions = try { routeStore.read() } catch (error: Exception) {
-                Session.operationInProgress.release(token)
+                releaseOperation(token)
                 runOnUiThread { result.error(routeErrorCode(error, "ROUTES_LOAD_FAILED"),
                     "Не удалось прочитать исключения приложений", null) }
                 return@execute
@@ -181,6 +193,8 @@ class MainActivity : FlutterActivity() {
                         }
                     },
                 )
+                // Transfer the CONNECTING lease to the known-UP latch before releasing the operation token.
+                appUpdates.observeTunnel(active)
                 runOnUiThread { result.success(mapOf("connected" to active)) }
             } catch (error: TunnelConnectionFailure) {
                 when (error.code) {
@@ -199,7 +213,7 @@ class MainActivity : FlutterActivity() {
                 runOnUiThread { result.error(profileErrorCode(error, requestedProtocol.connectError),
                     "Не удалось установить туннель. Проверьте параметры сервера.", null) }
             } finally {
-                Session.operationInProgress.release(token)
+                releaseOperation(token)
             }
         }
     }
@@ -221,7 +235,7 @@ class MainActivity : FlutterActivity() {
         val request = pending
         pending = null
         if (request != null) {
-            Session.operationInProgress.release(request.token)
+            releaseOperation(request.token)
             request.result.error("VPN_REQUEST_INTERRUPTED", "Запрос разрешения прерван. Повторите подключение.", null)
         }
     }
@@ -280,7 +294,7 @@ class MainActivity : FlutterActivity() {
             } catch (error: Exception) {
                 profileErrorCode(error, fallback)
             } finally {
-                Session.operationInProgress.release(token)
+                releaseOperation(token)
             }
             runOnUiThread {
                 if (failure == null) result.success(true)
@@ -313,7 +327,7 @@ class MainActivity : FlutterActivity() {
             } catch (error: Exception) {
                 routeErrorCode(error, "ROUTES_SAVE_FAILED")
             } finally {
-                Session.operationInProgress.release(token)
+                releaseOperation(token)
             }
             runOnUiThread {
                 if (failure == null) result.success(null)
@@ -468,6 +482,9 @@ class MainActivity : FlutterActivity() {
                             val token = Session.operationInProgress.acquire()
                             if (token == null) {
                                 result.error("VPN_BUSY", "Подключение уже изменяется", null)
+                            } else if (!appUpdates.beginConnection(token)) {
+                                releaseOperation(token)
+                                result.error("UPDATE_INSTALLING", "Android завершает обновление. Подключитесь после установки.", null)
                             } else try {
                                 validateConnectionProfile(config)
                                 val approval = VpnService.prepare(this)
@@ -477,7 +494,7 @@ class MainActivity : FlutterActivity() {
                                 } else startTunnel(call, result, token)
                             } catch (error: Exception) {
                                 pending = null
-                                Session.operationInProgress.release(token)
+                                releaseOperation(token)
                                 result.error(profileErrorCode(error, "VPN_REQUEST_INTERRUPTED"),
                                     "Не удалось подготовить подключение", null)
                             }
@@ -498,7 +515,7 @@ class MainActivity : FlutterActivity() {
                             } catch (_: Exception) {
                                 runOnUiThread { result.error(Session.protocol.disconnectError, "Не удалось отключить туннель", null) }
                             } finally {
-                                Session.operationInProgress.release(token)
+                                releaseOperation(token)
                             }
                         }
                     }
