@@ -1,11 +1,15 @@
 {
   "schema_version": 1,
-  "rules_version": 2,
+  "rules_version": 3,
   "recommended_bypass_packages": [
+    "com.idamob.tinkoff.android",
     "com.vk.im",
     "com.vkontakte.android",
     "com.wildberries.ru",
+    "ru.alfabank.mobile.android",
     "ru.oneme.app",
-    "ru.ozon.app.android"
+    "ru.ozon.app.android",
+    "ru.sberbankmobile",
+    "ru.vtb24.mobilebanking.android"
   ]
 }
