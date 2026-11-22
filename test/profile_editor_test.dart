@@ -9,6 +9,9 @@ import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
 // Local UI fixture only; native parsing and key validation belong to the bridge.
 const _config = '[Interface]\nPrivateKey = ui-test-key\n'
     'Address = 10.0.0.2/32\n[Peer]\nPublicKey = ui-test-peer\n';
+// Reserved example domain and synthetic UUID: never a usable connection.
+const _vless = 'vless://00000000-0000-4000-8000-000000000001@example.invalid:443'
+    '?type=tcp&security=tls&sni=example.invalid&flow=xtls-rprx-vision#UI%20fixture';
 const _field = Key('wireguard_profile_field');
 const _name = Key('wireguard_profile_name');
 const _save = Key('save_wireguard_profile');
@@ -86,6 +89,96 @@ Future<void> _tapSave(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('VLESS paste stays masked and saves the complete link only after an explicit action',
+      (tester) async {
+    var clipboardReads = 0;
+    String? saved;
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') {
+        clipboardReads++;
+        return {'text': _vless};
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await _openEditor(tester, onSave: (config, _) async { saved = config; });
+    expect(find.text('Профиль подключения'), findsOneWidget);
+    expect(clipboardReads, 0);
+    await _tapEditorKey(tester, _paste);
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(find.byKey(_field));
+    expect(field.controller!.text, _vless);
+    expect(field.obscureText, isTrue);
+    expect(field.readOnly, isTrue);
+    expect(field.enableInteractiveSelection, isFalse);
+    expect(clipboardReads, 1);
+    expect(saved, isNull);
+    expect(find.byWidgetPredicate((widget) => widget is Text &&
+        (widget.data?.contains('00000000-0000-4000-8000-000000000001') ?? false)),
+        findsNothing);
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saved, _vless);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final source in [('file', _import), ('camera', _scanQr), ('image', _qrImage)]) {
+    testWidgets('VLESS ${source.$1} import preserves the name and requires explicit save',
+        (tester) async {
+      String? saved;
+      await _openEditor(tester, initialConfig: _config, initialName: 'Мой сервер',
+        onImport: () async => _vless,
+        onScanQr: () async => _vless,
+        onImportQrImage: () async => _vless,
+        onSave: (config, _) async { saved = config; },
+      );
+      await _tapEditorKey(tester, source.$2);
+      await tester.pumpAndSettle();
+      final field = tester.widget<TextField>(find.byKey(_field));
+      expect(field.controller!.text, _vless);
+      expect(field.obscureText, isTrue);
+      expect(field.readOnly, isTrue);
+      expect(field.controller!.selection, const TextSelection.collapsed(offset: -1));
+      expect(tester.widget<TextField>(find.byKey(_name)).controller!.text, 'Мой сервер');
+      expect(saved, isNull);
+      await _tapSave(tester);
+      await tester.pumpAndSettle();
+      expect(saved, _vless);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('Unsupported clipboard links leave the existing profile draft intact',
+      (tester) async {
+    var link = 'vmess://PRIVATE_UNSUPPORTED_CONTENT';
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async =>
+        call.method == 'Clipboard.getData' ? {'text': link} : null);
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    var saves = 0;
+    await _openEditor(tester, initialConfig: _config,
+      onSave: (_, _) async { saves++; },
+    );
+    for (final unsupported in [
+      'vmess://PRIVATE_UNSUPPORTED_CONTENT',
+      'trojan://PRIVATE_UNSUPPORTED_CONTENT',
+      'ss://PRIVATE_UNSUPPORTED_CONTENT',
+      'https://example.invalid/sub/PRIVATE_UNSUPPORTED_CONTENT',
+    ]) {
+      link = unsupported;
+      await _tapEditorKey(tester, _paste);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _config);
+      expect(tester.widget<TextField>(find.byKey(_field)).obscureText, isTrue);
+      expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
+      expect(find.textContaining('PRIVATE_UNSUPPORTED_CONTENT'), findsNothing);
+      expect(saves, 0);
+    }
+    expect(find.textContaining('Ссылки подписки пока не поддерживаются.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Explicit save trims the name without changing the hidden configuration',
       (tester) async {
     String? savedConfig;
@@ -453,11 +546,11 @@ void main() {
   });
 
   for (final invalid in [
-    ('blank', ' \n ', 'Вставьте конфигурацию WireGuard перед сохранением.'),
+    ('blank', ' \n ', 'Добавьте конфигурацию WireGuard или ссылку VLESS перед сохранением.'),
     ('oversized', 'x' * 65537, 'Профиль слишком большой: максимум 65 536 символов.'),
     ('UUID', ' 00000000-0000-4000-8000-000000000000\n',
-      'Вставлен UUID. Для WireGuard нужен полный текст файла .conf '
-      'с разделами [Interface] и [Peer].'),
+      'Вставлен только UUID. Нужна полная ссылка VLESS из 3x-ui '
+          'или профиль WireGuard .conf с разделами [Interface] и [Peer].'),
   ]) {
     testWidgets('${invalid.$1} input never reaches the save callback', (tester) async {
       var saves = 0;
@@ -475,7 +568,16 @@ void main() {
   }
 
   for (final failure in [
-    ('INVALID_CONFIG', 'Некорректный профиль WireGuard. Проверьте конфигурацию.'),
+    ('INVALID_CONFIG', 'Некорректный профиль подключения. Проверьте конфигурацию или ссылку.'),
+    ('INVALID_VLESS_CONFIG', 'Некорректная ссылка VLESS. Скопируйте полную ссылку клиента из 3x-ui.'),
+    ('UNSUPPORTED_PROFILE',
+      'Этот формат пока не поддерживается. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.'),
+    ('UNSUPPORTED_TRANSPORT',
+      'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY.'),
+    ('UNSUPPORTED_SECURITY',
+      'Для VLESS нужны TLS с проверкой сертификата или REALITY. Проверьте настройки клиента в 3x-ui.'),
+    ('UNSUPPORTED_PROFILE_OPTION',
+      'В ссылке VLESS есть параметры, которые пока не поддерживаются. Проверьте варианты подключения в подсказке ⓘ.'),
     ('PROFILE_SAVE_FAILED',
       'Не удалось сохранить профиль. Проверьте конфигурацию и попробуйте снова.'),
     ('UNEXPECTED_NATIVE_CODE', 'Не удалось сохранить профиль. Попробуйте ещё раз.'),
@@ -713,7 +815,7 @@ void main() {
     for (final failure in [
       ('PROFILE_IMPORT_TOO_LARGE', 'Файл слишком большой: максимум 65 536 байт.'),
       ('PROFILE_IMPORT_INVALID',
-        'Нужен полный текстовый профиль WireGuard .conf с разделами [Interface] и [Peer].'),
+        'Нужен текстовый профиль WireGuard .conf или полная ссылка VLESS из 3x-ui.'),
       ('PROFILE_IMPORT_BUSY', 'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.'),
       ('PROFILE_IMPORT_INTERRUPTED', 'Импорт прерван. Выберите файл ещё раз.'),
       ('PROFILE_IMPORT_UNAVAILABLE',
@@ -981,7 +1083,12 @@ void main() {
       ('PROFILE_QR_NOT_FOUND', 'На изображении не найден QR-код.'),
       ('PROFILE_QR_MULTIPLE', 'На изображении несколько QR-кодов.'),
       ('PROFILE_QR_IMAGE_TOO_LARGE', 'Изображение слишком большое.'),
-      ('PROFILE_IMPORT_INVALID', 'В QR-коде нет полного профиля WireGuard.'),
+      ('PROFILE_IMPORT_INVALID', 'В QR-коде нет поддерживаемого профиля.'),
+      ('INVALID_VLESS_CONFIG', 'Некорректная ссылка VLESS.'),
+      ('UNSUPPORTED_PROFILE', 'Этот формат пока не поддерживается.'),
+      ('UNSUPPORTED_TRANSPORT', 'Этот вариант VLESS пока не поддерживается.'),
+      ('UNSUPPORTED_SECURITY', 'Для VLESS нужны TLS с проверкой сертификата или REALITY.'),
+      ('UNSUPPORTED_PROFILE_OPTION', 'В ссылке VLESS есть параметры, которые пока не поддерживаются.'),
       ('UNKNOWN_QR_ERROR', 'Не удалось прочитать QR-код.'),
     ]) {
       var saves = 0;
@@ -1141,7 +1248,9 @@ void main() {
     expect(saved, isNull);
     await _tapEditorKey(tester, _info);
     await tester.pumpAndSettle();
-    expect(find.textContaining('В WGDashboard'), findsOneWidget);
+    expect(find.textContaining('QR WireGuard из WGDashboard'), findsOneWidget);
+    expect(find.textContaining('В 3x-ui'), findsOneWidget);
+    expect(find.textContaining('TCP (Raw) с TLS или REALITY'), findsOneWidget);
     expect(find.textContaining('QR из фото'), findsWidgets);
     expect(tester.takeException(), isNull);
     await tester.ensureVisible(find.text('Понятно'));

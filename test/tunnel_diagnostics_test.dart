@@ -33,6 +33,34 @@ void _expectNoMeasurements(TunnelDiagnostics value) {
 }
 
 void main() {
+  test('Protocol decoding keeps VLESS separate from legacy WireGuard and discards alien handshakes', () {
+    expect(TunnelDiagnostics.fromPlatform(_status()).protocol, TunnelProtocol.wireguard);
+    final vless = TunnelDiagnostics.fromPlatform({..._status(), 'protocol': 'vless'});
+    expect(vless.protocol, TunnelProtocol.vless);
+    expect(vless.isKnown, isTrue);
+    expect(vless.connected, isTrue);
+    expect(vless.statistics.rxBytes, 2048);
+    expect(vless.statistics.handshakeStatus, HandshakeStatus.unknown);
+    expect(vless.statistics.latestHandshakeAgeSeconds, isNull);
+    final unavailable = TunnelDiagnostics.fromPlatform({
+      ..._status(), 'protocol': 'vless', 'statistics': {'status': 'unavailable'},
+    });
+    expect(unavailable.statistics.rxBytes, isNull);
+    expect(unavailable.statistics.txBytes, isNull);
+    expect(unavailable.statistics.status, TunnelStatisticsStatus.unavailable);
+  });
+
+  test('An explicit unknown protocol cannot become a WireGuard sample or retain secret text', () {
+    for (final protocol in <Object?>[null, 1, true, 'SECRET_PROTOCOL', 'vmess']) {
+      final value = TunnelDiagnostics.fromPlatform({..._status(), 'protocol': protocol});
+      expect(value.protocol, TunnelProtocol.unknown);
+      expect(value.isKnown, isFalse);
+      expect(value.connected, isTrue);
+      _expectNoMeasurements(value);
+      expect(value.toString(), isNot(contains('SECRET_PROTOCOL')));
+    }
+  });
+
   test('Valid local state and aggregate counters remain distinct observations', () {
     final value = TunnelDiagnostics.fromPlatform(_status());
     expect(value.isKnown, isTrue);
@@ -198,6 +226,7 @@ void main() {
 
   test('Only recognized error codes survive and decoded values do not retain the input maps', () {
     for (final code in ['WG_CONNECT_FAILED', 'WG_DISCONNECT_FAILED', 'WG_STATUS_FAILED',
+      'XRAY_CONNECT_FAILED', 'XRAY_DISCONNECT_FAILED', 'XRAY_STATUS_FAILED',
       'ROUTES_APPS_UNAVAILABLE', 'ROUTES_APPS_CHECK_FAILED']) {
       final value = TunnelDiagnostics.fromPlatform({..._status(), 'lastErrorCode': code});
       expect(value.lastErrorCode, code);

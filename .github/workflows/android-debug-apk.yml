@@ -38,6 +38,8 @@ jobs:
         run: |
           set -o pipefail
           bash tools/bootstrap_android.sh 2>&1 | tee diagnostics/bootstrap.log
+      - name: Verify and install pinned official Xray Android core
+        run: python3 tools/fetch_xray_android.py
       - name: Install dependencies
         run: |
           set -euo pipefail

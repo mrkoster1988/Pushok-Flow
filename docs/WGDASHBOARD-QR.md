@@ -2,6 +2,8 @@
 
 Функция доступна в [опубликованном Pushok Flow v0.35.0](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.35.0), сборка 35. [Результаты проверок и границы приёмки](RELEASE-v0.35.0.md).
 
+Для VLESS-клиента из 3x-ui готовится отдельная поддержка в v0.36.0: [инструкция и точные границы](3X-UI.md). Ниже описан именно WireGuard.
+
 ## Какой QR подходит
 
 В WGDashboard откройте нужную конфигурацию **WireGuard**, затем нужного клиента (**Peer**) и его QR-код. Обычный QR клиента содержит полный текст профиля, тот же, что загружается файлом `.conf`: [компонент QR в исходниках WGDashboard](https://github.com/WGDashboard/WGDashboard/blob/main/src/static/app/src/components/configurationComponents/peerQRCode.vue).

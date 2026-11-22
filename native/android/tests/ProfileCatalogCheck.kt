@@ -80,6 +80,23 @@ fun main() {
     check(migrated.storage.disk.legacy == null)
     check(migrated.storage.writes == 1 && migrated.cipher.legacyReads == 1)
 
+    // A new protocol uses the same encrypted catalog without migrating or
+    // overwriting the old WireGuard profile, selected ID or sensitive text.
+    val mixed = Fixture("legacy-ciphertext")
+    val mixedStore = mixed.store()
+    check(mixedStore.load() == SECRET)
+    val link = "vless://00000000-0000-4000-8000-000000000001@example.invalid:443?security=tls&type=tcp"
+    mixedStore.save(link, name = "3x-ui", createNew = true)
+    check(mixedStore.load() == SECRET)
+    check(mixedStore.load(id(2)) == link)
+    val publicMetadata = mixedStore.metadata().toString()
+    check(!publicMetadata.contains("vless://") && !publicMetadata.contains("PrivateKey"))
+    mixedStore.select(id(2))
+    mixed.storage.restart()
+    check(mixed.store(ProfileCatalogState()).load() == link)
+    mixedStore.delete(id(2))
+    check(mixedStore.load() == SECRET && mixed.cipher.legacyReads == 1)
+
     // Create, rename an inactive profile, select, and deterministic deletion fallback.
     first.save("second-config", name = "  Работа  ", createNew = true)
     check(first.load() == SECRET)

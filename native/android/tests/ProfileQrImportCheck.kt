@@ -47,7 +47,8 @@ private fun decoderChecks() {
     rejected("PROFILE_QR_NOT_FOUND") {
         ProfileQrDecoder.decodePixels(size, size, IntArray(size * size) { WHITE })
     }
-    for (payload in listOf("https://example.invalid/profile", "random text", "eyJjb250YWluZXJzIjpbXX0=",
+    rejected("UNSUPPORTED_PROFILE") { ProfileQrDecoder.decodePixels(size, size, qr("https://example.invalid/profile")) }
+    for (payload in listOf("random text", "eyJjb250YWluZXJzIjpbXX0=",
         "{\"containers\":[{\"container\":\"amnezia-awg\"}]}", "[Interface]\nPrivateKey = missing-peer")) {
         rejected("PROFILE_IMPORT_INVALID") { ProfileQrDecoder.decodePixels(size, size, qr(payload)) }
     }
@@ -72,6 +73,17 @@ private fun decoderChecks() {
     }
     rejected("PROFILE_QR_IMAGE_TOO_LARGE") { ProfileQrDecoder.decodePixels(2049, 1, IntArray(2049)) }
     rejected("PROFILE_QR_IMAGE_TOO_LARGE") { ProfileQrDecoder.decodePixels(2, 2, IntArray(3)) }
+    val vless = "vless://11111111-2222-4333-8444-555555555555@example.invalid:443?security=tls#Synthetic"
+    check(ProfileQrDecoder.decodePixels(size, size, qr(vless)) == vless)
+    rejected("UNSUPPORTED_TRANSPORT") {
+        ProfileQrDecoder.decodePixels(size, size, qr(vless.replace("security=tls", "security=tls&type=ws")))
+    }
+    rejected("UNSUPPORTED_SECURITY") {
+        ProfileQrDecoder.decodePixels(size, size, qr(vless.replace("security=tls", "security=none")))
+    }
+    rejected("INVALID_VLESS_CONFIG") {
+        ProfileQrDecoder.decodePixels(size, size, qr(vless.replace(":443", ":0")))
+    }
 }
 
 private fun payloadChecks() {
@@ -185,5 +197,5 @@ fun main() {
     payloadChecks()
     imageBoundsChecks()
     ownerSessionChecks()
-    println("ProfileQrImport executable checks passed (ZXing 3.5.4, payload/bounds/cancellation/session)")
+    println("ProfileQrImport executable checks passed (ZXing 3.5.4, WG/VLESS payload/bounds/cancellation/session)")
 }

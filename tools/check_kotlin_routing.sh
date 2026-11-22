@@ -25,6 +25,11 @@ java -jar "$out/profile-protection-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
   native/android/tests/ProfileImportReaderCheck.kt -include-runtime -d "$out/profile-import-tests.jar"
 java -jar "$out/profile-import-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt \
+  native/android/tests/VlessProfileCheck.kt -include-runtime -d "$out/vless-profile-tests.jar"
+java -jar "$out/vless-profile-tests.jar"
 core="$out/zxing-core.jar"
 if [[ -n "${FLOW_ZXING_CORE_JAR:-}" ]]; then
   cp "$FLOW_ZXING_CORE_JAR" "$core"
@@ -41,6 +46,8 @@ if hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() != expected:
     raise SystemExit('The pinned ZXing core 3.5.4 checksum does not match')
 PY
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrDecoder.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
   native/android/tests/ProfileQrImportCheck.kt -classpath "$core" -include-runtime -d "$out/qr-import-tests.jar"
@@ -64,3 +71,28 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.k
   native/android/tests/RecommendationAutomationCheck.kt \
   native/android/tests/RouteRecommendationsCheck.kt -include-runtime -d "$out/route-recommendations-tests.jar"
 java -jar "$out/route-recommendations-tests.jar"
+
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayLifecycle.kt \
+  native/android/tests/XrayLifecycleCheck.kt -include-runtime -d "$out/xray-lifecycle-tests.jar"
+java -jar "$out/xray-lifecycle-tests.jar"
+
+json_core="$out/json-core.jar"
+if [[ -n "${FLOW_JSON_CORE_JAR:-}" ]]; then
+  cp "$FLOW_JSON_CORE_JAR" "$json_core"
+else
+  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
+    https://repo.maven.apache.org/maven2/org/json/json/20250517/json-20250517.jar -o "$json_core"
+fi
+python3 - "$json_core" <<'JSON_CHECK'
+import hashlib
+from pathlib import Path
+import sys
+if hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() != '3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796':
+    raise SystemExit('Pinned JVM JSON test library checksum mismatch')
+JSON_CHECK
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/XrayConfig.kt \
+  native/android/tests/XrayConfigCheck.kt -classpath "$json_core" -include-runtime -d "$out/xray-config-tests.jar"
+java -cp "$out/xray-config-tests.jar:$json_core" shop.pushok.flow.XrayConfigCheckKt

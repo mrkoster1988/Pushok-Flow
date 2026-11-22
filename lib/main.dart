@@ -108,6 +108,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       !_savingRoute && !_routeConfirmationOpen &&
       (connected || (!_statusRefreshing && _diagnostics.isKnown &&
           !_diagnosticsStale && !_diagnostics.connected));
+  // An isolated service can survive a restart of this UI process. Unknown
+  // startup state must forbid Connect but still allow an explicit recovery Stop.
+  bool get _canRecoverTunnel => _isAndroid && _foreground && _informationOpen &&
+      !connecting && !_nativeBusy && !_profileBusy && !_profileEditorOpen &&
+      !_savingRoute && !_routeConfirmationOpen && !_statusRefreshing &&
+      (!_diagnostics.isKnown || _diagnosticsStale);
   bool get _canManageProfiles => _isAndroid && _foreground &&
       !_informationOpen &&
       !connected && !connecting && !_nativeBusy && !_profileBusy &&
@@ -153,7 +159,17 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         case 'VPN_STATE_UNAVAILABLE':
           return 'Не удалось уточнить состояние туннеля. Обновите диагностику и повторите действие.';
         case 'INVALID_CONFIG':
-          return 'Профиль WireGuard некорректен. Откройте его настройки и проверьте данные.';
+          return 'Профиль подключения некорректен. Откройте его настройки и проверьте данные.';
+        case 'INVALID_VLESS_CONFIG':
+          return 'Ссылка VLESS некорректна. Скопируйте полную ссылку клиента из 3x-ui.';
+        case 'UNSUPPORTED_PROFILE':
+          return 'Этот формат пока не поддерживается. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.';
+        case 'UNSUPPORTED_TRANSPORT':
+          return 'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY.';
+        case 'UNSUPPORTED_SECURITY':
+          return 'Для VLESS нужны TLS с проверкой сертификата или REALITY. Проверьте настройки клиента в 3x-ui.';
+        case 'UNSUPPORTED_PROFILE_OPTION':
+          return 'В ссылке VLESS есть параметры, которые пока не поддерживаются. Откройте подсказку ⓘ в редакторе профиля.';
         case 'PROFILE_LOAD_FAILED':
           return 'Не удалось открыть сохранённый профиль. Откройте «Серверы» и повторите проверку.';
         case 'PROFILE_CHANGED':
@@ -170,12 +186,13 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         case 'ROUTES_APPS_CHECK_FAILED':
           return 'Не удалось проверить приложения в исключениях. Откройте «Маршруты» и повторите проверку.';
         case 'WG_DISCONNECT_FAILED':
+        case 'XRAY_DISCONNECT_FAILED':
           return 'Не удалось отключить VPN. Повторите попытку.';
       }
     }
     return disconnecting
         ? 'Не удалось отключить VPN. Повторите попытку.'
-        : 'Не удалось установить WireGuard-туннель. Проверьте профиль и доступность сервера.';
+        : 'Не удалось установить туннель. Проверьте профиль и доступность сервера.';
   }
 
   Future<void> _toggleTunnel({String? profile}) async {
@@ -219,7 +236,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           if (!mounted) return;
           setState(() {
             connected = ok;
-            _diagnostics = TunnelDiagnostics(isKnown: true, connected: ok);
+            // The connect acknowledgement is not a protocol/traffic sample.
+            // The following status read supplies the actual engine metadata.
+            _diagnostics = TunnelDiagnostics(isKnown: true, connected: ok,
+                protocol: TunnelProtocol.unknown);
           });
           if (!ok) {
             final message = _connectionMessage(StateError('not connected'));
@@ -252,6 +272,40 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
     if (needsProfile && mounted && _foreground && requestEpoch == _profileRequestEpoch) {
       await _editProfile(connectAfterSave: true, tunnelIntent: tunnelIntent);
+    }
+  }
+
+  Future<void> _disconnectForRecovery() async {
+    if (!_canRecoverTunnel) return;
+    _statusEpoch++;
+    _tunnelIntentEpoch++;
+    setState(() {
+      connecting = true;
+      connectionError = null;
+      _diagnosticsStale = true;
+    });
+    _notifyInformation();
+    try {
+      // The native stop path attempts both engines without requiring a readable
+      // preliminary status. This action never loads a profile or starts a tunnel.
+      await WireGuardTunnel.disconnect();
+      if (mounted) setState(() {
+        connected = false;
+        _diagnostics = const TunnelDiagnostics(isKnown: true, connected: false,
+            protocol: TunnelProtocol.unknown, statistics: TunnelStatistics.inactive());
+      });
+    } catch (error) {
+      if (mounted) {
+        final message = _connectionMessage(error, disconnecting: true);
+        setState(() => connectionError = message);
+        _showNotice(message);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => connecting = false);
+        _notifyInformation();
+        await _refreshProfileStatus();
+      }
     }
   }
 
@@ -862,17 +916,19 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.35.0',
+            version: '0.36.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
             stale: _diagnosticsStale,
+            disconnecting: connecting,
             connectionError: connectionError,
             lastErrorCode: lastErrorCode,
             onRefresh: !_foreground || connecting || _profileBusy ||
                 _profileEditorOpen || _savingRoute || _statusRefreshing
                     ? null : _refreshProfileStatus,
             onClose: () => Navigator.of(sheetContext).pop(),
+            onDisconnect: _canRecoverTunnel ? _disconnectForRecovery : null,
           ),
         ),
       );
@@ -1039,7 +1095,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       // Confirmation and the protected editor block actions without pretending
       // that a catalog read is running behind the modal route.
       loading: _statusRefreshing,
-      error: !_isAndroid ? 'Профили WireGuard доступны в приложении для Android.'
+      error: !_isAndroid ? 'Профили подключения доступны в приложении для Android.'
           : _profilesError,
       mutationsEnabled: _canManageProfiles,
       onRefresh: !_isAndroid || _statusRefreshing || _profileBusy ||
@@ -1076,7 +1132,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         icon: const Icon(Icons.delete_outline), label: const Text('Очистить память Pushok ИИ')),
       if (feedbackMessage != null) Text(feedbackMessage!, style: const TextStyle(color: PushokFlowApp.secondary)),
       const SizedBox(height: 12),
-      const Text('Статистика WireGuard доступна по кнопке ⓘ справа сверху. Автоматическое обучение '
+      const Text('Диагностика связи доступна по кнопке ⓘ справа сверху. Автоматическое обучение '
         'и проверка доступности сайтов — следующие этапы.',
         style: TextStyle(color: PushokFlowApp.secondary)),
     ])),

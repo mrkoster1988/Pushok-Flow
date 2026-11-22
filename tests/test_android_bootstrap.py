@@ -113,7 +113,9 @@ dependencies {
         self.assertEqual(len(manifest.findall("queries/intent")), 1)
         self.assertEqual(len(self.launcher_queries(manifest)), 1)
         self.assertEqual(sorted(p.get(ANDROID + "name") for p in manifest.findall("uses-permission")),
-                         ["android.permission.CAMERA", "android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"])
+                         ["android.permission.ACCESS_NETWORK_STATE", "android.permission.CAMERA",
+                          "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+                          "android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"])
 
     def test_update_provider_is_private_and_preserves_other_providers(self):
         self.write_manifest(services='''<provider android:name="shop.pushok.flow.UpdateFileProvider"
@@ -140,7 +142,7 @@ dependencies {
                 app = self.patch().find("application")
                 self.assertEqual(app.get(ANDROID + "allowBackup"), "false")
                 self.assertEqual([service.get(ANDROID + "name") for service in app.findall("service")],
-                                 [".OtherService"])
+                                 [".OtherService", PATCH.XRAY_SERVICE])
 
     def test_repeated_bootstrap_is_byte_for_byte_idempotent(self):
         self.write_manifest(queries=PROCESS_TEXT, backup='android:allowBackup="true"')
@@ -277,7 +279,8 @@ class BootstrapScriptTests(unittest.TestCase):
             shutil.copy2(ROOT / "tools" / tool, self.project / "tools" / tool)
 
         self.native_names = (
-            "MainActivity.kt", "WireGuardRouting.kt", "SecureWireGuardStore.kt",
+            "MainActivity.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
+            "XrayConfig.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportReader.kt", "ProfileQrDecoder.kt",

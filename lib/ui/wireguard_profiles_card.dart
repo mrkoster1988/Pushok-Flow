@@ -100,7 +100,7 @@ class WireGuardProfilesCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(children: [
-              const Expanded(child: Text('Профили WireGuard',
+              const Expanded(child: Text('Профили подключения',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
               IconButton(
                 key: const Key('refresh_wireguard_profiles'),
@@ -135,7 +135,7 @@ class WireGuardProfilesCard extends StatelessWidget {
             if (profiles != null && !loading && error == null) ...[
               const SizedBox(height: 12),
               Text(profiles.isEmpty
-                  ? 'Профилей пока нет. Добавьте файл .conf или вставьте конфигурацию.'
+                  ? 'Профилей пока нет. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.'
                   : 'Сохранено ${profiles.length} из ${WireGuardProfiles.maxProfiles}',
                 key: const Key('wireguard_profiles_count'),
                 style: const TextStyle(color: PushokPalette.muted)),

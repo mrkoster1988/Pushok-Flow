@@ -17,7 +17,8 @@ object TunnelHealth {
     fun snapshot(connected: Boolean, busy: Boolean, startedAtMs: Long?, nowMs: Long,
                  lastErrorCode: String?, stateKnown: Boolean = true,
                  peerSamples: List<PeerSample>? = null,
-                 nowEpochMs: Long = 0L): Map<String, Any?> = mapOf(
+                 nowEpochMs: Long = 0L, isVless: Boolean = false): Map<String, Any?> = mapOf(
+        "protocol" to if (isVless) "vless" else "wireguard",
         "connected" to connected,
         "state" to when {
             busy -> "transitioning"
@@ -27,7 +28,8 @@ object TunnelHealth {
         },
         "uptimeSeconds" to uptimeSeconds(connected, startedAtMs, nowMs),
         "lastErrorCode" to lastErrorCode,
-        "statistics" to statistics(connected, busy, stateKnown, peerSamples, nowEpochMs)
+        // WireGuard handshake samples must never be shown for the Xray backend.
+        "statistics" to statistics(connected, busy, stateKnown, if (isVless) null else peerSamples, nowEpochMs)
     )
 
     private fun unavailableStatistics(status: String): Map<String, Any?> = mapOf(

@@ -13,7 +13,7 @@ import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 
-/** Offline QR-only decoding. WireGuard's SDK still validates the complete returned draft. */
+/** Offline QR-only decoding. Protocol-specific validation still checks the returned draft. */
 object ProfileQrDecoder {
     const val MAX_IMAGE_BYTES = 16 * 1024 * 1024
     const val MAX_SOURCE_PIXELS = 48_000_000L
@@ -96,12 +96,11 @@ object ProfileQrDecoder {
         encoded.get(bytes)
         val text = try { ProfileImportReader.read(ByteArrayInputStream(bytes), cancelled) }
             finally { bytes.fill(0); if (encoded.hasArray()) encoded.array().fill(0) }
-        // Do not interpret links, JSON or base64 wrappers as remote configuration sources.
-        // This is only an early shape check; unknown options (including AWG) reach Config.parse.
-        if (!Regex("(?m)^\\s*\\[Interface]\\s*(?:#.*)?$").containsMatchIn(text) ||
-            !Regex("(?m)^\\s*\\[Peer]\\s*(?:#.*)?$").containsMatchIn(text)) {
-            fail("PROFILE_IMPORT_INVALID")
-        }
+        // A VLESS link is local configuration, never a URL to fetch. JSON, subscription
+        // URLs and base64 wrappers are rejected. WG options (including AWG) remain intact
+        // for authoritative Config.parse validation before the draft crosses the channel.
+        try { ConnectionProfile.validateShape(text) }
+        catch (error: ProfileFormatFailure) { fail(error.code) }
         active(cancelled)
         return text
     }

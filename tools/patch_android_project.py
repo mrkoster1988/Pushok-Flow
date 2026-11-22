@@ -8,6 +8,7 @@ ANDROID = "{" + ANDROID_URI + "}"
 VPN_SERVICE = "com.wireguard.android.backend.GoBackend$VpnService"
 UPDATE_PROVIDER = "shop.pushok.flow.UpdateFileProvider"
 QR_ACTIVITY = "shop.pushok.flow.WireGuardQrActivity"
+XRAY_SERVICE = "shop.pushok.flow.XrayVpnService"
 TOOLS_URI = "http://schemas.android.com/tools"
 
 
@@ -31,11 +32,34 @@ def patch_manifest(path: Path) -> None:
 
     # VPN/update downloads and Android's user-confirmed package installer.
     for permission_name in ("android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
-                            "android.permission.CAMERA"):
+                            "android.permission.CAMERA", "android.permission.ACCESS_NETWORK_STATE",
+                            "android.permission.FOREGROUND_SERVICE",
+                            "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"):
         if not any(permission.get(ANDROID + "name") == permission_name
                    for permission in manifest.findall("uses-permission")):
             permission = ET.Element("uses-permission", {ANDROID + "name": permission_name})
             manifest.insert(list(manifest).index(app), permission)
+
+    xray_services = [item for item in app.findall("service")
+                     if item.get(ANDROID + "name") in (XRAY_SERVICE, ".XrayVpnService", "XrayVpnService")]
+    xray = xray_services[0] if xray_services else ET.SubElement(app, "service")
+    for duplicate in xray_services[1:]:
+        app.remove(duplicate)
+    xray.clear()
+    xray.set(ANDROID + "name", XRAY_SERVICE)
+    xray.set(ANDROID + "exported", "false")
+    xray.set(ANDROID + "permission", "android.permission.BIND_VPN_SERVICE")
+    xray.set(ANDROID + "process", ":xray")
+    xray.set(ANDROID + "foregroundServiceType", "specialUse")
+    intent = ET.SubElement(xray, "intent-filter")
+    ET.SubElement(intent, "action", {ANDROID + "name": "android.net.VpnService"})
+    ET.SubElement(xray, "property", {
+        ANDROID + "name": "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
+        ANDROID + "value": "User initiated encrypted VLESS tunnel with per-app routing",
+    })
+    ET.SubElement(xray, "meta-data", {
+        ANDROID + "name": "android.net.VpnService.SUPPORTS_ALWAYS_ON", ANDROID + "value": "false",
+    })
 
     # Scanning is optional: importing a file/image and the rest of the app also work without a camera.
     for feature_name in ("android.hardware.camera", "android.hardware.camera.any",
@@ -124,7 +148,8 @@ def patch_project(root: Path) -> None:
     for dep in ('implementation("com.wireguard.android:tunnel:1.0.20260102")',
                 'implementation("androidx.core:core:1.17.0")',
                 'implementation("com.journeyapps:zxing-android-embedded:4.3.0")',
-                'implementation("com.google.zxing:core:3.5.4")'):
+                'implementation("com.google.zxing:core:3.5.4")',
+                'implementation(files("libs/libXray-v26.11.9.aar"))'):
         if dep not in s:
             if re.search(r"dependencies\s*\{", s):
                 s = re.sub(r"dependencies\s*\{", lambda m: m.group(0) + "\n    " + dep, s, count=1)

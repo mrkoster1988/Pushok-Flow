@@ -17,16 +17,27 @@ spec.loader.exec_module(module)
 def manifest(service='', backup='false'):
     return (f'<manifest xmlns:android="{ANDROID}" xmlns:tools="http://schemas.android.com/tools">'
             '<uses-permission android:name="android.permission.CAMERA" />'
+            '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />'
+            '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />'
+            '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />'
             '<uses-feature android:name="android.hardware.camera" android:required="false" />'
             '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />'
             f'<application android:allowBackup="{backup}">'
             '<activity android:name="shop.pushok.flow.WireGuardQrActivity" android:exported="false" />'
             '<activity android:name="com.journeyapps.barcodescanner.CaptureActivity" tools:node="remove" />'
+            '<service android:name="shop.pushok.flow.XrayVpnService" android:exported="false" '
+            'android:permission="android.permission.BIND_VPN_SERVICE" android:process=":xray" '
+            'android:foregroundServiceType="specialUse">'
+            '<intent-filter><action android:name="android.net.VpnService" /></intent-filter>'
+            '<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" '
+            'android:value="User initiated encrypted VLESS tunnel with per-app routing" />'
+            '<meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />'
+            '</service>'
             f'{service}</application></manifest>')
 
 
 class V08Tests(unittest.TestCase):
-    def test_no_service_declaration_is_valid(self):
+    def test_library_wireguard_and_private_xray_declarations_are_valid(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / 'AndroidManifest.xml'
             f.write_text(manifest())

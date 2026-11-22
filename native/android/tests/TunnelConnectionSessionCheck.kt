@@ -175,5 +175,30 @@ fun main() {
         check(oldThread != null && oldThread === newThread)
         check(actual.get() && session.connected && session.connectedSinceElapsedMs == 1000L)
     }
+    // A second backend shares the same lifecycle and reports only its fixed codes.
+    withSession { session, _ ->
+        val protocol = TunnelConnectionSession.Protocol.VLESS
+        rejects("XRAY_CONNECT_FAILED") {
+            session.connect(protocol, { false }) { error("vless://PRIVATE_CREDENTIAL") }
+        }
+        check(session.lastErrorCode == "XRAY_CONNECT_FAILED")
+        var active = false
+        check(session.connect(protocol, { active }) { active = true; true })
+        check(session.lastErrorCode == null)
+        var otherStarts = 0
+        // A duplicate request, even for the other backend, cannot replace a live tunnel.
+        check(session.connect({ active }) { otherStarts++; true })
+        check(otherStarts == 0)
+        rejects("XRAY_DISCONNECT_FAILED") {
+            session.disconnect(protocol, { active }) { error("PRIVATE_UUID") }
+        }
+        check(session.connected && session.lastErrorCode == "XRAY_DISCONNECT_FAILED")
+        session.disconnect(protocol, { active }) { active = false; false }
+        check(!session.connected && session.lastErrorCode == null)
+        rejects("ROUTES_APPS_UNAVAILABLE") {
+            session.connect(protocol, { false }) { throw TunnelConnectionFailure("ROUTES_APPS_UNAVAILABLE") }
+        }
+        check(session.lastErrorCode == "ROUTES_APPS_UNAVAILABLE")
+    }
     println("TunnelConnectionSession state, failure recovery and shared queue checks passed")
 }

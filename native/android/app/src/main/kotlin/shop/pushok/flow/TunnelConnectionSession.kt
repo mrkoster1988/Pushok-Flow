@@ -15,6 +15,11 @@ class TunnelConnectionSession(
     private val nowElapsedMs: () -> Long,
     val io: ExecutorService = Executors.newSingleThreadExecutor(),
 ) {
+    enum class Protocol(val wireName: String, val connectError: String, val disconnectError: String) {
+        WIREGUARD("wireguard", "WG_CONNECT_FAILED", "WG_DISCONNECT_FAILED"),
+        VLESS("vless", "XRAY_CONNECT_FAILED", "XRAY_DISCONNECT_FAILED"),
+    }
+
     data class Observation(val known: Boolean, val connected: Boolean)
 
     @Volatile var connected = false
@@ -34,7 +39,10 @@ class TunnelConnectionSession(
         return Observation(known = true, connected = actual)
     }
 
-    fun connect(readState: () -> Boolean, activate: () -> Boolean): Boolean {
+    fun connect(readState: () -> Boolean, activate: () -> Boolean): Boolean =
+        connect(Protocol.WIREGUARD, readState, activate)
+
+    fun connect(protocol: Protocol, readState: () -> Boolean, activate: () -> Boolean): Boolean {
         val before = observe(readState)
         if (!before.known) throw TunnelConnectionFailure("VPN_STATE_UNAVAILABLE")
         // GoBackend can tear down/recreate UP when given a newly parsed Config.
@@ -55,7 +63,7 @@ class TunnelConnectionSession(
             val code = when ((error as? TunnelConnectionFailure)?.code) {
                 "ROUTES_APPS_UNAVAILABLE" -> "ROUTES_APPS_UNAVAILABLE"
                 "ROUTES_APPS_CHECK_FAILED" -> "ROUTES_APPS_CHECK_FAILED"
-                else -> "WG_CONNECT_FAILED"
+                else -> protocol.connectError
             }
             recordFailedConnect(readState, code)
             throw TunnelConnectionFailure(code)
@@ -64,7 +72,11 @@ class TunnelConnectionSession(
 
     /** Also used when preparing a new configuration fails before backend mutation. */
     fun failedConnect(readState: () -> Boolean) {
-        recordFailedConnect(readState, "WG_CONNECT_FAILED")
+        failedConnect(Protocol.WIREGUARD, readState)
+    }
+
+    fun failedConnect(protocol: Protocol, readState: () -> Boolean) {
+        recordFailedConnect(readState, protocol.connectError)
     }
 
     private fun recordFailedConnect(readState: () -> Boolean, code: String) {
@@ -74,7 +86,10 @@ class TunnelConnectionSession(
         observe(readState)
     }
 
-    fun disconnect(readState: () -> Boolean, deactivate: () -> Boolean) {
+    fun disconnect(readState: () -> Boolean, deactivate: () -> Boolean) =
+        disconnect(Protocol.WIREGUARD, readState, deactivate)
+
+    fun disconnect(protocol: Protocol, readState: () -> Boolean, deactivate: () -> Boolean) {
         try {
             // Do not require a successful preliminary read before trying DOWN.
             // A user must still be able to stop a last-known active connection.
@@ -83,9 +98,9 @@ class TunnelConnectionSession(
             connectedSinceElapsedMs = null
             lastErrorCode = null
         } catch (_: Exception) {
-            lastErrorCode = "WG_DISCONNECT_FAILED"
+            lastErrorCode = protocol.disconnectError
             observe(readState)
-            throw TunnelConnectionFailure("WG_DISCONNECT_FAILED")
+            throw TunnelConnectionFailure(protocol.disconnectError)
         }
     }
 }

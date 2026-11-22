@@ -4,6 +4,8 @@ enum TunnelStatisticsStatus { available, inactive, unavailable }
 
 enum HandshakeStatus { observed, never, unknown }
 
+enum TunnelProtocol { wireguard, vless, unknown }
+
 const _maxNativeInteger = 0x7fffffffffffffff;
 // Keep seconds safe for callers that use Dart's microsecond-based Duration.
 const _maxDurationSeconds = _maxNativeInteger ~/ 1000000;
@@ -11,6 +13,9 @@ const _safeErrorCodes = <String>{
   'WG_CONNECT_FAILED',
   'WG_DISCONNECT_FAILED',
   'WG_STATUS_FAILED',
+  'XRAY_CONNECT_FAILED',
+  'XRAY_DISCONNECT_FAILED',
+  'XRAY_STATUS_FAILED',
   'ROUTES_APPS_UNAVAILABLE',
   'ROUTES_APPS_CHECK_FAILED',
 };
@@ -52,7 +57,7 @@ class TunnelStatistics {
 
   /// Decode an active tunnel's counters. A failed or empty native read must not
   /// become a valid zero-byte measurement or a recent handshake.
-  factory TunnelStatistics.fromPlatform(Object? value) {
+  factory TunnelStatistics.fromPlatform(Object? value, {bool wireGuardHandshake = true}) {
     if (value is! Map || value['status'] != 'available') {
       return const TunnelStatistics.unavailable();
     }
@@ -66,10 +71,10 @@ class TunnelStatistics {
         maximum: _maxDurationSeconds);
     var handshake = HandshakeStatus.unknown;
     int? observedAge;
-    if (value['handshakeStatus'] == 'observed' && age != null) {
+    if (wireGuardHandshake && value['handshakeStatus'] == 'observed' && age != null) {
       handshake = HandshakeStatus.observed;
       observedAge = age;
-    } else if (value['handshakeStatus'] == 'never' &&
+    } else if (wireGuardHandshake && value['handshakeStatus'] == 'never' &&
         value['latestHandshakeAgeSeconds'] == null) {
       handshake = HandshakeStatus.never;
     }
@@ -89,6 +94,7 @@ class TunnelDiagnostics {
   const TunnelDiagnostics({
     required this.isKnown,
     required this.connected,
+    this.protocol = TunnelProtocol.wireguard,
     this.transitioning = false,
     this.uptimeSeconds = 0,
     this.lastErrorCode,
@@ -97,6 +103,7 @@ class TunnelDiagnostics {
 
   const TunnelDiagnostics.unavailable({this.connected = false})
       : isKnown = false,
+        protocol = TunnelProtocol.unknown,
         transitioning = false,
         uptimeSeconds = 0,
         lastErrorCode = null,
@@ -106,6 +113,7 @@ class TunnelDiagnostics {
   /// retained last-known state used to keep a disconnect action available.
   final bool isKnown;
   final bool connected;
+  final TunnelProtocol protocol;
   final bool transitioning;
   final int uptimeSeconds;
   final String? lastErrorCode;
@@ -116,18 +124,31 @@ class TunnelDiagnostics {
     final active = value['connected'];
     final state = value['state'];
     final error = _safeErrorCode(value['lastErrorCode']);
+    // Payloads from the original bridge do not include a protocol. An explicit
+    // invalid value must never be presented as a WireGuard observation.
+    final protocol = !value.containsKey('protocol')
+        ? TunnelProtocol.wireguard
+        : switch (value['protocol']) {
+            'wireguard' => TunnelProtocol.wireguard,
+            'vless' => TunnelProtocol.vless,
+            _ => TunnelProtocol.unknown,
+          };
 
     TunnelDiagnostics unknown() => TunnelDiagnostics(
       isKnown: false,
       connected: active is bool && active,
+      protocol: protocol,
       lastErrorCode: error,
     );
 
-    if (active is! bool || state is! String) return unknown();
+    if (active is! bool || state is! String || protocol == TunnelProtocol.unknown) {
+      return unknown();
+    }
     if (state == 'transitioning') {
       return TunnelDiagnostics(
         isKnown: true,
         connected: active,
+        protocol: protocol,
         transitioning: true,
         lastErrorCode: error,
       );
@@ -136,6 +157,7 @@ class TunnelDiagnostics {
       return TunnelDiagnostics(
         isKnown: true,
         connected: false,
+        protocol: protocol,
         lastErrorCode: error,
         statistics: const TunnelStatistics.inactive(),
       );
@@ -148,9 +170,11 @@ class TunnelDiagnostics {
     return TunnelDiagnostics(
       isKnown: true,
       connected: true,
+      protocol: protocol,
       uptimeSeconds: uptime,
       lastErrorCode: error,
-      statistics: TunnelStatistics.fromPlatform(value['statistics']),
+      statistics: TunnelStatistics.fromPlatform(value['statistics'],
+          wireGuardHandshake: protocol == TunnelProtocol.wireguard),
     );
   }
 }

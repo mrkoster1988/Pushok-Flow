@@ -7,10 +7,15 @@ import sys
 import os
 import shutil
 import re
+import zipfile
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fetch_xray_android import verify_elf_16k
 
 
 QR_IMPORT_VERSION_CODE = 35
 QR_ACTIVITY = 'shop.pushok.flow.WireGuardQrActivity'
+XRAY_VERSION_CODE = 36
+XRAY_SERVICE = 'shop.pushok.flow.XrayVpnService'
 STORAGE_PERMISSIONS = {
     'android.permission.READ_EXTERNAL_STORAGE',
     'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -152,7 +157,42 @@ def check_apk(path: Path, aapt: str | None = None) -> None:
     if version_code >= QR_IMPORT_VERSION_CODE:
         check_qr_import_manifest(manifest.stdout, declared_permissions)
         print('APK private QR scanner, camera permission and optional hardware checks passed')
+    if version_code >= XRAY_VERSION_CODE:
+        check_xray_manifest(manifest.stdout, declared_permissions)
+        check_xray_libraries(path)
+        print('APK isolated Xray service, three native ABIs, ELF 16 KiB pages and licenses verified')
     print('APK package, INTERNET and WireGuard VPN service checks passed')
+
+
+def check_xray_manifest(tree: str, permissions: set[str]) -> None:
+    names = {XRAY_SERVICE, '.XrayVpnService', 'XrayVpnService'}
+    services = [attributes for attributes in element_attributes(tree, 'service')
+                if string_attribute(attributes, 'name') in names]
+    if len(services) != 1 or not is_false_attribute(services[0], 'exported') or \
+            string_attribute(services[0], 'permission') != 'android.permission.BIND_VPN_SERVICE':
+        raise ValueError('Xray service must be single, private and protected by BIND_VPN_SERVICE')
+    if string_attribute(services[0], 'process') not in (':xray', 'shop.pushok.flow:xray'):
+        raise ValueError('Xray Go runtime must run in its own process')
+    foreground = attribute_value(services[0], 'foregroundServiceType') or ''
+    if not re.match(r'^(?:\(type 0x1[01]\)0x40000000\b|"specialUse")', foreground):
+        raise ValueError('Xray service foreground type must be specialUse')
+    if not {'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
+            'android.permission.ACCESS_NETWORK_STATE'} <= permissions:
+        raise ValueError('Xray foreground or network permissions missing')
+
+
+def check_xray_libraries(path: Path) -> None:
+    with zipfile.ZipFile(path) as apk:
+        for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64'):
+            name = f'lib/{abi}/libgojni.so'
+            try: data = apk.read(name)
+            except KeyError as error: raise ValueError(f'Xray native library missing for {abi}') from error
+            verify_elf_16k(data)
+        for name in ('libXray-MIT.txt', 'xray-core-MPL-2.0.txt', 'xray-sources.txt'):
+            try: notice = apk.read(f'assets/licenses/{name}')
+            except KeyError as error: raise ValueError('Xray redistribution notice missing from APK') from error
+            if not notice:
+                raise ValueError('Empty Xray redistribution notice')
 
 
 if __name__ == '__main__':

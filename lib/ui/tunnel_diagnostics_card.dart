@@ -3,26 +3,31 @@ import 'package:material_ui/material_ui.dart';
 import '../design/pushok_theme.dart';
 import '../platform/tunnel_diagnostics.dart';
 
-/// Displays a passive WireGuard snapshot; it does not probe remote services.
+/// Displays a passive tunnel snapshot; it does not probe remote services.
 class TunnelDiagnosticsCard extends StatelessWidget {
   const TunnelDiagnosticsCard({
     super.key,
     required this.diagnostics,
     required this.refreshing,
     required this.stale,
+    this.disconnecting = false,
     this.onRefresh,
+    this.onDisconnect,
   });
 
   final TunnelDiagnostics diagnostics;
   final bool refreshing;
   final bool stale;
+  final bool disconnecting;
   final VoidCallback? onRefresh;
+  final VoidCallback? onDisconnect;
 
   bool get _current => !stale && diagnostics.isKnown;
   bool get _active =>
       _current && diagnostics.connected && !diagnostics.transitioning;
   bool get _statisticsAvailable => _active &&
       diagnostics.statistics.status == TunnelStatisticsStatus.available;
+  bool get _wireGuard => diagnostics.protocol == TunnelProtocol.wireguard;
 
   String get _summary {
     if (!_current) {
@@ -94,19 +99,27 @@ class TunnelDiagnosticsCard extends StatelessWidget {
   );
 
   void _showHelp(BuildContext context) {
+    final transportHelp = _wireGuard
+        ? 'Рукопожатие WireGuard означает, что туннель обменялся ключами '
+          'хотя бы с одним узлом. Здесь показано последнее известное '
+          'рукопожатие среди узлов профиля.\n\n'
+          'Даже недавнее рукопожатие не подтверждает доступность сайтов, '
+          'работу DNS или прямые маршруты исключённых приложений. '
+          'Давнее рукопожатие возможно при простое и само по себе не означает сбой.'
+        : diagnostics.protocol == TunnelProtocol.vless
+            ? 'Состояние VLESS показывает работу локального туннеля. Само включение '
+              'не подтверждает доступность сайтов, работу DNS или прямые маршруты '
+              'исключённых приложений. Счётчики VLESS в этой версии недоступны.'
+            : 'Протокол и свежие показатели пока неизвестны. Обновите диагностику. '
+              'Состояние локального туннеля само по себе не подтверждает доступность сайтов.';
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Что показывает диагностика'),
         scrollable: true,
-        content: const Text(
-          'Рукопожатие WireGuard означает, что туннель обменялся ключами '
-          'хотя бы с одним узлом. Здесь показано последнее известное '
-          'рукопожатие среди узлов профиля.\n\n'
-          'Даже недавнее рукопожатие не подтверждает доступность сайтов, '
-          'работу DNS или прямые маршруты исключённых приложений. '
-          'Давнее рукопожатие возможно при простое и само по себе не означает сбой.\n\n'
-          'Получено и отправлено — накопленные счётчики туннеля WireGuard, '
+        content: Text(
+          '$transportHelp\n\n'
+          'Получено и отправлено — накопленные счётчики туннеля, '
           'а не скорость соединения. Прямой трафик исключённых приложений '
           'в них не входит. После нового подключения счётчики могут начаться заново.',
         ),
@@ -147,8 +160,23 @@ class TunnelDiagnosticsCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(_summary, key: const Key('tunnel_diagnostics_summary'),
             style: const TextStyle(color: PushokPalette.muted)),
-          _metric('Рукопожатие WireGuard', _handshake,
-              const Key('tunnel_handshake_value')),
+          if (!_current) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('recover_tunnel_disconnect'),
+              onPressed: refreshing || disconnecting ? null : onDisconnect,
+              icon: disconnecting
+                  ? const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.power_settings_new),
+              label: Text(disconnecting ? 'Отключение…' : 'Отключить туннель'),
+            ),
+          ],
+          if (_wireGuard)
+            _metric('Рукопожатие WireGuard', _handshake,
+                const Key('tunnel_handshake_value')),
+          if (diagnostics.protocol == TunnelProtocol.vless)
+            _metric('Протокол', 'VLESS', const Key('tunnel_protocol_value')),
           _metric('Получено', _bytes(diagnostics.statistics.rxBytes),
               const Key('tunnel_rx_value')),
           _metric('Отправлено', _bytes(diagnostics.statistics.txBytes),

@@ -49,7 +49,7 @@ void main() {
       mutationsEnabled: true,
       onAdd: () => adds++,
     ));
-    expect(find.text('Профили WireGuard'), findsOneWidget);
+    expect(find.text('Профили подключения'), findsOneWidget);
     expect(find.textContaining('Профилей пока нет.'), findsOneWidget);
     expect(adds, 0);
     await _tap(tester, 'add_wireguard_profile');

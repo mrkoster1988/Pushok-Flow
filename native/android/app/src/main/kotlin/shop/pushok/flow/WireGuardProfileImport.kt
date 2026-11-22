@@ -99,7 +99,7 @@ class WireGuardProfileImport(
         } else Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             // .conf has inconsistent MIME types across Android document providers.
-            // The bounded reader and WireGuard parser decide whether content is valid.
+            // The bounded reader and protocol parser decide whether content is valid.
             type = if (source == Source.QR_IMAGE) "image/*" else "*/*"
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
@@ -129,8 +129,9 @@ class WireGuardProfileImport(
             if (request.source == Source.CAMERA) {
                 val cameraError = data?.getStringExtra(WireGuardQrActivity.EXTRA_ERROR)
                 if (cameraError != null) {
-                    val safe = cameraError.takeIf { it in setOf("PROFILE_QR_CAMERA_DENIED",
-                        "PROFILE_QR_UNAVAILABLE", "PROFILE_IMPORT_INVALID") } ?: "PROFILE_IMPORT_INVALID"
+                    val safe = cameraError.takeIf { it in ProfileFormatFailure.SAFE_CODES ||
+                        it in setOf("PROFILE_QR_CAMERA_DENIED", "PROFILE_QR_UNAVAILABLE") }
+                        ?: "PROFILE_IMPORT_INVALID"
                     finish(request, code = safe)
                     return true
                 }
@@ -187,9 +188,13 @@ class WireGuardProfileImport(
                 }
                 // Parse before crossing the channel. The editor still requires explicit Save.
                 // No filename, URI, raw parser error, or parsed peer/key object is returned.
-                val parsed = Config.parse(ByteArrayInputStream(draft.toByteArray(StandardCharsets.UTF_8)))
-                if (parsed.peers.isEmpty()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INVALID")
+                if (ConnectionProfile.validateShape(draft) == ConnectionProfile.Kind.WIREGUARD) {
+                    val parsed = Config.parse(ByteArrayInputStream(draft.toByteArray(StandardCharsets.UTF_8)))
+                    if (parsed.peers.isEmpty()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INVALID")
+                }
                 if (!request.cancelled.get()) config = draft
+            } catch (error: ProfileFormatFailure) {
+                failure = error.code
             } catch (error: ProfileImportReader.Failure) {
                 failure = error.code
             } catch (_: com.wireguard.config.BadConfigException) {
@@ -252,7 +257,12 @@ class WireGuardProfileImport(
         val message = when (code) {
             "PROFILE_IMPORT_BUSY" -> "Импорт профиля уже выполняется"
             "PROFILE_IMPORT_TOO_LARGE" -> "Файл профиля больше 65 536 байт"
-            "PROFILE_IMPORT_INVALID" -> "Нужен полный профиль WireGuard в формате UTF-8"
+            "PROFILE_IMPORT_INVALID" -> "Нужен полный профиль WireGuard или ссылка VLESS в формате UTF-8"
+            "INVALID_VLESS_CONFIG" -> "Проверьте ссылку VLESS: обязательные параметры отсутствуют или неверны"
+            "UNSUPPORTED_PROFILE" -> "Поддерживаются профиль WireGuard и ссылка VLESS"
+            "UNSUPPORTED_TRANSPORT" -> "Для VLESS пока поддерживается транспорт TCP / RAW без HTTP-заголовка"
+            "UNSUPPORTED_SECURITY" -> "Для VLESS требуется TLS или REALITY с encryption=none и проверкой сертификата"
+            "UNSUPPORTED_PROFILE_OPTION" -> "Ссылка VLESS содержит пока неподдерживаемый параметр"
             "PROFILE_IMPORT_INTERRUPTED" -> "Импорт профиля прерван"
             "PROFILE_IMPORT_UNAVAILABLE" -> "Импорт профиля сейчас недоступен"
             "PROFILE_QR_CAMERA_DENIED" -> "Доступ к камере не разрешён"

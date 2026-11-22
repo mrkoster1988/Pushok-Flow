@@ -83,14 +83,14 @@ class WireGuardQrActivity : Activity() {
             }
         }
         layout.addView(TextView(this).apply {
-            text = "QR-код WireGuard"
+            text = "QR-код подключения"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.rgb(96, 232, 232))
             setPadding(0, dp(8), 0, dp(8))
         })
         layout.addView(TextView(this).apply {
-            text = "Наведите камеру на QR-код профиля в WGDashboard."
+            text = "Наведите камеру на QR-код WireGuard или VLESS из 3x-ui."
             textSize = 16f
             setTextColor(Color.rgb(190, 206, 225))
             setPadding(0, 0, 0, dp(12))

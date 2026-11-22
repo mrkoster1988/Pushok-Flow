@@ -28,6 +28,8 @@ class MainActivity : FlutterActivity() {
             override fun onStateChange(newState: Tunnel.State) {}
         }
         @Volatile var backend: GoBackend? = null
+        @Volatile var xray: XrayTunnelClient? = null
+        var protocol = TunnelConnectionSession.Protocol.WIREGUARD
         val operationInProgress = ProfileOperationGate()
         val routeSettingsState = RouteSettingsState()
     }
@@ -35,6 +37,44 @@ class MainActivity : FlutterActivity() {
     private var backend: GoBackend?
         get() = Session.backend
         set(value) { Session.backend = value }
+    // Only accessed on the shared connection queue. The native Xray library is
+    // loaded exclusively by its private :xray service, never alongside GoBackend.
+    private val xray: XrayTunnelClient
+        get() = Session.xray ?: XrayTunnelClient(applicationContext).also { Session.xray = it }
+
+    private fun readTunnelState(): Boolean {
+        val wireGuardUp = backend?.getState(tunnel) == Tunnel.State.UP
+        val xrayUp = xray.isUp()
+        // Ambiguous service state must not authorize profile/route mutations.
+        if (wireGuardUp && xrayUp) throw IllegalStateException("VPN_STATE_UNAVAILABLE")
+        if (wireGuardUp) Session.protocol = TunnelConnectionSession.Protocol.WIREGUARD
+        if (xrayUp) Session.protocol = TunnelConnectionSession.Protocol.VLESS
+        return wireGuardUp || xrayUp
+    }
+
+    private fun stopTunnels(): Boolean {
+        // Try both even when one state read or shutdown failed. A deliberate
+        // disconnect must remain available after a service/IPC failure.
+        var failed = false
+        try { backend?.setState(tunnel, Tunnel.State.DOWN, null) }
+        catch (_: Exception) { failed = true }
+        try { if (xray.stop()) failed = true }
+        catch (_: Exception) { failed = true }
+        if (failed) throw IllegalStateException("TUNNEL_STOP_FAILED")
+        return readTunnelState()
+    }
+
+    private fun validateConnectionProfile(raw: String): ConnectionProfile.Kind {
+        val kind = ConnectionProfile.validateShape(raw)
+        if (kind == ConnectionProfile.Kind.WIREGUARD) {
+            try {
+                WireGuardRouting.prepare(raw, emptySet())
+                val parsed = Config.parse(ByteArrayInputStream(raw.toByteArray(StandardCharsets.UTF_8)))
+                if (parsed.peers.isEmpty()) throw IllegalArgumentException()
+            } catch (_: Exception) { throw ProfileCatalogFailure("INVALID_CONFIG") }
+        }
+        return kind
+    }
     private val secureStore by lazy { SecureWireGuardStore(applicationContext) }
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
     private val appUpdates by lazy { AppUpdates(this) }
@@ -75,7 +115,7 @@ class MainActivity : FlutterActivity() {
         val expectedProfileId = (call.arguments as? Map<*, *>)?.get("expectedProfileId")
         if (raw.isNullOrBlank() || raw.length > 65536) {
             Session.operationInProgress.release(token)
-            result.error("INVALID_CONFIG", "Нужна конфигурация WireGuard", null)
+            result.error("INVALID_CONFIG", "Нужен профиль подключения", null)
             return
         }
         if (expectedProfileId != null && expectedProfileId !is String) {
@@ -107,22 +147,37 @@ class MainActivity : FlutterActivity() {
                     "Не удалось прочитать исключения приложений", null) }
                 return@execute
             }
+            var requestedProtocol = Session.protocol
             try {
-                val cleaned = WireGuardRouting.prepare(raw, exclusions)
-                val config = Config.parse(ByteArrayInputStream(cleaned.toByteArray(StandardCharsets.UTF_8)))
-                if (backend == null) backend = GoBackend(applicationContext)
+                val kind = validateConnectionProfile(raw)
+                requestedProtocol = if (kind == ConnectionProfile.Kind.VLESS)
+                    TunnelConnectionSession.Protocol.VLESS else TunnelConnectionSession.Protocol.WIREGUARD
+                val vlessProfile = if (kind == ConnectionProfile.Kind.VLESS) VlessProfile.parse(raw) else null
+                val config = if (kind == ConnectionProfile.Kind.WIREGUARD) {
+                    val cleaned = WireGuardRouting.prepare(raw, exclusions)
+                    Config.parse(ByteArrayInputStream(cleaned.toByteArray(StandardCharsets.UTF_8)))
+                } else null
                 val active = Session.connection.connect(
-                    readState = { backend?.getState(tunnel) == Tunnel.State.UP },
+                    protocol = requestedProtocol,
+                    readState = ::readTunnelState,
                     activate = {
                         // Never reconnect an already-UP tunnel or diagnose its
                         // old choices as missing before the session state check.
                         RouteAppAvailability.requireForConnection(exclusions, ::isRouteAppAvailable)
+                        Session.protocol = requestedProtocol
                         try {
-                            backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
+                            if (vlessProfile != null) {
+                                xray.start(vlessProfile, exclusions)
+                            } else {
+                                if (backend == null) backend = GoBackend(applicationContext)
+                                backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
+                            }
                         } catch (_: PackageManager.NameNotFoundException) {
                             // The app may disappear between preflight and the
                             // backend's addDisallowedApplication call.
                             throw TunnelConnectionFailure("ROUTES_APPS_UNAVAILABLE")
+                        } catch (error: XrayTunnelFailure) {
+                            throw TunnelConnectionFailure(error.code)
                         }
                     },
                 )
@@ -135,12 +190,14 @@ class MainActivity : FlutterActivity() {
                         "Android не подтвердил доступность приложения из исключений. Проверьте раздел «Маршруты».", null) }
                     "ROUTES_APPS_CHECK_FAILED" -> runOnUiThread { result.error("ROUTES_APPS_CHECK_FAILED",
                         "Не удалось проверить приложения из исключений. Повторите проверку в «Маршрутах».", null) }
-                    else -> runOnUiThread { result.error("WG_CONNECT_FAILED", "Не удалось установить туннель. Проверьте параметры сервера.", null) }
+                    else -> runOnUiThread { result.error(requestedProtocol.connectError,
+                        "Не удалось установить туннель. Проверьте параметры сервера.", null) }
                 }
-            } catch (_: Exception) {
-                Session.connection.failedConnect { backend?.getState(tunnel) == Tunnel.State.UP }
+            } catch (error: Exception) {
+                Session.connection.failedConnect(requestedProtocol, ::readTunnelState)
                 // Never send raw exceptions: they might include the private key or full configuration.
-                runOnUiThread { result.error("WG_CONNECT_FAILED", "Не удалось установить туннель. Проверьте параметры сервера.", null) }
+                runOnUiThread { result.error(profileErrorCode(error, requestedProtocol.connectError),
+                    "Не удалось установить туннель. Проверьте параметры сервера.", null) }
             } finally {
                 Session.operationInProgress.release(token)
             }
@@ -200,6 +257,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun profileErrorCode(error: Exception, fallback: String): String {
+        if (error is ProfileFormatFailure) return error.code
         val code = (error as? ProfileCatalogFailure)?.code
         return if (code in setOf("PROFILE_NAME_INVALID", "PROFILE_LIMIT_REACHED", "PROFILE_NOT_FOUND",
                 "PROFILE_STORE_UNAVAILABLE", "PROFILE_CHANGED", "INVALID_CONFIG", "VPN_ACTIVE", "VPN_STATE_UNAVAILABLE")) code!! else fallback
@@ -214,7 +272,7 @@ class MainActivity : FlutterActivity() {
         io.execute {
             val failure = try {
                 // A failed state read is not proof that the tunnel is down.
-                val state = Session.connection.observe { backend?.getState(tunnel) == Tunnel.State.UP }
+                val state = Session.connection.observe(::readTunnelState)
                 if (!state.known) throw ProfileCatalogFailure("VPN_STATE_UNAVAILABLE")
                 if (state.connected) throw ProfileCatalogFailure("VPN_ACTIVE")
                 action()
@@ -247,7 +305,7 @@ class MainActivity : FlutterActivity() {
         }
         io.execute {
             val failure = try {
-                val state = Session.connection.observe { backend?.getState(tunnel) == Tunnel.State.UP }
+                val state = Session.connection.observe(::readTunnelState)
                 if (!state.known) throw RouteSettingsFailure("VPN_STATE_UNAVAILABLE")
                 if (state.connected) throw RouteSettingsFailure("VPN_ACTIVE")
                 routeStore.replace(request)
@@ -281,14 +339,13 @@ class MainActivity : FlutterActivity() {
                     }
                     "vpnStatus" -> io.execute {
                         val currentBackend = backend
-                        val initial = Session.connection.observe {
-                            currentBackend?.getState(tunnel) == Tunnel.State.UP
-                        }
+                        val initial = Session.connection.observe(::readTunnelState)
                         var stateKnown = initial.known
                         var active = initial.connected
                         var samples: List<TunnelHealth.PeerSample>? = null
                         var sampledSessionStartMs: Long? = null
-                        if (stateKnown && active && !Session.operationInProgress.get()) {
+                        if (stateKnown && active && !Session.operationInProgress.get() &&
+                            Session.protocol == TunnelConnectionSession.Protocol.WIREGUARD) {
                             sampledSessionStartMs = Session.connection.connectedSinceElapsedMs
                             samples = try {
                                 val statistics = currentBackend?.getStatistics(tunnel)
@@ -306,9 +363,7 @@ class MainActivity : FlutterActivity() {
                             }
                             // A service can stop during the native statistics read. Discard its
                             // metrics if the tunnel state changed before the snapshot is returned.
-                            val afterStatistics = Session.connection.observe {
-                                currentBackend?.getState(tunnel) == Tunnel.State.UP
-                            }
+                            val afterStatistics = Session.connection.observe(::readTunnelState)
                             active = afterStatistics.connected
                             stateKnown = afterStatistics.known
                             if (!stateKnown) samples = null
@@ -320,7 +375,8 @@ class MainActivity : FlutterActivity() {
                         val status = TunnelHealth.snapshot(active, Session.operationInProgress.get(),
                             currentSessionStartMs, SystemClock.elapsedRealtime(), lastErrorCode,
                             stateKnown = stateKnown, peerSamples = samples,
-                            nowEpochMs = System.currentTimeMillis())
+                            nowEpochMs = System.currentTimeMillis(),
+                            isVless = Session.protocol == TunnelConnectionSession.Protocol.VLESS)
                         runOnUiThread { result.success(status) }
                     }
                     "listWireGuardProfiles" -> io.execute {
@@ -370,16 +426,8 @@ class MainActivity : FlutterActivity() {
                                    (createNew != null && createNew !is Boolean)) {
                             result.error("PROFILE_NOT_FOUND", "Не удалось выбрать профиль", null)
                         } else mutateProfile(result, "PROFILE_SAVE_FAILED") {
-                            try {
-                                // A parse failure must never overwrite a saved configuration.
-                                // Validate Flow's supported routing form too, without
-                                // altering the original configuration stored on disk.
-                                WireGuardRouting.prepare(config, emptySet())
-                                val parsed = Config.parse(ByteArrayInputStream(config.toByteArray(StandardCharsets.UTF_8)))
-                                if (parsed.peers.isEmpty()) throw IllegalArgumentException()
-                            } catch (_: Exception) {
-                                throw ProfileCatalogFailure("INVALID_CONFIG")
-                            }
+                            // Validation precedes the encrypted catalog write for both protocols.
+                            validateConnectionProfile(config)
                             secureStore.save(config, profileId as? String, name as? String, createNew == true)
                         }
                     }
@@ -415,21 +463,23 @@ class MainActivity : FlutterActivity() {
                             result.error("VPN_BUSY", "Подключение уже выполняется", null)
                         } else if (config.isNullOrBlank() || config.length > 65536) {
                             // Do not show Android's VPN approval for an unusable profile.
-                            result.error("INVALID_CONFIG", "Нужна конфигурация WireGuard", null)
+                            result.error("INVALID_CONFIG", "Нужен профиль подключения", null)
                         } else {
                             val token = Session.operationInProgress.acquire()
                             if (token == null) {
                                 result.error("VPN_BUSY", "Подключение уже изменяется", null)
                             } else try {
+                                validateConnectionProfile(config)
                                 val approval = VpnService.prepare(this)
                                 if (approval != null) {
                                     pending = PendingTunnelRequest(call, result, token)
                                     startActivityForResult(approval, vpnRequestCode)
                                 } else startTunnel(call, result, token)
-                            } catch (_: Exception) {
+                            } catch (error: Exception) {
                                 pending = null
                                 Session.operationInProgress.release(token)
-                                result.error("VPN_REQUEST_INTERRUPTED", "Не удалось открыть разрешение VPN", null)
+                                result.error(profileErrorCode(error, "VPN_REQUEST_INTERRUPTED"),
+                                    "Не удалось подготовить подключение", null)
                             }
                         }
                     }
@@ -440,12 +490,13 @@ class MainActivity : FlutterActivity() {
                         } else io.execute {
                             try {
                                 Session.connection.disconnect(
-                                    readState = { backend?.getState(tunnel) == Tunnel.State.UP },
-                                    deactivate = { backend?.setState(tunnel, Tunnel.State.DOWN, null) == Tunnel.State.UP },
+                                    protocol = Session.protocol,
+                                    readState = ::readTunnelState,
+                                    deactivate = ::stopTunnels,
                                 )
                                 runOnUiThread { result.success(mapOf("connected" to false)) }
                             } catch (_: Exception) {
-                                runOnUiThread { result.error("WG_DISCONNECT_FAILED", "Не удалось отключить туннель", null) }
+                                runOnUiThread { result.error(Session.protocol.disconnectError, "Не удалось отключить туннель", null) }
                             } finally {
                                 Session.operationInProgress.release(token)
                             }

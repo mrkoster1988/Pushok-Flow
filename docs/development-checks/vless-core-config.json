@@ -1,0 +1,61 @@
+{
+  "artifact_sha256": "c9ef50234579c8bd7120e50428494c15bc760a45b87c6d60538636ecf7aa12c3",
+  "version": {
+    "version": "26.11.9"
+  },
+  "positive_cases": [
+    {
+      "case": 1,
+      "security": "tls",
+      "flow": "xtls-rprx-vision",
+      "configuration_sha256": "1c1c2691a618c252c3bb82f390e3e8129e64bb7f65afce96e4d39b352c653aeb",
+      "success": true,
+      "error": ""
+    },
+    {
+      "case": 2,
+      "security": "reality",
+      "flow": "xtls-rprx-vision",
+      "configuration_sha256": "3b4b1bd58b07d79fc7b1c6d820262d4e207ab2651cc8a79cd850c2298bc89070",
+      "success": true,
+      "error": ""
+    },
+    {
+      "case": 3,
+      "security": "tls",
+      "flow": null,
+      "configuration_sha256": "e61eecef5e8298db810beca7fa2af8d4d7ca766276685ca045c454c745872edb",
+      "success": true,
+      "error": ""
+    },
+    {
+      "case": 4,
+      "security": "reality",
+      "flow": null,
+      "configuration_sha256": "0405266da5421cfa77f0946d07dc64dd6a1eb617556be568912ee16e0fcb6e9a",
+      "success": true,
+      "error": ""
+    }
+  ],
+  "invalid_protocol_rejected": true,
+  "core_running_after_tests": false,
+  "recordedAt": "2026-11-22T09:41:26.344407+00:00",
+  "scope": "Official Linux core validation of generated Android configurations; no network or TUN start",
+  "upstreamRelease": "https://github.com/XTLS/libXray/releases/tag/v26.11.9",
+  "androidAarSha256": "4ddb0608ffee6e642ab9cda056c37df0b420a6b1e2be7292de33a1a3f3ca7a9a",
+  "artifacts": {
+    "libxray-linux-x64.zip": {
+      "sha256": "c9ef50234579c8bd7120e50428494c15bc760a45b87c6d60538636ecf7aa12c3",
+      "sizeBytes": 25448264
+    },
+    "libxray-linux-x64/libXray.so": {
+      "sha256": "cb7b949fe682459b5d8d0239b444a8483bea97c09184b148136ec50e6245bcb3",
+      "sizeBytes": 36585088
+    }
+  },
+  "sourceFilesSha256": {
+    "native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt": "de3842be95b4f492fc744f85881edc6c23fb7a457564d8cee15f409c8e73f7a8",
+    "native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt": "fadafe9d0dab07d2af0b75bfbd408fdd51d550aa82715dd126a62477ffd8034c",
+    "native/android/app/src/main/kotlin/shop/pushok/flow/XrayConfig.kt": "584e672acd0b7b9eebe8328adb5fa0328b6c340dca3d6e196421ccb8478bcd84"
+  }
+}

@@ -157,6 +157,7 @@ CI закрепляет Flutter `3.50.0`, Java 17, Kotlin CLI `2.2.21`, Material
 ```bash
 python3 -m unittest discover -s tests -v
 bash tools/bootstrap_android.sh
+python3 tools/fetch_xray_android.py
 flutter pub get --enforce-lockfile
 git diff --exit-code -- pubspec.lock
 bash tools/check_kotlin_routing.sh
@@ -170,6 +171,8 @@ python3 tools/verify_android_apk.py build/app/outputs/flutter-apk/app-release.ap
 При стандартном сгенерированном Android-проекте этот результат ещё требует подписи постоянным ключом. Для окончательного APK `verify_release_apk.py` проверяет сертификат, подпись, пакет, версию, SDK, отсутствие режима отладки и необходимые компоненты. Выравнивание отдельно проверяется через `zipalign -c -P 16 4`. Скрипт `create_update_manifest.py` формирует публичные файлы выпуска. Команды подписи и требования к хранению ключа приведены в [UPDATES.md](UPDATES.md).
 
 Bootstrap переносит только Android-часть временного Flutter-проекта, затем подключает нативный мост, updater и его ограниченный FileProvider. Исходники Flutter, `pubspec.yaml`, тесты и документация сохраняются. Резервное копирование защищённых профилей отключено.
+
+Начиная с v0.36.0 отдельный шаг `fetch_xray_android.py` загружает официальный libXray v26.11.9 только на машине сборки. Он проверяет точные SHA-256 и размеры ZIP/AAR, наличие четырёх ABI и выравнивание ELF под страницы 16 КиБ. APK включает нужные Flutter ABI и лицензии; установленное приложение не загружает исполняемый код. Служба Xray обязана оставаться в отдельном приватном процессе `:xray`.
 
 Workflow `android-release.yml` для подписи и публикации через GitHub secrets запускается только вручную и предназначен для будущего использования после настройки секретов; этот вариант не активирован. В v0.24.0 постоянная подпись выполнена локально, а `publish-verified-update.yml` передал проверенный результат в GitHub Release без ключа подписи в CI. Debug workflow остаётся средством разработки, а регулярный канал обновлений использует постоянный сертификат.
 

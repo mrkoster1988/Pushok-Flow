@@ -24,7 +24,8 @@ fun main() {
     val status = TunnelHealth.snapshot(true, false, 1000L, 10500L, null)
     check(status["state"] == "connected")
     check(status["uptimeSeconds"] == 9L)
-    check(status.keys == setOf("connected", "state", "uptimeSeconds", "lastErrorCode", "statistics"))
+    check(status.keys == setOf("connected", "state", "uptimeSeconds", "lastErrorCode", "statistics", "protocol"))
+    check(status["protocol"] == "wireguard")
     check(TunnelHealth.snapshot(false, true, null, 500L, "WG_CONNECT_FAILED")["state"] == "transitioning")
 
     // A failed state query preserves the last known boolean but is not fresh evidence.
@@ -88,5 +89,11 @@ fun main() {
     unavailable(statistics(peers, busy = true))
     unavailable(statistics(peers, connected = false, busy = true))
     unavailable(statistics(peers, connected = false, stateKnown = false))
+    // Switching protocols cannot relabel old WireGuard counters as a VLESS handshake.
+    val vless = TunnelHealth.snapshot(true, false, 1000L, 5000L, null,
+        peerSamples = peers, nowEpochMs = 100000L, isVless = true)
+    check(vless["protocol"] == "vless")
+    check(vless["connected"] == true && vless["uptimeSeconds"] == 4L)
+    unavailable(vless["statistics"] as Map<*, *>)
     println("TunnelHealth executable checks passed")
 }

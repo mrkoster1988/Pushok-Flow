@@ -15,7 +15,9 @@ class AppInformationSheet extends StatelessWidget {
     required this.stale,
     required this.onClose,
     required this.version,
+    this.disconnecting = false,
     this.onRefresh,
+    this.onDisconnect,
     this.connectionError,
     this.lastErrorCode,
   });
@@ -24,8 +26,10 @@ class AppInformationSheet extends StatelessWidget {
   final TunnelDiagnostics diagnostics;
   final bool refreshing;
   final bool stale;
+  final bool disconnecting;
   final VoidCallback onClose;
   final VoidCallback? onRefresh;
+  final VoidCallback? onDisconnect;
   final String? connectionError;
   final String? lastErrorCode;
   final String version;
@@ -93,7 +97,9 @@ class AppInformationSheet extends StatelessWidget {
               diagnostics: diagnostics,
               refreshing: refreshing,
               stale: stale,
+              disconnecting: disconnecting,
               onRefresh: onRefresh,
+              onDisconnect: onDisconnect,
             ) else const PushokPanel(
               child: Text('Диагностика связи доступна в приложении для Android.'),
             ),

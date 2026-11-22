@@ -15,6 +15,8 @@ const _profile = '[Interface]\n'
     'PublicKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n'
     'AllowedIPs = 0.0.0.0/0\n'
     'Endpoint = vpn.example:51820\n';
+const _vlessProfile = 'vless://00000000-0000-4000-8000-000000000001@example.invalid:443'
+    '?type=tcp&security=tls&sni=example.invalid&flow=xtls-rprx-vision#Fixture';
 
 Map<String, Object?> _statistics({int rx = 2048, int tx = 1024, int? age = 5}) => {
   'status': 'available',
@@ -60,6 +62,7 @@ class _AndroidBridge {
   bool connected = false;
   bool failProfileExists = false;
   PlatformException? connectError;
+  PlatformException? disconnectError;
   PlatformException? saveError;
   Object? privacyError;
   Object? statusError;
@@ -67,10 +70,12 @@ class _AndroidBridge {
   Set<String> bypassPackages = {};
   Set<String> unavailablePackages = {};
   String? statusState;
+  String? statusProtocol;
   bool? statusConnected;
   Map<String, Object?> statistics = _statistics();
   bool invalidPrivacyToken = false;
   Completer<void>? connectGate;
+  Completer<void>? disconnectGate;
   Completer<void>? saveGate;
   Completer<String?>? loadGate;
   Completer<String>? privacyGate;
@@ -150,6 +155,8 @@ class _AndroidBridge {
         connected = true;
         return {'connected': true};
       case 'disconnectWireGuard':
+        if (disconnectGate != null) await disconnectGate!.future;
+        if (disconnectError != null) throw disconnectError!;
         connected = false;
         return {'connected': false};
       case 'vpnStatus':
@@ -158,6 +165,7 @@ class _AndroidBridge {
         return {
           'connected': statusConnected ?? connected,
           'state': statusState ?? (connected ? 'connected' : 'disconnected'),
+          if (statusProtocol != null) 'protocol': statusProtocol,
           'uptimeSeconds': connected ? 12 : 0,
           'lastErrorCode': null,
           'statistics': connected ? statistics : {'status': 'inactive'},
@@ -849,6 +857,63 @@ void main() {
     });
   });
 
+  testWidgets('Unknown startup state offers explicit recovery Stop without any Connect or profile read',
+      (tester) async {
+    // The isolated native service survived, but this fresh UI has never seen UP.
+    bridge.connected = true;
+    bridge.savedProfile = _vlessProfile;
+    bridge.statusError = PlatformException(code: 'XRAY_STATUS_FAILED', message: 'PRIVATE_NATIVE_DETAIL');
+    await _withApp(tester, () async {
+      expect(tester.widget<InkWell>(find.byKey(const Key('pushok_connect_button'))).onTap, isNull);
+      await _showDiagnostics(tester);
+      final recovery = find.byKey(const Key('recover_tunnel_disconnect'));
+      await tester.ensureVisible(recovery);
+      expect(tester.widget<OutlinedButton>(recovery).onPressed, isNotNull);
+      expect(find.textContaining('PRIVATE_NATIVE_DETAIL'), findsNothing);
+      final earlierReads = bridge.named('vpnStatus').length;
+      bridge.statusError = null;
+      await tester.tap(recovery);
+      await tester.pumpAndSettle();
+      expect(bridge.named('disconnectWireGuard'), hasLength(1));
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('saveWireGuardProfile'), isEmpty);
+      expect(bridge.named('vpnStatus').length, greaterThan(earlierReads));
+      expect(find.byKey(const Key('recover_tunnel_disconnect')), findsNothing);
+      await _closeInformation(tester);
+      expect(find.text('Статус: отключено'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Recovery Stop is serialized and a failure cannot claim disconnection or disclose native data',
+      (tester) async {
+    bridge.connected = true;
+    bridge.statusState = 'unknown';
+    bridge.statusConnected = false;
+    bridge.disconnectError = PlatformException(code: 'XRAY_DISCONNECT_FAILED',
+        message: 'PRIVATE_STOP_DETAIL');
+    bridge.disconnectGate = Completer<void>();
+    await _withApp(tester, () async {
+      await _showDiagnostics(tester);
+      final recovery = find.byKey(const Key('recover_tunnel_disconnect'));
+      final queued = tester.widget<OutlinedButton>(recovery).onPressed!;
+      queued();
+      queued();
+      await tester.pump();
+      expect(bridge.named('disconnectWireGuard'), hasLength(1));
+      expect(tester.widget<OutlinedButton>(recovery).onPressed, isNull);
+      bridge.disconnectGate!.complete();
+      await tester.pumpAndSettle();
+      expect(bridge.connected, isTrue);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(find.textContaining('PRIVATE_STOP_DETAIL'), findsNothing);
+      expect(find.text('Туннель выключен.'), findsNothing);
+      expect(tester.widget<OutlinedButton>(recovery).onPressed, isNotNull);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   testWidgets('A diagnostic timeout hides stale data and ignores the eventual old response', (tester) async {
     bridge.connected = true;
     await _withApp(tester, () async {
@@ -1081,6 +1146,40 @@ void main() {
       await _openServers(tester);
       expect(tester.widget<OutlinedButton>(find.byKey(const Key('add_wireguard_profile'))).onPressed, isNull);
       expect(tester.widget<OutlinedButton>(find.byKey(const Key('edit_wireguard_profile_$_firstProfileId'))).onPressed, isNull);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Selecting VLESS beside WireGuard keeps the full link private until explicit connection',
+      (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_secondProfileId] = {'name': '3x-ui', 'config': _vlessProfile};
+    bridge.statusProtocol = 'vless';
+    bridge.statistics = {'status': 'unavailable'};
+    await _withApp(tester, () async {
+      await _openServers(tester);
+      expect(find.text('Мой профиль'), findsOneWidget);
+      expect(find.text('3x-ui'), findsOneWidget);
+      expect(find.textContaining('example.invalid'), findsNothing);
+      final select = find.byKey(const Key('select_wireguard_profile_$_secondProfileId'));
+      await tester.ensureVisible(select);
+      await tester.tap(select);
+      await tester.pumpAndSettle();
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Главная')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      final args = bridge.named('connectWireGuard').single.arguments as Map;
+      expect(args['config'], _vlessProfile);
+      expect(args['expectedProfileId'], _secondProfileId);
+      expect(bridge.profiles[_firstProfileId]?['config'], _profile);
+      await tester.tap(find.byKey(const Key('open_app_information')));
+      await tester.pumpAndSettle();
+      expect(find.text('VLESS'), findsOneWidget);
+      expect(find.text('Рукопожатие WireGuard'), findsNothing);
+      expect(find.textContaining('example.invalid'), findsNothing);
       expect(tester.takeException(), isNull);
     });
   });

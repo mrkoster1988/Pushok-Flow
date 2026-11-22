@@ -66,6 +66,38 @@ String _value(WidgetTester tester, String key) =>
     tester.widget<Text>(find.byKey(Key(key))).data!;
 
 void main() {
+  testWidgets('VLESS shows local tunnel status without a WireGuard handshake or invented counters',
+      (tester) async {
+    await _showCard(tester, diagnostics: const TunnelDiagnostics(
+      isKnown: true, connected: true, protocol: TunnelProtocol.vless,
+      uptimeSeconds: 90,
+    ));
+    expect(find.text('VLESS'), findsOneWidget);
+    expect(find.text('Рукопожатие WireGuard'), findsNothing);
+    expect(find.byKey(const Key('tunnel_handshake_value')), findsNothing);
+    expect(_value(tester, 'tunnel_rx_value'), '—');
+    expect(_value(tester, 'tunnel_tx_value'), '—');
+    expect(_value(tester, 'tunnel_uptime_value'), '1 мин 30 сек');
+    expect(find.text('Туннель включён. Статистика пока недоступна.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('info_tunnel_diagnostics')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Состояние VLESS'), findsOneWidget);
+    expect(find.textContaining('не подтверждает доступность сайтов'), findsOneWidget);
+    expect(find.textContaining('Рукопожатие WireGuard'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Unknown protocol never renders a guessed VLESS or WireGuard label', (tester) async {
+    await _showCard(tester, diagnostics: const TunnelDiagnostics.unavailable(connected: true));
+    expect(find.text('VLESS'), findsNothing);
+    expect(find.text('Рукопожатие WireGuard'), findsNothing);
+    await tester.tap(find.byKey(const Key('info_tunnel_diagnostics')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Протокол и свежие показатели пока неизвестны.'), findsOneWidget);
+    expect(find.textContaining('Состояние VLESS'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Measured zero is shown as zero; unknown statistics never become zero', (tester) async {
     await _showCard(tester, diagnostics: _zero);
     expect(_value(tester, 'tunnel_rx_value'), '0 Б');

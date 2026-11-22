@@ -6,7 +6,7 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 
-/** Only bounded text decoding. WireGuard grammar is validated by the SDK afterwards. */
+/** Only bounded text decoding. The chosen protocol's grammar is validated afterwards. */
 object ProfileImportReader {
     const val MAX_BYTES = 65536
 

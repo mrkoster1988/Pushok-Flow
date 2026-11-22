@@ -5,6 +5,7 @@ build/
 .idea/
 *.iml
 android/.gradle/
+android/app/libs/
 **/local.properties
 .env
 *.key

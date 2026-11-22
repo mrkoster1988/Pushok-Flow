@@ -1,0 +1,23 @@
+Pushok Flow bundles the unmodified official libXray v26.11.9 Android AAR.
+
+libXray wrapper: MIT
+https://github.com/XTLS/libXray/tree/5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3
+Source archive: https://github.com/XTLS/libXray/archive/5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3.tar.gz
+License: libXray-MIT.txt in this directory.
+
+Xray-core: Mozilla Public License 2.0
+Exact embedded core source: https://github.com/XTLS/Xray-core/tree/676eaf66f8f05d4d558ee7a74b4736623d3feeb9
+Source archive: https://github.com/XTLS/Xray-core/archive/676eaf66f8f05d4d558ee7a74b4736623d3feeb9.tar.gz
+License: xray-core-MPL-2.0.txt in this directory.
+No changes are made to these upstream libraries. Corresponding source remains
+available at the above upstream commit archives, including build instructions,
+go.mod and go.sum for the source dependency set.
+
+Official upstream build: Go1.27.3, Android NDKr30, API21, four Android ABIs.
+libxray-android.zip SHA256:
+1b1aa12124a7112af983a6cea74c77f27aadc6b650acf3c5a57019619ba9fa48
+libXray.aar SHA256:
+4ddb0608ffee6e642ab9cda056c37df0b420a6b1e2be7292de33a1a3f3ca7a9a
+
+The separate WireGuard backend remains com.wireguard.android:tunnel:1.0.20260102.
+Each native Go runtime runs in its own Android process.
