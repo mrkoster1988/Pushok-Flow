@@ -71,8 +71,11 @@ Flutter hot reload предназначен для разработки, а не
 | --- | --- | --- |
 | MAX / МАКС | `ru.oneme.app` | [MAX LLC](https://play.google.com/store/apps/details?hl=ru&id=ru.oneme.app) |
 | ВКонтакте | `com.vkontakte.android` | [VKL](https://play.google.com/store/apps/details?hl=ru&id=com.vkontakte.android) |
+| VK Мессенджер | `com.vk.im` | [VK LLC](https://play.google.com/store/apps/details?hl=ru&id=com.vk.im) |
 | Ozon | `ru.ozon.app.android` | [Internet Solutions LLC](https://play.google.com/store/apps/details?hl=ru&id=ru.ozon.app.android) |
 | Wildberries | `com.wildberries.ru` | [Wildberries LLC](https://play.google.com/store/apps/details?hl=ru&id=com.wildberries.ru) |
+
+Версия данных 1 содержала MAX, ВКонтакте, Ozon и Wildberries. Версия 2 добавляет отдельное приложение VK Мессенджер. Это публикация данных поверх неизменного исходника APK `3b124a098334c4f83cd4ca6385a1eb3780145555`: версия приложения, его код и подпись не меняются.
 
 Банковские приложения не добавляются по догадке: для каждой распространяемой версии нужен проверенный идентификатор. Отсутствие приложения в этом списке не мешает выбрать его вручную в «Маршрутах».
 
