@@ -21,6 +21,11 @@ android {{
     packaging {{
         jniLibs {{
             useLegacyPackaging = true
+            // WireGuard also ships x86, which Flutter release does not support.
+            // With --split-per-abi Flutter skips its default NDK ABI filter, and
+            // AGP's universal output otherwise includes that dependency ABI.
+            // Exclude only x86 at packaging time; ndk.abiFilters conflicts with splits.
+            excludes += "lib/x86/**"
         }}
     }}
     // --split-per-abi enables splitting in Flutter before the app DSL is read.

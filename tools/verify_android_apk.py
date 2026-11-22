@@ -393,7 +393,9 @@ def check_compact_native_packaging(path: Path, tree: str, expected_abi: str | No
             if item.is_dir() or item.file_size <= 0 or item.compress_size <= 0:
                 raise ValueError('Empty native library: ' + item.filename)
         if actual_abis != set(abis):
-            raise ValueError('APK native ABI set differs from the explicitly expected architectures')
+            raise ValueError('APK native ABI set differs from the explicitly expected architectures: '
+                             + 'expected=' + ','.join(sorted(abis))
+                             + '; actual=' + ','.join(sorted(actual_abis)))
 
 
 if __name__ == '__main__':

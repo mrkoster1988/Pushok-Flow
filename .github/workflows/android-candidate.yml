@@ -163,7 +163,7 @@ jobs:
       - name: Verify every candidate package and preserve exact bytes
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, shutil, subprocess, sys
+          import hashlib, json, os, shutil, subprocess, sys, zipfile
           from pathlib import Path
           sys.path.insert(0, 'tools')
           from verify_android_apk import NATIVE_ABIS, check_apk
@@ -172,6 +172,25 @@ jobs:
           expected = {'app-release.apk', *(f'app-{abi}-release.apk' for abi in NATIVE_ABIS)}
           if {path.name for path in build.glob('*.apk')} != expected:
               raise SystemExit('Expected exactly one universal and three standalone ABI APKs.')
+          # Capture all four outputs before the first validation can stop the job.
+          # In particular, third-party AARs can add an unsupported ABI to universal.
+          inventory = []
+          for abi in (None, *NATIVE_ABIS):
+              suffix = f'-{abi}' if abi else ''
+              apk = build / f'app{suffix}-release.apk'
+              if not apk.is_file() or not 0 < apk.stat().st_size <= MAX_APK_BYTES:
+                  raise SystemExit('Missing, empty or oversized candidate APK.')
+              with zipfile.ZipFile(apk) as archive:
+                  native = [{'name': item.filename, 'sizeBytes': item.file_size,
+                             'compressedBytes': item.compress_size, 'compressionMethod': item.compress_type}
+                            for item in archive.infolist()
+                            if item.filename.startswith('lib/') and item.filename.endswith('.so')]
+              actual_abis = sorted({item['name'].split('/')[1] for item in native})
+              inventory.append({'apkName': apk.name, 'sizeBytes': apk.stat().st_size,
+                                'expectedAbis': [abi] if abi else list(NATIVE_ABIS),
+                                'actualAbis': actual_abis, 'nativeLibraries': native})
+              print(f'Native inventory {apk.name}: ABIs={actual_abis}, libraries={len(native)}', flush=True)
+          Path('candidate-diagnostics/apk-native-inventory.json').write_text(json.dumps(inventory, indent=2) + '\n')
           toolchain = Path(os.environ['PUSHOK_SDK_BUILD_TOOLS'])
           aapt = str(toolchain / 'aapt')
           version, code = read_version(Path('pubspec.yaml'))

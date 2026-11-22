@@ -1,11 +1,17 @@
 """Standalone ABI packages retain identity, completeness and the existing release gates."""
-from contextlib import ExitStack
+from contextlib import ExitStack, chdir, redirect_stdout
+import fnmatch
 import hashlib
+import io
+import json
+import os
 from pathlib import Path
+import re
 import struct
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -15,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 import verify_android_apk as APK
 import verify_release_apk as RELEASE
+import patch_android_project as ANDROID_PATCH
 
 ABIS = ('arm64-v8a', 'armeabi-v7a', 'x86_64')
 LIBRARIES = ('libflutter.so', 'libapp.so', 'libgojni.so', 'libwg-go.so', 'libwg.so', 'libwg-quick.so')
@@ -92,6 +99,55 @@ class StandaloneAbiApkTests(unittest.TestCase):
                 self.write({**files_for(('arm64-v8a',)), path: elf()})
                 with self.assertRaisesRegex(ValueError, 'Unexpected native library path'):
                     APK.check_compact_native_packaging(self.apk, MANIFEST, 'arm64-v8a')
+
+    def test_wireguard_x86_is_removed_without_touching_supported_libraries(self):
+        # AGP's universal split includes every dependency ABI. WireGuard ships
+        # three x86 libraries in addition to the app's eighteen supported ones.
+        required = files_for(ABIS)
+        x86 = {f'lib/x86/{name}': elf() for name in ('libwg-go.so', 'libwg.so', 'libwg-quick.so')}
+        with_x86 = {**required, **x86}
+        self.write(with_x86)
+        with self.assertRaisesRegex(ValueError, 'ABI set differs'):
+            APK.check_compact_native_packaging(self.apk, MANIFEST)
+        managed = ANDROID_PATCH.patch_native_packaging('android {}\n')
+        patterns = re.findall(r'excludes\s*\+=\s*"([^"]+)"', managed)
+        packaged = {name: data for name, data in with_x86.items()
+                    if not any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)}
+        self.assertEqual(packaged, required)
+        self.write(packaged)
+        APK.check_compact_native_packaging(self.apk, MANIFEST)
+        APK.check_xray_libraries(self.apk)
+
+    def test_all_candidate_abi_inventories_survive_first_apk_gate_failure(self):
+        build = self.root / 'build/app/outputs/flutter-apk'
+        build.mkdir(parents=True)
+        for abi in (None, *ABIS):
+            files = files_for(ABIS if abi is None else (abi,))
+            if abi is None:
+                files.update({f'lib/x86/{name}': elf()
+                              for name in ('libwg-go.so', 'libwg.so', 'libwg-quick.so')})
+            self.write(files)
+            self.apk.rename(build / ('app' + ('-' + abi if abi else '') + '-release.apk'))
+        (self.root / 'candidate-diagnostics').mkdir()
+        (self.root / 'pubspec.yaml').write_text('version: 0.40.0+40\n')
+        workflow = (ROOT / '.github/workflows/android-candidate.yml').read_text()
+        step = workflow.split('      - name: Verify every candidate package and preserve exact bytes\n', 1)[1]
+        script = textwrap.dedent(re.search(r"python3 - <<'PY'\n(.*?)\n          PY", step, re.S).group(1))
+        with chdir(self.root), patch.dict(os.environ, {'PUSHOK_SDK_BUILD_TOOLS': str(self.root)}), \
+             patch.object(APK, 'check_apk', side_effect=ValueError('fixture gate rejected')) as gate, \
+             redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, 'fixture gate rejected'):
+                exec(compile(script, 'candidate-workflow', 'exec'), {})
+        gate.assert_called_once()
+        inventory = json.loads((self.root / 'candidate-diagnostics/apk-native-inventory.json').read_text())
+        self.assertEqual(len(inventory), 4)
+        universal = next(item for item in inventory if item['apkName'] == 'app-release.apk')
+        self.assertEqual(universal['actualAbis'], sorted((*ABIS, 'x86')))
+        self.assertEqual(len(universal['nativeLibraries']), 21)
+        for abi in ABIS:
+            item = next(item for item in inventory if item['apkName'] == f'app-{abi}-release.apk')
+            self.assertEqual(item['actualAbis'], [abi])
+            self.assertEqual(len(item['nativeLibraries']), 6)
 
     def test_single_abi_cannot_skip_compression_or_extraction(self):
         for abi in ABIS:
