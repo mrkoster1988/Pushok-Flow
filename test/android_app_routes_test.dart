@@ -88,10 +88,11 @@ void main() {
   });
 
   test('Availability snapshot preserves non-launcher selections and cannot be mutated', () async {
-    response = {
+    final payload = <String, List<String>>{
       'packages': ['example.hidden', 'example.deleted', 'example.browser'],
       'unavailablePackages': ['example.deleted'],
     };
+    response = payload;
     final status = await AndroidAppRoutes.getBypassStatus();
     expect(calls.single.method, 'getBypassStatus');
     expect(status.packages.toList(), ['example.browser', 'example.deleted', 'example.hidden']);
@@ -99,8 +100,15 @@ void main() {
     expect(status.unavailablePackages.contains('example.hidden'), isFalse);
     expect(() => status.packages.clear(), throwsUnsupportedError);
     expect(() => status.unavailablePackages.clear(), throwsUnsupportedError);
-    (response as Map)['packages'] = [];
+    // Decode directly too: the channel codec already copies its input, so this
+    // specifically verifies that the parser does not retain mutable lists.
+    final directSnapshot = BypassStatus.fromPlatform(payload);
+    payload['packages']!.clear();
+    payload['unavailablePackages']!.clear();
     expect(status.packages, hasLength(3));
+    expect(status.unavailablePackages, {'example.deleted'});
+    expect(directSnapshot.packages, {'example.browser', 'example.deleted', 'example.hidden'});
+    expect(directSnapshot.unavailablePackages, {'example.deleted'});
   });
 
   test('Availability rejects partial, duplicate, oversized and non-subset payloads', () async {
