@@ -1,0 +1,58 @@
+{
+  "recordedAtUtc": "2026-11-22T13:06:39.761434+00:00",
+  "status": "verified_signed_awaiting_publication",
+  "apkSourceCommit": "ca1c9cf33156aa1950e91b1f31705d09c772a886",
+  "stagingCommit": "ba8fa7a00d51a970f61ffe3fb2c366c04fe007dd",
+  "verifiedSignedApk": {
+    "packageName": "shop.pushok.flow",
+    "versionName": "0.37.0",
+    "versionCode": 37,
+    "minSdk": 24,
+    "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+    "sha256": "48a32c75e6dd9caac6306c1279e52474b0af97c2228d97689128af329a6cf641",
+    "sizeBytes": 167698482
+  },
+  "sourceChecks": {
+    "runId": 45024271477,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45024271477",
+    "conclusion": "success",
+    "pythonTests": 207,
+    "flutterTests": 238,
+    "analyzer": "No issues found"
+  },
+  "androidCandidate": {
+    "runId": 45024271841,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45024271841",
+    "conclusion": "success",
+    "kotlinSuites": 15,
+    "artifactId": 14754858924,
+    "artifactSizeBytes": 67952717,
+    "artifactSha256": "2bc0e1eb71241744e21aaddcd3d5db0d5ad93de5c789bcceb909acbc0b95f864",
+    "candidateApkSha256": "4fbf64c9bf9867a8f08e80aed2bfacd40144457ffe8b53bd9f8ce1d347249d62"
+  },
+  "localVerification": {
+    "persistentCertificateMatchesPreviousRelease": true,
+    "apkPayloadUnchangedBySigning": true,
+    "publicDeltaExactRoundTrip": true,
+    "zipalign16KiB": "passed",
+    "packageVersionMinSdkNonDebuggable": "passed",
+    "privateUpdateCallbacksAndPersistentScheduler": "passed"
+  },
+  "publication": {
+    "status": "awaiting_user_authorization",
+    "workflowDispatched": false,
+    "latestPublishedTag": "v0.36.0",
+    "latestPublishedReleaseId": 454349540,
+    "reason": "Automatic approval review rejected public release workflow submission; publication was not retried."
+  },
+  "physicalDeviceAcceptance": {
+    "status": "pending",
+    "scope": [
+      "background scheduling under device restrictions",
+      "download and resume on a physical phone",
+      "unattended installation and confirmation fallback",
+      "update preserves existing profiles and settings",
+      "real VPN connection and per-application routes"
+    ]
+  }
+}
