@@ -1,0 +1,25 @@
+{
+  "checkedAt": "2026-11-22T20:31:59.835402+00:00",
+  "checks": [
+    {
+      "url": "https://pushok.shop/api/v1/public-config",
+      "httpStatus": 200,
+      "contentType": "application/json",
+      "telegramBotUsername": "mtproxy_pushok_bot"
+    },
+    {
+      "url": "https://pushok.shop/api/v1/miniapp/config",
+      "httpStatus": 200,
+      "contentType": "application/json",
+      "miniAppEnabled": true
+    },
+    {
+      "url": "https://pushok.shop/",
+      "httpStatus": 200,
+      "contentType": "text/html",
+      "title": "puShok · MTProxy — кабинет спонсора"
+    }
+  ],
+  "scope": "Read-only public cabinet configuration; no account sign-in or payment attempted.",
+  "mtproxySourceCommit": "849f5321a8e19c612625894d93d749dbbd8b3dd6"
+}

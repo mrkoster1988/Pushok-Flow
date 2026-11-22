@@ -86,7 +86,7 @@ void main() {
       if (call.method == 'takePendingLink') {
         return {'url': 'https://example.invalid/sub/PRIVATE_TOKEN'};
       }
-      if (call.method == 'openPushokAccount') return true;
+      if (call.method == 'openPushokAccount' || call.method == 'openPushokHub') return true;
       return _status();
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
@@ -94,7 +94,9 @@ void main() {
     await bridge.status();
     await bridge.takePendingLink();
     await bridge.openPushokAccount();
-    expect(calls.map((call) => call.method), ['status', 'takePendingLink', 'openPushokAccount']);
+    await bridge.openPushokHub();
+    expect(calls.map((call) => call.method),
+      ['status', 'takePendingLink', 'openPushokAccount', 'openPushokHub']);
     expect(calls.every((call) => call.arguments == null), isTrue);
     await bridge.importSubscription('https://example.invalid/sub/PRIVATE_TOKEN', 'Название');
     expect(calls.last.arguments, {'url': 'https://example.invalid/sub/PRIVATE_TOKEN', 'name': 'Название'});

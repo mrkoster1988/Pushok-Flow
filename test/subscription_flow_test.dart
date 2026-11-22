@@ -67,6 +67,7 @@ class _Bridge {
         imported = true;
         return subscriptions;
       case 'openPushokAccount':
+      case 'openPushokHub':
         expect(call.arguments, isNull);
         return true;
       default: return subscriptions;
@@ -146,15 +147,21 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('Profile opens the canonical Pushok entry without pretending to sign in', (tester) async {
+  testWidgets('Profile opens the existing MTProxy account and Pushok hub as distinct destinations', (tester) async {
     final bridge = _Bridge()..pending = null;
     await _pump(tester, bridge);
     await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Профиль')));
     await tester.pumpAndSettle();
     expect(find.textContaining('@pushok_app'), findsOneWidget);
-    expect(find.text('Открыть Pushok'), findsOneWidget);
+    expect(find.text('Открыть кабинет MTProxy'), findsOneWidget);
+    expect(find.textContaining('Регистрация, оплата и подписки'), findsNothing);
     await tester.tap(find.byKey(const Key('open_pushok_account')));
     await tester.pumpAndSettle();
+    expect(bridge.calls.where((call) => call == 'openPushokAccount').length, 1);
+    expect(bridge.calls, isNot(contains('openPushokHub')));
+    await tester.tap(find.byKey(const Key('open_pushok_hub')));
+    await tester.pumpAndSettle();
+    expect(bridge.calls.where((call) => call == 'openPushokHub').length, 1);
     expect(bridge.calls.where((call) => call == 'openPushokAccount').length, 1);
     expect(bridge.calls, isNot(contains('importSubscription')));
     await tester.pumpWidget(const SizedBox.shrink());

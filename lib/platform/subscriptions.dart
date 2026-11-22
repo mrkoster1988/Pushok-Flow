@@ -124,7 +124,8 @@ class SubscriptionDraft {
 
 class FlowSubscriptions {
   FlowSubscriptions({required this.isAndroid});
-  static const botUsername = '@pushok_app';
+  static const botUsername = '@mtproxy_pushok_bot';
+  static const hubUsername = '@pushok_app';
   static const _channel = MethodChannel('shop.pushok.flow/subscriptions');
   final bool isAndroid;
 
@@ -163,6 +164,11 @@ class FlowSubscriptions {
   Future<void> openPushokAccount() async {
     if (!isAndroid) throw MissingPluginException();
     await _channel.invokeMethod<void>('openPushokAccount');
+  }
+
+  Future<void> openPushokHub() async {
+    if (!isAndroid) throw MissingPluginException();
+    await _channel.invokeMethod<void>('openPushokHub');
   }
 }
 

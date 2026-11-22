@@ -54,7 +54,8 @@ class ProfileSubscriptions(
                 when (call.method) {
                     "status" -> status(result)
                     "takePendingLink" -> result.success(takePendingLink())
-                    "openPushokAccount" -> openPushokAccount(result)
+                    "openPushokAccount" -> openPushokLink(PushokExternalLinks.Destination.ACCOUNT, result)
+                    "openPushokHub" -> openPushokLink(PushokExternalLinks.Destination.HUB, result)
                     "setAutomaticUpdates" -> {
                         val value = (call.arguments as? Map<*, *>)?.get("enabled") as? Boolean
                         if (value == null) failure(result, "SUBSCRIPTION_INVALID")
@@ -151,13 +152,20 @@ class ProfileSubscriptions(
         }
     }
 
-    private fun openPushokAccount(result: MethodChannel.Result) {
+    private fun openPushokLink(destination: PushokExternalLinks.Destination, result: MethodChannel.Result) {
         try {
             ensureActive(epoch.get())
             val activity = activityReference.get() ?: throw SubscriptionFailure("SUBSCRIPTION_INTERRUPTED")
-            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SubscriptionLinks.ACCOUNT_URL)))
+            PushokExternalLinks.open(destination) { url ->
+                activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }
             result.success(true)
-        } catch (_: Exception) { failure(result, "PUSHOK_ACCOUNT_UNAVAILABLE") }
+        } catch (_: Exception) {
+            failure(result, when (destination) {
+                PushokExternalLinks.Destination.ACCOUNT -> "PUSHOK_ACCOUNT_UNAVAILABLE"
+                PushokExternalLinks.Destination.HUB -> "PUSHOK_HUB_UNAVAILABLE"
+            })
+        }
     }
 
     private fun setAutomaticUpdates(value: Boolean, result: MethodChannel.Result) {

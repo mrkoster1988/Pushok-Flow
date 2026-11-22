@@ -49,9 +49,11 @@ class SubscriptionsCard extends StatelessWidget {
     showDialog<void>(context: context, builder: (context) => AlertDialog(
       title: const Text('Подписки и серверы'),
       content: const SingleChildScrollView(child: Text(
-        'Регистрация, оплата и управление подпиской Pushok находятся в '
-        '${FlowSubscriptions.botUsername}. Полученную HTTPS-ссылку добавьте здесь. '
-        'Можно использовать подписку своей панели с поддерживаемыми ссылками VLESS.\n\n'
+        'Вход и регистрация доступны в существующем кабинете MTProxy '
+        '(${FlowSubscriptions.botUsername}).\n\n'
+        'Для подключения Flow добавьте HTTPS-ссылку подписки своего провайдера '
+        'или панели с поддерживаемыми ссылками VLESS. '
+        'Аккаунт MTProxy сам по себе не предоставляет серверы для Flow.\n\n'
         'Flow загружает список серверов и сохраняет его на устройстве. '
         'Автообновление проверяет список при открытии приложения, когда подключение '
         'Flow отключено: не чаще раза в шесть часов после успешной проверки. '
@@ -169,7 +171,7 @@ class SubscriptionsCard extends StatelessWidget {
           const SizedBox(height: 8),
           OutlinedButton.icon(key: const Key('manage_pushok_subscription'),
             onPressed: onOpenAccount, icon: const Icon(Icons.open_in_new),
-            label: const Text('Управлять подпиской')),
+            label: const Text('Кабинет MTProxy')),
         ])),
       for (final entry in status?.subscriptions ?? const <FlowSubscription>[]) ...[
         const SizedBox(height: 12),

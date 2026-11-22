@@ -48,6 +48,12 @@ def files_for(abis):
     return files
 
 
+def candidate_workflow_script():
+    workflow = (ROOT / '.github/workflows/android-candidate.yml').read_text()
+    step = workflow.split('      - name: Verify universal candidate package and preserve exact bytes\n', 1)[1]
+    return textwrap.dedent(re.search(r"python3 - <<'PY'\n(.*?)\n          PY", step, re.S).group(1))
+
+
 class StandaloneAbiApkTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -118,36 +124,90 @@ class StandaloneAbiApkTests(unittest.TestCase):
         APK.check_compact_native_packaging(self.apk, MANIFEST)
         APK.check_xray_libraries(self.apk)
 
-    def test_all_candidate_abi_inventories_survive_first_apk_gate_failure(self):
+    def test_universal_candidate_inventory_survives_apk_gate_failure(self):
         build = self.root / 'build/app/outputs/flutter-apk'
         build.mkdir(parents=True)
-        for abi in (None, *ABIS):
-            files = files_for(ABIS if abi is None else (abi,))
-            if abi is None:
-                files.update({f'lib/x86/{name}': elf()
-                              for name in ('libwg-go.so', 'libwg.so', 'libwg-quick.so')})
-            self.write(files)
-            self.apk.rename(build / ('app' + ('-' + abi if abi else '') + '-release.apk'))
+        files = files_for(ABIS)
+        files.update({f'lib/x86/{name}': elf()
+                      for name in ('libwg-go.so', 'libwg.so', 'libwg-quick.so')})
+        self.write(files)
+        self.apk.rename(build / 'app-release.apk')
         (self.root / 'candidate-diagnostics').mkdir()
         (self.root / 'pubspec.yaml').write_text('version: 0.40.0+40\n')
-        workflow = (ROOT / '.github/workflows/android-candidate.yml').read_text()
-        step = workflow.split('      - name: Verify every candidate package and preserve exact bytes\n', 1)[1]
-        script = textwrap.dedent(re.search(r"python3 - <<'PY'\n(.*?)\n          PY", step, re.S).group(1))
         with chdir(self.root), patch.dict(os.environ, {'PUSHOK_SDK_BUILD_TOOLS': str(self.root)}), \
              patch.object(APK, 'check_apk', side_effect=ValueError('fixture gate rejected')) as gate, \
              redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(ValueError, 'fixture gate rejected'):
-                exec(compile(script, 'candidate-workflow', 'exec'), {})
+                exec(compile(candidate_workflow_script(), 'candidate-workflow', 'exec'), {})
         gate.assert_called_once()
         inventory = json.loads((self.root / 'candidate-diagnostics/apk-native-inventory.json').read_text())
-        self.assertEqual(len(inventory), 4)
-        universal = next(item for item in inventory if item['apkName'] == 'app-release.apk')
+        self.assertEqual(len(inventory), 1)
+        universal = inventory[0]
+        self.assertEqual(universal['apkName'], 'app-release.apk')
         self.assertEqual(universal['actualAbis'], sorted((*ABIS, 'x86')))
         self.assertEqual(len(universal['nativeLibraries']), 21)
-        for abi in ABIS:
-            item = next(item for item in inventory if item['apkName'] == f'app-{abi}-release.apk')
-            self.assertEqual(item['actualAbis'], [abi])
-            self.assertEqual(len(item['nativeLibraries']), 6)
+
+    def test_candidate_workflow_rejects_missing_or_extra_apks_before_preserving_release_bytes(self):
+        build = self.root / 'build/app/outputs/flutter-apk'
+        build.mkdir(parents=True)
+        for names in ((), ('app-arm64-v8a-release.apk',),
+                      ('app-release.apk', 'app-arm64-v8a-release.apk')):
+            with self.subTest(names=names):
+                for path in build.glob('*.apk'):
+                    path.unlink()
+                for name in names:
+                    (build / name).write_bytes(b'fixture')
+                with chdir(self.root), patch.object(APK, 'check_apk') as gate:
+                    with self.assertRaisesRegex(SystemExit, 'exactly one universal APK'):
+                        exec(compile(candidate_workflow_script(), 'candidate-workflow', 'exec'), {})
+                gate.assert_not_called()
+                self.assertFalse((self.root / 'candidate-dist').exists())
+
+    def test_candidate_workflow_preserves_one_exact_universal_apk_and_all_verification_gates(self):
+        build = self.root / 'build/app/outputs/flutter-apk'
+        build.mkdir(parents=True)
+        output = self.root / 'candidate-dist'
+        output.mkdir()
+        (self.root / 'candidate-diagnostics').mkdir()
+        (self.root / 'pubspec.yaml').write_text('version: 0.43.0+43\n')
+        self.write(files_for(ABIS))
+        original = self.apk.read_bytes()
+        self.apk.rename(build / 'app-release.apk')
+        certificate = 'ab' * 32
+        signature = ('Verified using v2 scheme (APK Signature Scheme v2): true\nNumber of signers: 1\n'
+                     f'Signer #1 certificate SHA-256 digest: {certificate}\n')
+        badging = "package: name='shop.pushok.flow' versionCode='43' versionName='0.43.0'\nsdkVersion:'24'\n"
+        responses = [subprocess.CompletedProcess([], 0, badging, ''),
+                     subprocess.CompletedProcess([], 0, signature, ''),
+                     subprocess.CompletedProcess([], 0, '', '')]
+        with chdir(self.root), patch.dict(os.environ, {
+                'PUSHOK_SDK_BUILD_TOOLS': str(self.root), 'GITHUB_SHA': '12' * 20}), \
+             patch.object(APK, 'check_apk') as gate, \
+             patch.object(subprocess, 'run', side_effect=responses) as commands, \
+             redirect_stdout(io.StringIO()):
+            exec(compile(candidate_workflow_script(), 'candidate-workflow', 'exec'), {})
+        apk = Path('build/app/outputs/flutter-apk/app-release.apk')
+        gate.assert_called_once_with(apk, str(self.root / 'aapt'))
+        self.assertEqual([call.args[0] for call in commands.call_args_list], [
+            [str(self.root / 'aapt'), 'dump', 'badging', str(apk)],
+            [str(self.root / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)],
+            [str(self.root / 'zipalign'), '-c', '-P', '16', '4', str(apk)],
+        ])
+        name = 'Pushok-Flow-v0.43.0-candidate.apk'
+        self.assertEqual({path.name for path in output.iterdir()},
+                         {name, name + '.sha256', 'candidate.json', 'README.txt'})
+        self.assertEqual((output / name).read_bytes(), original)
+        digest = hashlib.sha256(original).hexdigest()
+        self.assertEqual((output / (name + '.sha256')).read_text(), f'{digest}  {name}\n')
+        metadata = json.loads((output / 'candidate.json').read_text())
+        self.assertEqual(metadata['sourceCommit'], '12' * 20)
+        self.assertEqual(metadata['sha256'], digest)
+        self.assertEqual(metadata['sizeBytes'], len(original))
+        self.assertEqual(metadata['versionCode'], 43)
+        self.assertEqual(metadata['temporaryCertificateSha256'], certificate)
+        self.assertIs(metadata['trustedRelease'], False)
+        self.assertIs(metadata['requiresPersistentSigning'], True)
+        self.assertNotIn('abi', metadata)
 
     def test_single_abi_cannot_skip_compression_or_extraction(self):
         for abi in ABIS:

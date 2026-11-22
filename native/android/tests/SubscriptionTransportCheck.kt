@@ -37,6 +37,46 @@ private fun expectCode(code: String, run: () -> Unit) {
     }
 }
 
+private fun checkPushokExternalLinks() {
+    val destinations = mapOf(
+        PushokExternalLinks.Destination.ACCOUNT to listOf(
+            "tg://resolve?domain=mtproxy_pushok_bot", "https://pushok.shop/"),
+        PushokExternalLinks.Destination.HUB to listOf(
+            "tg://resolve?domain=pushok_app", "https://t.me/pushok_app"),
+    )
+    check(PushokExternalLinks.Destination.entries.toSet() == destinations.keys)
+    for ((destination, expected) in destinations) {
+        val nativeOnly = mutableListOf<String>()
+        PushokExternalLinks.open(destination) { nativeOnly.add(it) }
+        check(nativeOnly == expected.take(1)) { "Telegram success must not launch a second activity" }
+
+        // ActivityNotFoundException is a RuntimeException. A forbidden launch may
+        // instead raise SecurityException; both must fall back to the fixed HTTPS URL.
+        for (launchFailure in listOf(RuntimeException("No handler"), SecurityException("Launch refused"))) {
+            val fallback = mutableListOf<String>()
+            PushokExternalLinks.open(destination) { url ->
+                fallback.add(url)
+                if (fallback.size == 1) throw launchFailure
+            }
+            check(fallback == expected) { "Unavailable Telegram must open the correct web destination" }
+        }
+
+        val failed = mutableListOf<String>()
+        val browserFailure = IllegalStateException("No browser")
+        var propagated: Exception? = null
+        try {
+            PushokExternalLinks.open(destination) { url ->
+                failed.add(url)
+                if (failed.size == 1) throw RuntimeException("No Telegram")
+                throw browserFailure
+            }
+        } catch (failure: Exception) { propagated = failure }
+        check(failed == expected && propagated === browserFailure) {
+            "A failed fallback must reach the method-channel error handler"
+        }
+    }
+}
+
 fun main() {
     val publicDns: (String) -> Array<InetAddress> = { arrayOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8))) }
     val source = "https://subscription.example.org/access/secret-token"
@@ -123,7 +163,7 @@ fun main() {
         "$validLink\n", "pushokflow://subscription?url=" + "x".repeat(SubscriptionLinks.MAX_LINK_LENGTH))) {
         check(SubscriptionLinks.parse(bad) == null) { "Invalid link was accepted" }
     }
-    check(SubscriptionLinks.ACCOUNT_URL == "https://t.me/pushok_app")
+    checkPushokExternalLinks()
 
     val sixHours = SubscriptionRefreshPolicy.SUCCESS_INTERVAL_MS
     val hour = SubscriptionRefreshPolicy.RETRY_INTERVAL_MS

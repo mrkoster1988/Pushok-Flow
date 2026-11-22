@@ -38,7 +38,8 @@ void main() {
     expect(find.text('Сервис не передал срок подписки.'), findsOneWidget);
     expect(find.textContaining('Активна'), findsNothing);
     expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
-    expect(find.text('Управлять подпиской'), findsOneWidget);
+    expect(find.text('Кабинет MTProxy'), findsOneWidget);
+    expect(find.text('Управлять подпиской'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

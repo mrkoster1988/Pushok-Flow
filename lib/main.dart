@@ -614,14 +614,24 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     await _changeSubscriptions(() => _subscriptionBridge.deleteSubscription(subscription.id));
   }
 
-  Future<void> _openPushokAccount() async {
+  Future<void> _openPushokAccount() => _openPushokDestination();
+
+  Future<void> _openPushokHub() => _openPushokDestination(hub: true);
+
+  Future<void> _openPushokDestination({bool hub = false}) async {
     if (!_isAndroid || !mounted || !_foreground || _openingPushok) return;
     setState(() => _openingPushok = true);
     try {
-      await _subscriptionBridge.openPushokAccount();
+      if (hub) {
+        await _subscriptionBridge.openPushokHub();
+      } else {
+        await _subscriptionBridge.openPushokAccount();
+      }
     } catch (_) {
       if (mounted && _foreground) {
-        _showNotice('Не удалось открыть Pushok. Найдите ${FlowSubscriptions.botUsername} в Telegram.');
+        final username = hub ? FlowSubscriptions.hubUsername : FlowSubscriptions.botUsername;
+        _showNotice('Не удалось открыть ${hub ? 'Pushok' : 'кабинет MTProxy'}. '
+          'Найдите $username в Telegram.');
       }
     } finally {
       if (mounted) setState(() => _openingPushok = false);
@@ -1168,7 +1178,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.42.0',
+            version: '0.43.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -1417,12 +1427,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const ListTile(contentPadding: EdgeInsets.zero,
         leading: Icon(Icons.person_outline, color: PushokPalette.teal),
-        title: Text('Pushok'),
-        subtitle: Text('Регистрация, оплата и подписки в ${FlowSubscriptions.botUsername}')),
+        title: Text('Аккаунт Pushok'),
+        subtitle: Text('Вход и регистрация в существующем кабинете MTProxy')),
       const SizedBox(height: 8),
       OutlinedButton.icon(key: const Key('open_pushok_account'),
         onPressed: _isAndroid && _foreground && !_openingPushok ? _openPushokAccount : null,
-        icon: const Icon(Icons.open_in_new), label: const Text('Открыть Pushok')),
+        icon: const Icon(Icons.open_in_new), label: const Text('Открыть кабинет MTProxy')),
+      TextButton.icon(key: const Key('open_pushok_hub'),
+        onPressed: _isAndroid && _foreground && !_openingPushok ? _openPushokHub : null,
+        icon: const Icon(Icons.hub_outlined),
+        label: const Text('Pushok · ${FlowSubscriptions.hubUsername}')),
     ])),
     const SizedBox(height: 12),
     AppUpdatesCard(isAndroid: _isAndroid),

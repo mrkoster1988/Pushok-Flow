@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets
 
 /** A link only opens a protected draft. It never authorizes fetching or saving. */
 object SubscriptionLinks {
-    const val ACCOUNT_URL = "https://t.me/pushok_app"
     const val MAX_LINK_LENGTH = 16_384
 
     class Draft(val url: String, val name: String?) {
@@ -40,6 +39,28 @@ object SubscriptionLinks {
         // Form encoding is used by the public import link builder. URLDecoder is strict
         // about percent escapes; the policy rejects decoded controls and credentials.
         return URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+    }
+}
+
+/** Fixed external destinations. Opening them does not authenticate Flow. */
+object PushokExternalLinks {
+    enum class Destination(val telegramUrl: String, val webUrl: String) {
+        ACCOUNT("tg://resolve?domain=mtproxy_pushok_bot", "https://pushok.shop/"),
+        HUB("tg://resolve?domain=pushok_app", "https://t.me/pushok_app"),
+    }
+
+    fun open(destination: Destination, startActivity: (String) -> Unit) {
+        try {
+            // Attempt the custom scheme directly: Android package visibility must not
+            // incorrectly hide an installed Telegram handler from resolveActivity.
+            startActivity(destination.telegramUrl)
+            return
+        } catch (_: Exception) {
+            // No Telegram handler, or Android could not start it. A browser can still
+            // open the existing web cabinet (or the separate ecosystem entry point).
+        }
+        // Propagate a failed fallback so the method channel reports an error.
+        startActivity(destination.webUrl)
     }
 }
 
