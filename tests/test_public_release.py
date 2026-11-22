@@ -17,6 +17,24 @@ import publish_public_release as publish
 import restore_public_release as restore
 
 
+def release_metadata(document, dist, *, draft=True, slug='untagged-118a6cb2049c401d4260', identity=765):
+    """Model the real GitHub draft-to-published URL lifecycle, including asset IDs."""
+    if not draft:
+        slug = document['release']['tag']
+    assets = []
+    for index, (name, expected) in enumerate(publish.asset_expectations(document, dist).items()):
+        assets.append({**expected, 'id': 1000+index, 'name': name, 'state': 'uploaded',
+            'url': publish.API_ROOT+f'releases/assets/{1000+index}',
+            'browser_download_url': f'https://github.com/{restore.REPOSITORY}/releases/download/{slug}/{name}'})
+    return {'id': identity, 'tag_name': document['release']['tag'], 'target_commitish': document['sourceCommit'],
+        'name': 'Pushok Flow '+document['release']['versionName'], 'body': document['notes'],
+        'draft': draft, 'prerelease': False, 'published_at': None if draft else '2026-11-22T17:00:00Z',
+        'html_url': f'https://github.com/{restore.REPOSITORY}/releases/tag/{slug}',
+        'url': publish.API_ROOT+f'releases/{identity}',
+        'upload_url': f'https://uploads.github.com/repos/{restore.REPOSITORY}/releases/{identity}/assets{{?name,label}}',
+        'assets': assets}
+
+
 def zipped(payload=b'unchanged application bytes', signature=b'temporary signer', extra=b''):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w') as archive:
@@ -293,19 +311,21 @@ class PublicPublisherTests(unittest.TestCase):
                     publish.validate_assets({'assets': broken}, document, root)
 
     def test_publish_uses_created_numeric_id_and_checks_before_mutation(self):
-        document, _, _ = fixture()
+        document, _, signed = fixture()
         tag = {'object': {'type': 'commit', 'sha': document['sourceCommit']}}
-        draft = {'id': 765, 'tag_name': 'v0.27.0', 'draft': True, 'prerelease': False,
-            'upload_url': f'https://uploads.github.com/repos/{restore.REPOSITORY}/releases/765/assets{{?name,label}}'}
-        final = {**draft, 'draft': False}
-        with tempfile.TemporaryDirectory() as directory, \
-             mock.patch.object(publish, 'verify_local_assets'), \
-             mock.patch.object(publish, 'preflight'), \
-             mock.patch.object(publish, 'validate_assets'), \
-             mock.patch.object(publish, 'require_previous'), \
-             mock.patch.object(publish, 'upload_asset', return_value={}) as upload, \
-             mock.patch.object(publish, 'api', side_effect=[tag, draft, draft, tag, final]) as api:
-            publish.publish(document, Path(directory), Path(directory))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            name = document['release']['apkName']
+            (root/name).write_bytes(signed)
+            (root/(name+'.sha256')).write_text(document['release']['sha256']+'  '+name+'\n')
+            (root/'update.json').write_text(json.dumps(restore.manifest(document['release'])))
+            (root/'verified-release.json').write_text(json.dumps(document['release']))
+            draft = release_metadata(document, root)
+            final = release_metadata(document, root, draft=False)
+            with mock.patch.object(publish, 'preflight'), mock.patch.object(publish, 'require_previous'), \
+                 mock.patch.object(publish, 'upload_asset', return_value={}) as upload, \
+                 mock.patch.object(publish, 'api', side_effect=[tag, {**draft, 'assets': []}, draft, tag, draft, final]) as api:
+                publish.publish(document, root, root)
             self.assertEqual(api.call_args_list[2].args, ('releases/765',))
             self.assertEqual(api.call_args_list[-1].args[:2], ('releases/765', 'PATCH'))
             self.assertTrue(all('/releases/765/assets?' in call.args[0] for call in upload.call_args_list))

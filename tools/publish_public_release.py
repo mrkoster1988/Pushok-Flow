@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -169,6 +170,106 @@ def require_absent(tag):
     raise ValueError('Too many releases to verify absence safely')
 
 
+def release_id(value):
+    return type(value) is int and 1 <= value <= 2**63-1
+
+
+def validate_recovery_plan(plan, document, staging_sha256=None):
+    require(type(plan) is dict and set(plan) == {
+        'schemaVersion', 'repository', 'tag', 'sourceCommit', 'releaseId', 'stagingSha256', 'assetIds'},
+        'Invalid release recovery plan fields')
+    require(type(plan['schemaVersion']) is int and plan['schemaVersion'] == 1
+            and plan['repository'] == REPOSITORY and plan['tag'] == document['release']['tag']
+            and plan['sourceCommit'] == document['sourceCommit'] and release_id(plan['releaseId']),
+            'Recovery plan identity differs from staging')
+    require(type(plan['stagingSha256']) is str and re.fullmatch(r'[0-9a-f]{64}', plan['stagingSha256'])
+            and (staging_sha256 is None or plan['stagingSha256'] == staging_sha256),
+            'Recovery plan staging SHA256 differs')
+    ids = plan['assetIds']
+    require(type(ids) is dict and set(ids) == set(public_asset_names(document))
+            and all(release_id(value) for value in ids.values()) and len(set(ids.values())) == len(ids),
+            'Recovery plan must identify every exact existing asset')
+    return plan
+
+
+def read_recovery_plan(staging, document):
+    """Only an explicit, unchanged HEAD-tracked plan may resume a failed draft."""
+    path = staging.with_name(document['release']['tag']+'-resume.json')
+    if not path.exists() and not path.is_symlink():
+        return None
+    require(path.is_file() and not path.is_symlink(), 'Recovery plan must be a regular tracked file')
+    plan = validate_recovery_plan(read_json(path), document,
+        hashlib.sha256(staging.read_bytes()).hexdigest())
+    root = staging.resolve().parent.parent
+    relative = path.resolve().relative_to(root).as_posix()
+    tracked = subprocess.run(['git', 'show', 'HEAD:'+relative], cwd=root, capture_output=True)
+    require(tracked.returncode == 0 and tracked.stdout == path.read_bytes(),
+            'Recovery plan must exactly match the tracked HEAD file')
+    return plan
+
+
+def validate_release_identity(release, document, expected_id, *, draft):
+    require(type(release) is dict and release_id(expected_id)
+            and type(release.get('id')) is int and release['id'] == expected_id
+            and release.get('tag_name') == document['release']['tag']
+            and release.get('target_commitish') == document['sourceCommit']
+            and release.get('name') == 'Pushok Flow '+document['release']['versionName']
+            and release.get('body') == document['notes']
+            and release.get('draft') is draft and release.get('prerelease') is False,
+            'Release identity or state differs from approved staging')
+    require(release.get('url') == API_ROOT+f'releases/{expected_id}'
+            and release.get('upload_url') == f'https://uploads.github.com/repos/{REPOSITORY}/releases/{expected_id}/assets{{?name,label}}',
+            'Unexpected release API identity')
+    prefix = f'https://github.com/{REPOSITORY}/releases/tag/'
+    html = release.get('html_url')
+    require(type(html) is str and html.startswith(prefix), 'Unexpected release HTML URL')
+    slug = html[len(prefix):]
+    if draft:
+        require('published_at' in release and release['published_at'] is None,
+                'Only a never-published draft can be published')
+        require(slug == document['release']['tag'] or re.fullmatch(r'untagged-[a-f0-9]+', slug),
+                'Unexpected draft HTML URL')
+    else:
+        require(slug == document['release']['tag'], 'Published release HTML URL differs')
+        require(type(release.get('published_at')) is str
+                and re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', release['published_at']),
+                'Published release timestamp is missing or invalid')
+    return f'https://github.com/{REPOSITORY}/releases/download/{slug}/'
+
+
+def draft_snapshot(draft, document, expected_id):
+    prefix = validate_release_identity(draft, document, expected_id, draft=True)
+    assets = draft.get('assets')
+    require(type(assets) is list and all(type(item) is dict and type(item.get('name')) is str for item in assets)
+            and len(assets) == len(public_asset_names(document))
+            and {item['name'] for item in assets} == set(public_asset_names(document)),
+            'Draft must contain the complete exact asset set')
+    snapshot = {}
+    for asset in assets:
+        require(release_id(asset.get('id')) and asset.get('state') == 'uploaded'
+                and type(asset.get('size')) is int and asset['size'] > 0
+                and type(asset.get('digest')) is str and re.fullmatch(r'sha256:[0-9a-f]{64}', asset['digest'])
+                and asset.get('url') == API_ROOT+f'releases/assets/{asset["id"]}'
+                and asset.get('browser_download_url') == prefix+asset['name'],
+                'Draft asset metadata or URL differs')
+        snapshot[asset['name']] = {key: asset[key] for key in
+            ('id', 'state', 'size', 'digest', 'url', 'browser_download_url')}
+    require(len({item['id'] for item in snapshot.values()}) == len(snapshot), 'Draft asset IDs are duplicated')
+    return snapshot
+
+
+def require_recovery_draft(document, plan):
+    validate_recovery_plan(plan, document)
+    tag = api('git/ref/tags/'+document['release']['tag'])
+    require(tag.get('object', {}).get('type') == 'commit'
+            and tag['object']['sha'] == document['sourceCommit'], 'Recovery release tag differs')
+    draft = api(f'releases/{plan["releaseId"]}')
+    snapshot = draft_snapshot(draft, document, plan['releaseId'])
+    require({name: asset['id'] for name, asset in snapshot.items()} == plan['assetIds'],
+            'Draft asset IDs differ from the tracked recovery plan')
+    return draft
+
+
 def validate_run(run, document, workflow):
     require(run.get('status') == 'completed' and run.get('conclusion') == 'success', 'CI run is not successful')
     require(run.get('head_sha') == document['sourceCommit'] and run.get('head_branch') == 'main'
@@ -186,8 +287,12 @@ def validate_artifact(artifact, document):
             and artifact.get('workflow_run', {}).get('head_sha') == document['sourceCommit'], 'Artifact belongs to another source build')
 
 
-def preflight(document, diagnostics):
-    require_absent(document['release']['tag'])
+def preflight(document, diagnostics, recovery=None):
+    draft = None
+    if recovery is None:
+        require_absent(document['release']['tag'])
+    else:
+        draft = require_recovery_draft(document, recovery)
     latest = require_previous(document)
     source = api(f'actions/runs/{document["sourceRunId"]}')
     checks = api(f'actions/runs/{document["sourceChecksRunId"]}')
@@ -196,6 +301,15 @@ def preflight(document, diagnostics):
     artifact = api(f'actions/artifacts/{document["sourceArtifact"]["id"]}')
     validate_artifact(artifact, document)
     diagnostics.mkdir(parents=True, exist_ok=True)
+    if draft is not None:
+        snapshot_path = diagnostics/'release-resume-preflight.json'
+        if snapshot_path.exists():
+            previous = read_json(snapshot_path, MAX_API_BYTES)
+            require(draft_snapshot(previous, document, recovery['releaseId']) ==
+                    draft_snapshot(draft, document, recovery['releaseId']),
+                    'Draft assets changed since initial recovery preflight')
+        snapshot_path.write_text(json.dumps(draft, indent=2)+'\n')
+        (diagnostics/'release-resume-plan.json').write_text(json.dumps(recovery, indent=2)+'\n')
     for name, data in [('source-run', source), ('source-checks-run', checks), ('source-artifact', artifact), ('previous-release', latest)]:
         (diagnostics/(name+'.json')).write_text(json.dumps(data, indent=2)+'\n')
     output = os.environ.get('GITHUB_OUTPUT')
@@ -203,6 +317,7 @@ def preflight(document, diagnostics):
         with open(output, 'a', encoding='utf-8') as stream:
             stream.write(f'source_sha={document["sourceCommit"]}\nartifact_id={document["sourceArtifact"]["id"]}\nrelease_apk={document["release"]["apkName"]}\n')
     print('Both CI runs, source artifact and previous public update channel confirmed.')
+    return draft
 
 
 def asset_expectations(document, dist):
@@ -230,9 +345,21 @@ def validate_asset_metadata(assets, expected, require_urls=False):
                     'Uploaded asset has an unexpected download URL')
 
 
-def validate_assets(release, document, dist):
+def validate_assets(release, document, dist, *, require_urls=None):
     validate_asset_metadata(release.get('assets'), asset_expectations(document, dist),
-                            require_urls=document['schemaVersion'] == 2)
+                            require_urls=document['schemaVersion'] == 2 if require_urls is None else require_urls)
+
+
+def validate_draft_assets(draft, document, dist, expected_id, recovery=None):
+    snapshot = draft_snapshot(draft, document, expected_id)
+    if recovery is not None:
+        require({name: asset['id'] for name, asset in snapshot.items()} == recovery['assetIds'],
+                'Draft asset IDs differ from the tracked recovery plan')
+    prefix = validate_release_identity(draft, document, expected_id, draft=True)
+    expected = {name: {**item, 'browser_download_url': prefix+name}
+                for name, item in asset_expectations(document, dist).items()}
+    validate_asset_metadata(draft['assets'], expected, require_urls=True)
+    return snapshot
 
 
 def verify_local_assets(document, dist):
@@ -281,40 +408,49 @@ def upload_asset(url, path):
         connection.close()
 
 
-def publish(document, dist, diagnostics):
+def publish(document, dist, diagnostics, recovery=None):
     verify_local_assets(document, dist)
     # Recheck just before the first mutation, including existing drafts and channel races.
-    preflight(document, diagnostics)
+    if recovery is None:
+        preflight(document, diagnostics)
+    else:
+        draft = preflight(document, diagnostics, recovery)
     tag = document['release']['tag']
-    created_tag = api('git/refs', 'POST', {'ref': 'refs/tags/'+tag, 'sha': document['sourceCommit']})
-    require(created_tag.get('object', {}).get('type') == 'commit'
-            and created_tag['object']['sha'] == document['sourceCommit'], 'Created tag differs')
-    release = api('releases', 'POST', {'tag_name': tag, 'target_commitish': document['sourceCommit'],
-        'name': 'Pushok Flow '+document['release']['versionName'], 'body': document['notes'],
-        'draft': True, 'prerelease': False, 'make_latest': 'false', 'generate_release_notes': False})
-    (diagnostics/'release-created.json').write_text(json.dumps(release, indent=2)+'\n')
-    release_id = release.get('id')
-    require(type(release_id) is int and release_id > 0 and release.get('draft') is True
-            and release.get('tag_name') == tag, 'Unexpected created draft')
-    expected_upload = f'https://uploads.github.com/repos/{REPOSITORY}/releases/{release_id}/assets'
-    require(release.get('upload_url') == expected_upload+'{?name,label}', 'Unexpected upload URL')
-    for name in public_asset_names(document):
-        url = expected_upload+'?name='+urllib.parse.quote(name, safe='')
-        uploaded = upload_asset(url, dist/name)
-        (diagnostics/('uploaded-'+name+'.json')).write_text(json.dumps(uploaded, indent=2)+'\n')
-    # Always address the numeric ID returned by POST; the tag endpoint excludes drafts.
-    draft = api(f'releases/{release_id}')
-    require(draft.get('id') == release_id and draft.get('tag_name') == tag
-            and draft.get('draft') is True and draft.get('prerelease') is False, 'Draft state changed')
-    validate_assets(draft, document, dist)
+    if recovery is None:
+        created_tag = api('git/refs', 'POST', {'ref': 'refs/tags/'+tag, 'sha': document['sourceCommit']})
+        require(created_tag.get('object', {}).get('type') == 'commit'
+                and created_tag['object']['sha'] == document['sourceCommit'], 'Created tag differs')
+        release = api('releases', 'POST', {'tag_name': tag, 'target_commitish': document['sourceCommit'],
+            'name': 'Pushok Flow '+document['release']['versionName'], 'body': document['notes'],
+            'draft': True, 'prerelease': False, 'make_latest': 'false', 'generate_release_notes': False})
+        (diagnostics/'release-created.json').write_text(json.dumps(release, indent=2)+'\n')
+        release_id = release.get('id')
+        validate_release_identity(release, document, release_id, draft=True)
+        expected_upload = f'https://uploads.github.com/repos/{REPOSITORY}/releases/{release_id}/assets'
+        for name in public_asset_names(document):
+            url = expected_upload+'?name='+urllib.parse.quote(name, safe='')
+            uploaded = upload_asset(url, dist/name)
+            (diagnostics/('uploaded-'+name+'.json')).write_text(json.dumps(uploaded, indent=2)+'\n')
+        # Always address the numeric ID; the tag endpoint excludes drafts.
+        draft = api(f'releases/{release_id}')
+    else:
+        release_id = recovery['releaseId']
+    original = validate_draft_assets(draft, document, dist, release_id, recovery)
     current_tag = api('git/ref/tags/'+tag)
     require(current_tag.get('object', {}).get('type') == 'commit'
             and current_tag['object']['sha'] == document['sourceCommit'], 'Release tag changed')
     require_previous(document)
+    # Retain the exact uploads, including asset IDs, across the final read checks.
+    confirmed = api(f'releases/{release_id}')
+    require(validate_draft_assets(confirmed, document, dist, release_id, recovery) == original,
+            'Draft assets changed before publication')
+    (diagnostics/'release-draft-verified.json').write_text(json.dumps(confirmed, indent=2)+'\n')
     final = api(f'releases/{release_id}', 'PATCH', {'draft': False, 'prerelease': False, 'make_latest': 'true'})
-    require(final.get('id') == release_id and final.get('tag_name') == tag
-            and final.get('draft') is False and final.get('prerelease') is False, 'Publication response differs')
-    validate_assets(final, document, dist)
+    validate_release_identity(final, document, release_id, draft=False)
+    validate_assets(final, document, dist, require_urls=True)
+    require(all(type(item.get('id')) is int for item in final['assets'])
+            and {item['name']: item.get('id') for item in final['assets']} ==
+            {name: item['id'] for name, item in original.items()}, 'Published asset IDs changed')
     (diagnostics/'release-published.json').write_text(json.dumps(final, indent=2)+'\n')
     print(f'Published {tag}; release ID {release_id}; {len(public_asset_names(document))} verified assets retained.')
 
@@ -451,12 +587,13 @@ def main():
         require(version(args.release_version), 'Invalid release version')
         staging = Path('release-staging')/('v'+args.release_version+'.json')
         document = read_staging(staging, args.release_version)
+        recovery = read_recovery_plan(staging, document) if args.command in ('preflight', 'publish') else None
         if args.command == 'preflight':
-            preflight(document, args.diagnostics)
+            preflight(document, args.diagnostics, recovery)
         elif args.command == 'verify-assets':
             verify_local_assets(document, args.dist)
         elif args.command == 'publish':
-            publish(document, args.dist, args.diagnostics)
+            publish(document, args.dist, args.diagnostics, recovery)
         elif args.command == 'verify-public':
             verify_public(document, args.dist, args.diagnostics)
         elif args.command == 'verify-discovery':

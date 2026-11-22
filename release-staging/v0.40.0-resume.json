@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "repository": "mrkoster1988/Pushok-Flow",
+  "tag": "v0.40.0",
+  "sourceCommit": "3b1f8672686e99ddadf2b5fffb9ca972bc41812f",
+  "releaseId": 454631088,
+  "stagingSha256": "30e00cf21f4fff529131b94a6544aad3c5db78d5d6df2ca114102364fbceba99",
+  "assetIds": {
+    "Pushok-Flow-v0.40.0.apk": 779911749,
+    "Pushok-Flow-v0.40.0.apk.sha256": 779911962,
+    "Pushok-Flow-v0.40.0-arm64-v8a.apk": 779912000,
+    "Pushok-Flow-v0.40.0-arm64-v8a.apk.sha256": 779912101,
+    "Pushok-Flow-v0.40.0-armeabi-v7a.apk": 779912138,
+    "Pushok-Flow-v0.40.0-armeabi-v7a.apk.sha256": 779912267,
+    "Pushok-Flow-v0.40.0-x86_64.apk": 779912318,
+    "Pushok-Flow-v0.40.0-x86_64.apk.sha256": 779912416,
+    "update.json": 779912449
+  }
+}
