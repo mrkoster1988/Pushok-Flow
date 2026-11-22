@@ -10,6 +10,7 @@ NAME = 'com.wireguard.android.backend.GoBackend$VpnService'
 SCANNER = 'shop.pushok.flow.WireGuardQrActivity'
 GENERIC_SCANNER = 'com.journeyapps.barcodescanner.CaptureActivity'
 XRAY_SERVICE = 'shop.pushok.flow.XrayVpnService'
+MAIN_ACTIVITY = 'shop.pushok.flow.MainActivity'
 UPDATE_PROVIDER = 'shop.pushok.flow.UpdateFileProvider'
 UPDATE_INSTALL_RECEIVER = 'shop.pushok.flow.UpdateInstallReceiver'
 UPDATE_REPLACED_RECEIVER = 'shop.pushok.flow.UpdateReplacedReceiver'
@@ -34,6 +35,27 @@ def validate(path: Path) -> None:
     app = manifest.find('application')
     if app is None:
         raise ValueError('Android manifest has no application element')
+    mains = [item for item in app.findall('activity')
+             if activity_name(item.get(ANDROID + 'name', '')) == MAIN_ACTIVITY]
+    if len(mains) != 1 or mains[0].get(ANDROID + 'exported') != 'true' or \
+            mains[0].get(ANDROID + 'launchMode') != 'singleTop':
+        raise ValueError('Subscription links require one exported singleTop MainActivity')
+    main = mains[0]
+    link_metadata = [item for item in main.findall('meta-data')
+                     if item.get(ANDROID + 'name') == 'flutter_deeplinking_enabled']
+    if len(link_metadata) != 1 or link_metadata[0].get(ANDROID + 'value') != 'false':
+        raise ValueError('Subscription URLs must bypass Flutter automatic route handling')
+    filters = [item for item in main.findall('intent-filter')
+               if any(data.get(ANDROID + 'scheme') == 'pushokflow' for data in item.findall('data'))]
+    if len(filters) != 1:
+        raise ValueError('Subscription link intent filter missing or duplicated')
+    link_filter = filters[0]
+    if [item.get(ANDROID + 'name') for item in link_filter.findall('action')] != ['android.intent.action.VIEW'] or \
+            sorted(item.get(ANDROID + 'name') for item in link_filter.findall('category')) != \
+            ['android.intent.category.BROWSABLE', 'android.intent.category.DEFAULT'] or \
+            len(link_filter.findall('data')) != 1 or link_filter.find('data').attrib != {
+                ANDROID + 'scheme': 'pushokflow', ANDROID + 'host': 'subscription'}:
+        raise ValueError('Subscription link intent filter must accept only its owned scheme and host')
     services = [s for s in app.findall('service') if s.get(ANDROID + 'name') == NAME]
     if services:
         raise ValueError('App manifest redeclares WireGuard VPN service; use the library manifest')

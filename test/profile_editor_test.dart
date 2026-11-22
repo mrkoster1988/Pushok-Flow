@@ -201,7 +201,7 @@ void main() {
       expect(find.textContaining('PRIVATE_UNSUPPORTED_CONTENT'), findsNothing);
       expect(saves, 0);
     }
-    expect(find.textContaining('Ссылки подписки пока не поддерживаются.'), findsOneWidget);
+    expect(find.textContaining('Это ссылка подписки.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

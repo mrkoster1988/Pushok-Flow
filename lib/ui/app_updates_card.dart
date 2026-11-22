@@ -263,7 +263,8 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
     }
     return switch (status.installWaitingReason) {
       'confirmation' => 'Файл проверен. Android ждёт вашего подтверждения установки.',
-      'connection' => 'Файл проверен. Установка ждёт отключения активного подключения.',
+      'connection' => 'Файл проверен. Автоустановка ждёт отключения активного подключения. '
+          'Вы можете установить обновление вручную кнопкой ниже.',
       'foreground' => 'Файл проверен. Автоустановка продолжится, когда вы свернёте Pushok Flow.',
       'unsupported' => 'Файл проверен. Эта версия Android требует подтверждения установки.',
       _ => status.automaticUpdatesEnabled
@@ -405,7 +406,7 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
       action = _button(key: const Key('download_app_update'), label: 'Скачать',
           icon: Icons.download_outlined, action: _updates.downloadUpdate,
           pendingPhase: UpdatePhase.downloading);
-    } else if (status.phase == UpdatePhase.ready && status.installWaitingReason != 'connection') {
+    } else if (status.phase == UpdatePhase.ready) {
       action = status.installPermissionGranted
           ? _button(key: const Key('install_app_update'),
               label: status.installWaitingReason == 'confirmation'

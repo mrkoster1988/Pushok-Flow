@@ -41,6 +41,29 @@ Future<void> _tap(WidgetTester tester, String key) async {
 }
 
 void main() {
+  testWidgets('Managed servers can be selected but cannot be edited or removed separately',
+      (tester) async {
+    var selected = false;
+    await _pumpCard(tester, WireGuardProfilesCard(
+      catalog: WireGuardProfiles.fromPlatform({
+        'profiles': [
+          {'id': _firstId, 'name': 'Свой сервер'},
+          {'id': _secondId, 'name': 'Сервер подписки', 'subscriptionId': _firstId,
+            'subscriptionName': 'Магазин'},
+        ],
+        'activeProfileId': _firstId,
+      }),
+      mutationsEnabled: true,
+      onSelect: (_) => selected = true,
+      onEdit: (_) => fail('Managed edit must not be exposed'),
+      onDelete: (_) => fail('Managed deletion must not be exposed'),
+    ));
+    expect(find.byKey(const ValueKey('edit_wireguard_profile_$_secondId')), findsNothing);
+    expect(find.byKey(const ValueKey('delete_wireguard_profile_$_secondId')), findsNothing);
+    expect(find.text('Из подписки «Магазин»'), findsOneWidget);
+    await _tap(tester, 'select_wireguard_profile_$_secondId');
+    expect(selected, isTrue);
+  });
   testWidgets('An empty catalog offers explicit creation without any automatic action',
       (tester) async {
     var adds = 0;

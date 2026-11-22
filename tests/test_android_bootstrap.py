@@ -92,6 +92,47 @@ dependencies {
         self.assertEqual(app.find("meta-data").get(ANDROID + "value"), "2")
         self.assertIn("Keep Flutter metadata", self.manifest.read_text())
 
+    def test_subscription_link_routing_is_narrow_and_idempotent(self):
+        self.write_manifest()
+        manifest = self.patch()
+        main = manifest.find('application/activity')
+        self.assertEqual(main.get(ANDROID + 'launchMode'), 'singleTop')
+        self.assertEqual(main.get(ANDROID + 'exported'), 'true')
+        route = [item for item in main.findall('meta-data')
+                 if item.get(ANDROID + 'name') == 'flutter_deeplinking_enabled']
+        self.assertEqual(len(route), 1)
+        self.assertEqual(route[0].get(ANDROID + 'value'), 'false')
+        filters = [item for item in main.findall('intent-filter') if item.find('data') is not None]
+        self.assertEqual(len(filters), 1)
+        self.assertEqual(filters[0].find('data').attrib, {
+            ANDROID + 'scheme': 'pushokflow', ANDROID + 'host': 'subscription'})
+        MANIFEST_CHECK.validate(self.manifest)
+        original = self.manifest.read_bytes()
+        self.patch()
+        self.assertEqual(self.manifest.read_bytes(), original)
+
+    def test_source_gate_rejects_broad_subscription_links_and_flutter_routes(self):
+        for mode in ('missing', 'host', 'extra-data', 'flutter-routing', 'launch-mode'):
+            with self.subTest(mode=mode):
+                self.write_manifest()
+                manifest = self.patch()
+                main = manifest.find('application/activity')
+                link_filter = next(item for item in main.findall('intent-filter') if item.find('data') is not None)
+                if mode == 'missing':
+                    main.remove(link_filter)
+                elif mode == 'host':
+                    link_filter.find('data').set(ANDROID + 'host', '*')
+                elif mode == 'extra-data':
+                    ET.SubElement(link_filter, 'data', {ANDROID + 'scheme': 'https'})
+                elif mode == 'flutter-routing':
+                    next(item for item in main.findall('meta-data') if item.get(ANDROID + 'name') ==
+                         'flutter_deeplinking_enabled').set(ANDROID + 'value', 'true')
+                else:
+                    main.set(ANDROID + 'launchMode', 'standard')
+                ET.ElementTree(manifest).write(self.manifest)
+                with self.assertRaisesRegex(ValueError, 'Subscription'):
+                    MANIFEST_CHECK.validate(self.manifest)
+
     def test_creates_queries_when_missing(self):
         self.write_manifest()
         manifest = self.patch()
@@ -414,7 +455,8 @@ class BootstrapScriptTests(unittest.TestCase):
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportReader.kt", "ProfileQrDecoder.kt",
             "ProfileQrImageReader.kt", "ProfileQrSession.kt", "WireGuardQrActivity.kt",
-            "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "RouteSettingsStore.kt", "RouteAppAvailability.kt",
+            "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "SubscriptionPolicy.kt", "SubscriptionFeed.kt",
+            "SubscriptionLinks.kt", "SubscriptionDownloader.kt", "ProfileSubscriptions.kt", "RouteSettingsStore.kt", "RouteAppAvailability.kt",
             "RouteRecommendationPolicy.kt", "RouteRecommendationStore.kt", "RecommendationAutomation.kt", "RouteRecommendations.kt",
         )
         native = self.project / "native/android/app/src/main/kotlin/shop/pushok/flow"

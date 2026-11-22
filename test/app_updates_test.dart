@@ -451,7 +451,7 @@ void main() {
   const waitingMessages = {
     'permission': 'Один раз разрешите установку обновлений',
     'confirmation': 'Android ждёт вашего подтверждения',
-    'connection': 'Установка ждёт отключения активного подключения',
+    'connection': 'Автоустановка ждёт отключения активного подключения',
     'foreground': 'когда вы свернёте Pushok Flow',
     'unsupported': 'Эта версия Android требует подтверждения',
   };
@@ -467,8 +467,6 @@ void main() {
         if (entry.key == 'permission') {
           expect(find.byKey(const Key('allow_app_update_install')), findsOneWidget);
           expect(find.byKey(const Key('install_app_update')), findsNothing);
-        } else if (entry.key == 'connection') {
-          expect(find.byKey(const Key('install_app_update')), findsNothing);
         } else {
           expect(find.byKey(const Key('install_app_update')), findsOneWidget);
         }
@@ -476,6 +474,19 @@ void main() {
       });
     });
   }
+
+  testWidgets('A connection can defer automatic installation without hiding manual installation', (tester) async {
+    bridge.state = _status(phase: 'ready', permission: true,
+        waitingReason: 'connection');
+    await _withCard(tester, () async {
+      expect(find.textContaining('установить обновление вручную'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('install_app_update')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('installUpdate'), 1);
+      expect(bridge.count('setAutomaticUpdates'), 0);
+      expect(bridge.count('downloadUpdate'), 0);
+    });
+  });
 
   testWidgets('Manual checking, downloading, permission and installation remain separate actions', (tester) async {
     await _withCard(tester, () async {

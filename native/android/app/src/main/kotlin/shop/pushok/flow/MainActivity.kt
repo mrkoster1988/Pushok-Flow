@@ -93,6 +93,9 @@ class MainActivity : FlutterActivity() {
     private val routeRecommendations by lazy { RouteRecommendations(this) }
     private val profileScreenProtection by lazy { ProfileScreenProtection(this) }
     private val profileImport by lazy { WireGuardProfileImport(this) { profileScreenProtection.isActive } }
+    private val profileSubscriptions by lazy {
+        ProfileSubscriptions(this, secureStore, ::mutateSubscription)
+    }
     private val lastErrorCode get() = Session.connection.lastErrorCode
     private val vpnRequestCode = 7341
 
@@ -100,12 +103,21 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         appUpdates.setForeground(true)
         routeRecommendations.setForeground(true)
+        profileSubscriptions.setForeground(true)
     }
 
     override fun onPause() {
         appUpdates.setForeground(false)
         routeRecommendations.setForeground(false)
+        profileSubscriptions.setForeground(false)
         super.onPause()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        profileSubscriptions.acceptLink(intent.takeIf { it.action == Intent.ACTION_VIEW }?.dataString)
+        // Do not retain a bearer subscription URL in the Activity's next recreation intent.
+        setIntent(Intent(intent).setData(null))
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -222,6 +234,7 @@ class MainActivity : FlutterActivity() {
         profileImport.dispose()
         appUpdates.dispose()
         routeRecommendations.dispose()
+        profileSubscriptions.dispose()
         profileScreenProtection.dispose()
         interruptPendingVpnRequest()
         super.onDestroy()
@@ -265,6 +278,7 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         profileImport.dispose()
         routeRecommendations.dispose()
+        profileSubscriptions.dispose()
         profileScreenProtection.dispose()
         interruptPendingVpnRequest()
         super.cleanUpFlutterEngine(flutterEngine)
@@ -272,9 +286,10 @@ class MainActivity : FlutterActivity() {
 
     private fun profileErrorCode(error: Exception, fallback: String): String {
         if (error is ProfileFormatFailure) return error.code
+        if (error is SubscriptionFailure) return error.code
         val code = (error as? ProfileCatalogFailure)?.code
         return if (code in setOf("PROFILE_NAME_INVALID", "PROFILE_LIMIT_REACHED", "PROFILE_NOT_FOUND",
-                "PROFILE_STORE_UNAVAILABLE", "PROFILE_CHANGED", "INVALID_CONFIG", "VPN_ACTIVE", "VPN_STATE_UNAVAILABLE")) code!! else fallback
+                "PROFILE_STORE_UNAVAILABLE", "PROFILE_CHANGED", "PROFILE_MANAGED", "INVALID_CONFIG", "VPN_ACTIVE", "VPN_BUSY", "VPN_STATE_UNAVAILABLE")) code!! else fallback
     }
 
     private fun mutateProfile(result: MethodChannel.Result, fallback: String, action: () -> Unit) {
@@ -300,6 +315,24 @@ class MainActivity : FlutterActivity() {
                 if (failure == null) result.success(true)
                 else result.error(failure, "Не удалось изменить профиль", null)
             }
+        }
+    }
+
+    /** The same process-wide queue and gate protect local edits and subscription commits. */
+    private fun mutateSubscription(action: () -> Unit, completed: (String?) -> Unit) {
+        val token = Session.operationInProgress.acquire()
+        if (token == null) { completed("VPN_BUSY"); return }
+        io.execute {
+            val failure = try {
+                val state = Session.connection.observe(::readTunnelState)
+                if (!state.known) throw ProfileCatalogFailure("VPN_STATE_UNAVAILABLE")
+                if (state.connected) throw ProfileCatalogFailure("VPN_ACTIVE")
+                action()
+                null
+            } catch (error: Exception) {
+                profileErrorCode(error, "SUBSCRIPTION_STORE_FAILED")
+            } finally { releaseOperation(token) }
+            runOnUiThread { completed(failure) }
         }
     }
 
@@ -341,6 +374,9 @@ class MainActivity : FlutterActivity() {
         profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
         routeRecommendations.register(flutterEngine.dartExecutor.binaryMessenger)
+        profileSubscriptions.register(flutterEngine.dartExecutor.binaryMessenger)
+        profileSubscriptions.acceptLink(intent.takeIf { it?.action == Intent.ACTION_VIEW }?.dataString)
+        if (intent?.data != null) setIntent(Intent(intent).setData(null))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

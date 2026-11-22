@@ -65,8 +65,15 @@ class SecureWireGuardStore(context: Context) {
         override fun encrypt(catalog: ProfileCatalog): String {
             val profiles = JSONArray()
             catalog.profiles.forEach { profiles.put(JSONObject().put("id", it.id)
-                .put("name", it.name).put("config", it.config)) }
-            val json = JSONObject().put("version", 1).put("profiles", profiles)
+                .put("name", it.name).put("config", it.config)
+                .put("subscriptionId", it.subscriptionId ?: JSONObject.NULL)) }
+            val subscriptions = JSONArray()
+            catalog.subscriptions.forEach { subscriptions.put(JSONObject().put("id", it.id)
+                .put("name", it.name).put("url", it.url).put("updatedAt", it.updatedAt)
+                .put("expiresAt", it.expiresAt ?: JSONObject.NULL)
+                .put("usedBytes", it.usedBytes ?: JSONObject.NULL)
+                .put("totalBytes", it.totalBytes ?: JSONObject.NULL)) }
+            val json = JSONObject().put("version", 2).put("profiles", profiles).put("subscriptions", subscriptions)
                 .put("activeProfileId", catalog.activeProfileId ?: JSONObject.NULL)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key(create = true))
@@ -81,22 +88,49 @@ class SecureWireGuardStore(context: Context) {
 
         override fun decrypt(encrypted: String): ProfileCatalog {
             val json = JSONObject(decryptText(encrypted, catalog = true))
-            require(json.opt("version") == 1 && json.has("activeProfileId")) { "PROFILE_LOAD_FAILED" }
+            val version = json.opt("version")
+            require(version in listOf(1, 2) && json.has("activeProfileId")) { "PROFILE_LOAD_FAILED" }
             val values = json.opt("profiles") as? JSONArray ?: error("PROFILE_LOAD_FAILED")
             require(values.length() <= ProfileCatalogStore.MAX_PROFILES) { "PROFILE_LOAD_FAILED" }
             val profiles = (0 until values.length()).map { index ->
                 val item = values.opt(index) as? JSONObject ?: error("PROFILE_LOAD_FAILED")
                 StoredWireGuardProfile(item.opt("id") as? String ?: error("PROFILE_LOAD_FAILED"),
                     item.opt("name") as? String ?: error("PROFILE_LOAD_FAILED"),
-                    item.opt("config") as? String ?: error("PROFILE_LOAD_FAILED"))
+                    item.opt("config") as? String ?: error("PROFILE_LOAD_FAILED"),
+                    if (version == 2) nullableString(item, "subscriptionId") else null)
             }
             val active = json.opt("activeProfileId")
             require(active == JSONObject.NULL || active is String) { "PROFILE_LOAD_FAILED" }
-            return ProfileCatalog(profiles, active as? String)
+            val subscriptions = if (version == 1) emptyList() else {
+                val items = json.opt("subscriptions") as? JSONArray ?: error("PROFILE_LOAD_FAILED")
+                require(items.length() <= SubscriptionPolicy.MAX_SUBSCRIPTIONS) { "PROFILE_LOAD_FAILED" }
+                (0 until items.length()).map { index ->
+                    val item = items.opt(index) as? JSONObject ?: error("PROFILE_LOAD_FAILED")
+                    StoredSubscription(item.opt("id") as? String ?: error("PROFILE_LOAD_FAILED"),
+                        item.opt("name") as? String ?: error("PROFILE_LOAD_FAILED"),
+                        item.opt("url") as? String ?: error("PROFILE_LOAD_FAILED"),
+                        nullableLong(item, "updatedAt") ?: error("PROFILE_LOAD_FAILED"),
+                        nullableLong(item, "expiresAt"), nullableLong(item, "usedBytes"), nullableLong(item, "totalBytes"))
+                }
+            }
+            return ProfileCatalog(profiles, active as? String, subscriptions)
         }
 
         override fun decryptLegacy(encrypted: String) = decryptText(encrypted, catalog = false)
     }, state)
+
+    private fun nullableString(item: JSONObject, field: String): String? = when (val value = item.opt(field)) {
+        JSONObject.NULL -> null
+        is String -> value
+        else -> error("PROFILE_LOAD_FAILED")
+    }
+
+    private fun nullableLong(item: JSONObject, field: String): Long? = when (val value = item.opt(field)) {
+        JSONObject.NULL -> null
+        is Long -> value
+        is Int -> value.toLong()
+        else -> error("PROFILE_LOAD_FAILED")
+    }
 
     fun metadata(): Map<String, Any?> = catalogStore.metadata()
     fun save(config: String, profileId: String? = null, name: String? = null, createNew: Boolean = false) =
@@ -106,4 +140,11 @@ class SecureWireGuardStore(context: Context) {
     fun delete(profileId: String? = null) = catalogStore.delete(profileId)
     fun select(profileId: String) = catalogStore.select(profileId)
     fun exists(): Boolean = catalogStore.exists()
+    fun subscriptions(): Map<String, Any?> = catalogStore.subscriptions()
+    fun subscriptionRecords(): List<StoredSubscription> = catalogStore.subscriptionRecords()
+    fun importSubscription(name: String, url: String, feed: SubscriptionFeed.Parsed, now: Long): String =
+        catalogStore.importSubscription(name, url, feed, now)
+    fun refreshSubscription(id: String, expectedUrl: String, feed: SubscriptionFeed.Parsed, now: Long) =
+        catalogStore.refreshSubscription(id, expectedUrl, feed, now)
+    fun deleteSubscription(id: String) = catalogStore.deleteSubscription(id)
 }

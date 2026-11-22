@@ -9,9 +9,12 @@ import 'ai/pushok_ai_memory.dart';
 import 'platform/wireguard_tunnel.dart';
 import 'platform/wireguard_profiles.dart';
 import 'platform/profile_privacy.dart';
+import 'platform/subscriptions.dart';
 import 'platform/tunnel_diagnostics.dart';
 import 'ui/wireguard_profile_editor.dart';
 import 'ui/wireguard_profiles_card.dart';
+import 'ui/subscriptions_card.dart';
+import 'ui/subscription_editor.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
@@ -62,6 +65,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   String? connectionError;
   WireGuardProfiles? _profiles;
   String? _profilesError;
+  late final FlowSubscriptions _subscriptionBridge;
+  SubscriptionStatus? _subscriptions;
+  String? _subscriptionsError;
+  bool _subscriptionsLoading = false;
+  bool _subscriptionsBusy = false;
+  bool _pendingSubscriptionReading = false;
+  bool _openingPushok = false;
+  int _subscriptionEpoch = 0;
+  Timer? _subscriptionPoll;
+  SubscriptionDraft? _pendingSubscriptionLink;
   String? lastErrorCode;
   TunnelDiagnostics _diagnostics = const TunnelDiagnostics.unavailable();
   bool _diagnosticsStale = true;
@@ -317,6 +330,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     _recommendationEpoch++;
     _recommendationPoll?.cancel();
     _informationRevision.dispose();
+    _subscriptionEpoch++;
+    _subscriptionPoll?.cancel();
+    _subscriptionBridge.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -325,11 +341,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _recommendationBridge = RouteRecommendations(isAndroid: _isAndroid);
+    _subscriptionBridge = FlowSubscriptions(isAndroid: _isAndroid);
+    _subscriptionBridge.listenForPendingLinks(() {
+      unawaited(_takePendingSubscriptionLink());
+    });
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _loadRoutes();
-    _refreshProfileStatus();
+    unawaited(_refreshProfileStatus().then((_) =>
+      _readSubscriptions(checkAutomatically: true)));
     _loadAiFeedback();
     _startHealthPolling();
   }
@@ -348,7 +369,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     _foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _startHealthPolling();
-      _refreshProfileStatus();
+      unawaited(_refreshProfileStatus().then((_) =>
+        _readSubscriptions(checkAutomatically: true)));
       _loadRoutes();
       if (tab == 1) unawaited(_readRecommendations(checkAutomatically: true));
     } else {
@@ -359,6 +381,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _statusEpoch++;
       _routeEpoch++;
       _recommendationEpoch++;
+      _subscriptionEpoch++;
+      _subscriptionPoll?.cancel();
       _recommendationPoll?.cancel();
       setState(() {
         _diagnosticsStale = true;
@@ -367,6 +391,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         _recommendationsLoading = false;
         _recommendationsRefreshing = false;
         _recommendationsSavingAutoUpdate = false;
+        _subscriptionsLoading = false;
       });
       _healthPoll?.cancel();
     }
@@ -379,6 +404,228 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       final data = await PushokAiMemory.summary();
       if (mounted) setState(() => feedback = data);
     } catch (_) { if (mounted) setState(() => feedbackMessage = 'Память недоступна на этом устройстве.'); }
+  }
+
+  Future<void> _readSubscriptions({bool checkAutomatically = false}) async {
+    if (!_isAndroid || !mounted || !_foreground || _subscriptionsLoading ||
+        _subscriptionsBusy) return;
+    final epoch = ++_subscriptionEpoch;
+    _subscriptionPoll?.cancel();
+    var received = false;
+    setState(() => _subscriptionsLoading = true);
+    try {
+      final status = await _subscriptionBridge.status();
+      if (!mounted || !_foreground || epoch != _subscriptionEpoch) return;
+      received = true;
+      setState(() {
+        _subscriptions = status;
+        _subscriptionsError = status.errorCode == null ? null
+            : subscriptionErrorMessage(PlatformException(code: status.errorCode!));
+      });
+    } catch (error) {
+      if (mounted && _foreground && epoch == _subscriptionEpoch) {
+        setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+      }
+    } finally {
+      if (mounted && epoch == _subscriptionEpoch) {
+        setState(() => _subscriptionsLoading = false);
+      }
+    }
+    if (!mounted || !_foreground || epoch != _subscriptionEpoch) return;
+    if (_subscriptions?.busy ?? false) {
+      _subscriptionPoll = Timer(const Duration(seconds: 1), () {
+        if (mounted && _foreground) unawaited(_readSubscriptions());
+      });
+    }
+    await _takePendingSubscriptionLink();
+    if (checkAutomatically && _pendingSubscriptionLink == null &&
+        received && (_subscriptions?.automaticUpdatesEnabled ?? false) &&
+        !_subscriptions!.busy && _subscriptions!.subscriptions.isNotEmpty && _canManageProfiles) {
+      await _changeSubscriptions(_subscriptionBridge.refreshDue, automatic: true);
+    }
+  }
+
+  Future<void> _changeSubscriptions(Future<SubscriptionStatus> Function() action,
+      {bool automatic = false}) async {
+    if (!_canManageProfiles || _subscriptionsBusy || (_subscriptions?.busy ?? false)) return;
+    _statusEpoch++;
+    setState(() { _subscriptionsBusy = true; _profileBusy = true; });
+    try {
+      final status = await action();
+      if (mounted) setState(() {
+        _subscriptions = status;
+        _subscriptionsError = status.errorCode == null ? null
+            : subscriptionErrorMessage(PlatformException(code: status.errorCode!));
+      });
+      if (!automatic && mounted && _foreground) _showNotice('Список серверов обновлён.');
+    } catch (error) {
+      if (mounted) setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+    } finally {
+      if (mounted) {
+        _statusEpoch++;
+        setState(() { _subscriptionsBusy = false; _profileBusy = false; });
+        await _refreshProfileStatus();
+        await _readSubscriptions();
+      }
+    }
+  }
+
+  Future<void> _setSubscriptionAutomaticUpdates(bool enabled) async {
+    if (!_isAndroid || !mounted || !_foreground || _subscriptionsBusy ||
+        _subscriptionsLoading || _subscriptions == null) return;
+    setState(() => _subscriptionsBusy = true);
+    try {
+      final status = await _subscriptionBridge.setAutomaticUpdates(enabled);
+      if (mounted) setState(() {
+        _subscriptions = status;
+        _subscriptionsError = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+    } finally {
+      if (mounted) setState(() => _subscriptionsBusy = false);
+    }
+  }
+
+  Future<void> _takePendingSubscriptionLink() async {
+    if (!_isAndroid || !mounted || !_foreground || _pendingSubscriptionReading) return;
+    _pendingSubscriptionReading = true;
+    try {
+      final draft = await _subscriptionBridge.takePendingLink();
+      if (!mounted) return;
+      if (draft != null) setState(() {
+        _pendingSubscriptionLink = draft;
+        tab = 2;
+      });
+    } catch (_) {
+      // A broken external link cannot reveal native message/details or replace
+      // an existing saved subscription. A later explicit link can be retried.
+    } finally {
+      _pendingSubscriptionReading = false;
+    }
+    if (mounted && _foreground && _pendingSubscriptionLink != null &&
+        _subscriptions != null && !_subscriptions!.busy &&
+        _canManageProfiles && !_subscriptionsBusy) {
+      await _addSubscription(draft: _pendingSubscriptionLink);
+    }
+  }
+
+  Future<void> _addSubscription({SubscriptionDraft? draft}) async {
+    if (!_canManageProfiles || _subscriptionsBusy || _subscriptions == null ||
+        _subscriptions!.busy) return;
+    if (_subscriptions!.subscriptions.length >= SubscriptionStatus.maxSubscriptions) {
+      _showNotice('Можно добавить до пяти подписок. Удалите ненужную.');
+      return;
+    }
+    final intentEpoch = _profileRequestEpoch;
+    _statusEpoch++;
+    setState(() => _profileBusy = true);
+    ProfilePrivacy? protection;
+    bool? saved;
+    try {
+      try {
+        protection = await ProfilePrivacy.acquire();
+      } catch (_) {
+        if (mounted && _foreground) {
+          _showNotice('Не удалось защитить экран подписки. Перезапустите приложение.');
+        }
+        return;
+      }
+      if (!mounted || !_foreground || intentEpoch != _profileRequestEpoch) return;
+      setState(() {
+        _profileBusy = false;
+        _profileEditorOpen = true;
+        if (draft != null && identical(draft, _pendingSubscriptionLink)) {
+          _pendingSubscriptionLink = null;
+        }
+      });
+      final navigator = Navigator.of(context);
+      final localizations = MaterialLocalizations.of(context);
+      final route = ModalBottomSheetRoute<bool>(
+        capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
+        settings: const RouteSettings(name: 'flow-subscription'),
+        barrierLabel: localizations.scrimLabel,
+        barrierOnTapHint: localizations.scrimOnTapHint(localizations.bottomSheetLabel),
+        modalBarrierColor: Theme.of(context).bottomSheetTheme.modalBarrierColor,
+        isScrollControlled: true, useSafeArea: true,
+        isDismissible: false, enableDrag: false,
+        backgroundColor: PushokPalette.midnight,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          side: BorderSide(color: PushokPalette.glowCyan)),
+        builder: (context) => SubscriptionEditor(draft: draft,
+          onSave: (url, name) async {
+            if (!mounted || !_foreground || connected || connecting) {
+              throw PlatformException(code: 'VPN_ACTIVE');
+            }
+            final status = await _subscriptionBridge.importSubscription(url, name);
+            if (mounted) setState(() {
+              _subscriptions = status;
+              _subscriptionsError = null;
+            });
+          }),
+      );
+      unawaited(navigator.push<bool>(route));
+      saved = await route.completed;
+      await WidgetsBinding.instance.endOfFrame;
+    } finally {
+      if (protection != null) {
+        try { await protection.release(); }
+        catch (_) {
+          if (mounted && _foreground) {
+            _showNotice('Защита экрана осталась включённой. Для снимков других экранов перезапустите приложение.');
+          }
+        }
+      }
+      if (mounted) {
+        _statusEpoch++;
+        setState(() { _profileBusy = false; _profileEditorOpen = false; });
+        await _refreshProfileStatus();
+      }
+    }
+    if (saved == true && mounted && _foreground) {
+      _showNotice('Подписка добавлена. Выберите сервер и подключитесь на главной.');
+    }
+  }
+
+  Future<void> _deleteSubscription(FlowSubscription subscription) async {
+    if (!_canManageProfiles || _subscriptionsBusy || (_subscriptions?.busy ?? false)) return;
+    final intentEpoch = _profileRequestEpoch;
+    setState(() => _profileBusy = true);
+    bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Удалить подписку из Flow?'),
+          content: Text('«${subscription.name}» и её серверы будут удалены с этого устройства. '
+            'Оплаченный доступ и автопродление в магазине сохранятся.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Отмена')),
+            TextButton(key: const Key('confirm_delete_subscription'),
+              onPressed: () => Navigator.of(context).pop(true), child: const Text('Удалить')),
+          ],
+        ));
+    } finally {
+      if (mounted) setState(() => _profileBusy = false);
+    }
+    if (confirmed != true || !mounted || !_foreground ||
+        intentEpoch != _profileRequestEpoch) return;
+    await _changeSubscriptions(() => _subscriptionBridge.deleteSubscription(subscription.id));
+  }
+
+  Future<void> _openPushokAccount() async {
+    if (!_isAndroid || !mounted || !_foreground || _openingPushok) return;
+    setState(() => _openingPushok = true);
+    try {
+      await _subscriptionBridge.openPushokAccount();
+    } catch (_) {
+      if (mounted && _foreground) {
+        _showNotice('Не удалось открыть Pushok. Найдите ${FlowSubscriptions.botUsername} в Telegram.');
+      }
+    } finally {
+      if (mounted) setState(() => _openingPushok = false);
+    }
   }
 
   Future<void> _readRecommendations({bool checkAutomatically = false}) =>
@@ -534,7 +781,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Future<void> _editProfile({WireGuardProfileSummary? profile,
       bool connectAfterSave = false, int? tunnelIntent}) async {
-    if (!_canManageProfiles) return;
+    if (!_canManageProfiles || (profile?.isManaged ?? false)) return;
     if (profile == null && _profiles!.isFull) {
       _showNotice('Можно сохранить до 20 профилей. Удалите ненужный профиль.');
       return;
@@ -672,6 +919,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       if (error.code == 'PROFILE_NOT_FOUND') {
         return 'Профиль уже недоступен. Обновите список.';
       }
+      if (error.code == 'PROFILE_MANAGED') {
+        return 'Этот сервер обновляется вместе с подпиской. Откройте раздел «Подписки».';
+      }
       if (error.code == 'PROFILE_STORE_UNAVAILABLE') {
         return 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.';
       }
@@ -705,7 +955,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _deleteProfile(WireGuardProfileSummary profile) async {
-    if (!_canManageProfiles) return;
+    if (!_canManageProfiles || profile.isManaged) return;
     final intentEpoch = _profileRequestEpoch;
     final remaining = _profiles!.profiles.where((p) => p.id != profile.id).toList();
     final fallback = profile.id == _profiles!.activeProfileId && remaining.isNotEmpty
@@ -918,7 +1168,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.40.0',
+            version: '0.41.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -982,7 +1232,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
             unawaited(_refreshRoutes());
             unawaited(_readRecommendations(checkAutomatically: enteringRoutes));
           }
-          if (v == 2) unawaited(_refreshProfileStatus());
+          if (v == 2) {
+            unawaited(_refreshProfileStatus().then((_) =>
+              _readSubscriptions(checkAutomatically: true)));
+          }
         },
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [
@@ -1091,7 +1344,28 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       onAutoUpdateChanged: _isAndroid && _foreground ? _setRecommendationAutoUpdate : null,
     ),
   );
-  Widget servers() => ListView(children: [
+  Widget servers() => SingleChildScrollView(child: Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+    SubscriptionsCard(
+      status: _subscriptions,
+      loading: _subscriptionsLoading,
+      busy: _subscriptionsBusy,
+      error: !_isAndroid ? 'Подписки доступны в приложении для Android.' : _subscriptionsError,
+      mutationsEnabled: _canManageProfiles,
+      pendingLink: _pendingSubscriptionLink != null,
+      onAdd: () => _addSubscription(),
+      onRefreshList: _isAndroid && _foreground ? _readSubscriptions : null,
+      onRefresh: (subscription) => _changeSubscriptions(
+        () => _subscriptionBridge.refreshSubscription(subscription.id)),
+      onDelete: _deleteSubscription,
+      onAutomaticUpdatesChanged: _isAndroid && _foreground
+          ? _setSubscriptionAutomaticUpdates : null,
+      onOpenAccount: _isAndroid && _foreground && !_openingPushok
+          ? _openPushokAccount : null,
+      onOpenPendingLink: () => _addSubscription(draft: _pendingSubscriptionLink),
+    ),
+    const SizedBox(height: 12),
     WireGuardProfilesCard(
       catalog: _profiles,
       // Confirmation and the protected editor block actions without pretending
@@ -1112,7 +1386,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       child: Text('Для изменения профилей отключите туннель.',
           style: TextStyle(color: PushokPalette.muted)),
     ),
-  ]);
+  ]));
   Widget assistant() => ListView(children: [
     card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const ListTile(leading: Icon(Icons.smart_toy_outlined, color: PushokFlowApp.teal),
@@ -1140,8 +1414,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     ])),
   ]);
   Widget profile() => ListView(children: [
-    card(const ListTile(leading: Icon(Icons.person_outline), title: Text('Pushok ID'),
-      subtitle: Text('Единая авторизация — в разработке'))),
+    card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const ListTile(contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.person_outline, color: PushokPalette.teal),
+        title: Text('Pushok'),
+        subtitle: Text('Регистрация, оплата и подписки в ${FlowSubscriptions.botUsername}')),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(key: const Key('open_pushok_account'),
+        onPressed: _isAndroid && _foreground && !_openingPushok ? _openPushokAccount : null,
+        icon: const Icon(Icons.open_in_new), label: const Text('Открыть Pushok')),
+    ])),
     const SizedBox(height: 12),
     AppUpdatesCard(isAndroid: _isAndroid),
   ]);

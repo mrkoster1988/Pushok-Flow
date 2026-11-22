@@ -194,7 +194,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         .firstMatch(config.trim())?.group(1)?.toLowerCase();
     if (scheme == 'http' || scheme == 'https') {
       return (code: 'UNSUPPORTED_PROFILE',
-          message: 'Ссылки подписки пока не поддерживаются. Скопируйте ссылку одного клиента VLESS из 3x-ui.');
+          message: 'Это ссылка подписки. Откройте «Серверы → Подписки → Добавить подписку».');
     }
     if (scheme != null && scheme != 'vless') {
       return (code: 'UNSUPPORTED_PROFILE', message: _unsupportedProfile);

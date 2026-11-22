@@ -50,6 +50,12 @@ class WireGuardProfilesCard extends StatelessWidget {
               key: ValueKey('wireguard_profile_name_${profile.id}'),
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
           ]),
+          if (profile.isManaged) ...[
+            const SizedBox(height: 8),
+            Text('Из подписки «${profile.subscriptionName}»',
+              key: ValueKey('managed_wireguard_profile_${profile.id}'),
+              style: const TextStyle(color: PushokPalette.muted)),
+          ],
           if (selected) ...[
             const SizedBox(height: 10),
             Align(alignment: Alignment.centerLeft,
@@ -69,14 +75,14 @@ class WireGuardProfilesCard extends StatelessWidget {
               icon: const Icon(Icons.check_circle_outline),
               label: const Text('Выбрать'),
             ),
-            OutlinedButton.icon(
+            if (!profile.isManaged) OutlinedButton.icon(
               key: ValueKey('edit_wireguard_profile_${profile.id}'),
               onPressed: _canChange && onEdit != null
                   ? () => onEdit!(profile) : null,
               icon: const Icon(Icons.edit_outlined),
               label: const Text('Изменить'),
             ),
-            OutlinedButton.icon(
+            if (!profile.isManaged) OutlinedButton.icon(
               key: ValueKey('delete_wireguard_profile_${profile.id}'),
               onPressed: _canChange && onDelete != null
                   ? () => onDelete!(profile) : null,

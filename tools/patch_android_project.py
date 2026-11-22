@@ -11,6 +11,7 @@ UPDATE_INSTALL_RECEIVER = "shop.pushok.flow.UpdateInstallReceiver"
 UPDATE_REPLACED_RECEIVER = "shop.pushok.flow.UpdateReplacedReceiver"
 QR_ACTIVITY = "shop.pushok.flow.WireGuardQrActivity"
 XRAY_SERVICE = "shop.pushok.flow.XrayVpnService"
+MAIN_ACTIVITY = "shop.pushok.flow.MainActivity"
 TOOLS_URI = "http://schemas.android.com/tools"
 NATIVE_PACKAGING_START = "// BEGIN PUSHOK_NATIVE_PACKAGING"
 NATIVE_PACKAGING_END = "// END PUSHOK_NATIVE_PACKAGING"
@@ -66,6 +67,32 @@ def patch_manifest(path: Path) -> None:
     app = manifest.find("application")
     if app is None:
         raise ValueError("Android manifest has no application element")
+
+    # A custom link opens an import draft in our existing Activity. Flutter's router
+    # must not receive the bearer URL as an initial route before native validation.
+    main_activities = [item for item in app.findall("activity")
+                       if item.get(ANDROID + "name") in (MAIN_ACTIVITY, ".MainActivity", "MainActivity")]
+    if len(main_activities) != 1:
+        raise ValueError("Subscription links require exactly one MainActivity")
+    main_activity = main_activities[0]
+    main_activity.set(ANDROID + "exported", "true")
+    main_activity.set(ANDROID + "launchMode", "singleTop")
+    for metadata in list(main_activity.findall("meta-data")):
+        if metadata.get(ANDROID + "name") == "flutter_deeplinking_enabled":
+            main_activity.remove(metadata)
+    ET.SubElement(main_activity, "meta-data", {
+        ANDROID + "name": "flutter_deeplinking_enabled", ANDROID + "value": "false",
+    })
+    for intent_filter in list(main_activity.findall("intent-filter")):
+        if any(item.get(ANDROID + "scheme") == "pushokflow" for item in intent_filter.findall("data")):
+            main_activity.remove(intent_filter)
+    subscription_filter = ET.SubElement(main_activity, "intent-filter")
+    ET.SubElement(subscription_filter, "action", {ANDROID + "name": "android.intent.action.VIEW"})
+    ET.SubElement(subscription_filter, "category", {ANDROID + "name": "android.intent.category.DEFAULT"})
+    ET.SubElement(subscription_filter, "category", {ANDROID + "name": "android.intent.category.BROWSABLE"})
+    ET.SubElement(subscription_filter, "data", {
+        ANDROID + "scheme": "pushokflow", ANDROID + "host": "subscription",
+    })
 
     # The WireGuard AAR contributes its VPN service via manifest merging.
     # Remove old app declarations, including self-closing service elements.

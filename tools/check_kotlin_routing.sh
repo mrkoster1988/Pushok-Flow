@@ -59,10 +59,27 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
   native/android/tests/ProfileQrImportCheck.kt -classpath "$core" -include-runtime -d "$out/qr-import-tests.jar"
 java -cp "$out/qr-import-tests.jar:$core" shop.pushok.flow.ProfileQrImportCheckKt
-kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt \
+subscription_core=(
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionPolicy.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionFeed.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt
+)
+kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileOperationGate.kt \
   native/android/tests/ProfileCatalogCheck.kt -include-runtime -d "$out/profile-catalog-tests.jar"
 java -jar "$out/profile-catalog-tests.jar"
+kotlinc "${subscription_core[@]}" \
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionDownloader.kt \
+  native/android/tests/SubscriptionFeedCheck.kt \
+  native/android/tests/SubscriptionCatalogCheck.kt \
+  native/android/tests/SubscriptionTransportCheck.kt -include-runtime -d "$out/subscription-tests.jar"
+java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionFeedCheckKt
+java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionCatalogCheckKt
+java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionTransportCheckKt
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.kt \
   native/android/tests/RouteSettingsCheck.kt -include-runtime -d "$out/route-settings-tests.jar"
 java -jar "$out/route-settings-tests.jar"

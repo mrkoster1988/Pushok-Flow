@@ -41,6 +41,27 @@ void main() {
     expect(empty.isFull, isFalse);
   });
 
+  test('Managed profiles expose ownership without exposing a subscription URL', () {
+    final catalog = WireGuardProfiles.fromPlatform({
+      'profiles': [{
+        'id': _firstId, 'name': 'Сервер',
+        'subscriptionId': _secondId, 'subscriptionName': 'Магазин',
+      }],
+      'activeProfileId': _firstId,
+    });
+    expect(catalog.activeProfile!.isManaged, isTrue);
+    expect(catalog.activeProfile!.subscriptionName, 'Магазин');
+    for (final invalid in [
+      {'id': _firstId, 'name': 'Сервер', 'subscriptionId': _secondId},
+      {'id': _firstId, 'name': 'Сервер', 'subscriptionName': 'Магазин'},
+      {'id': _firstId, 'name': 'Сервер', 'subscriptionId': 'bad', 'subscriptionName': 'Магазин'},
+    ]) {
+      expect(() => WireGuardProfiles.fromPlatform({
+        'profiles': [invalid], 'activeProfileId': _firstId,
+      }), throwsFormatException);
+    }
+  });
+
   test('Incomplete, secret-bearing or ambiguous envelopes fail as a whole', () {
     for (final invalid in <Object?>[
       null,

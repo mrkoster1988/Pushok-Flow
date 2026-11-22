@@ -1,10 +1,14 @@
 /// Metadata for the Servers screen. Configuration text and native error details
 /// never belong in this model.
 class WireGuardProfileSummary {
-  const WireGuardProfileSummary({required this.id, required this.name});
+  const WireGuardProfileSummary({required this.id, required this.name,
+    this.subscriptionId, this.subscriptionName});
 
   final String id;
   final String name;
+  final String? subscriptionId;
+  final String? subscriptionName;
+  bool get isManaged => subscriptionId != null;
 }
 
 class WireGuardProfiles {
@@ -53,13 +57,24 @@ class WireGuardProfiles {
     final profiles = <WireGuardProfileSummary>[];
     final ids = <String>{};
     for (final entry in entries) {
-      if (entry is! Map || entry.length != 2 ||
+      if (entry is! Map ||
+          entry.keys.any((key) => !const {
+            'id', 'name', 'subscriptionId', 'subscriptionName',
+          }.contains(key)) ||
           !entry.containsKey('id') || !entry.containsKey('name')) throw invalid;
       final id = entry['id'];
       final name = entry['name'];
+      final subscriptionId = entry['subscriptionId'];
+      final subscriptionName = entry['subscriptionName'];
       if (id is! String || !_idPattern.hasMatch(id) || !ids.add(id) ||
           name is! String || !isValidName(name)) throw invalid;
-      profiles.add(WireGuardProfileSummary(id: id, name: name));
+      if ((subscriptionId == null) != (subscriptionName == null) ||
+          (subscriptionId != null && (subscriptionId is! String ||
+            !_idPattern.hasMatch(subscriptionId) || subscriptionName is! String ||
+            !isValidName(subscriptionName)))) throw invalid;
+      profiles.add(WireGuardProfileSummary(id: id, name: name,
+        subscriptionId: subscriptionId as String?,
+        subscriptionName: subscriptionName as String?));
     }
     if (profiles.isEmpty ? active != null : active == null || !ids.contains(active)) {
       throw invalid;
