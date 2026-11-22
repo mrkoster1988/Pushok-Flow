@@ -54,6 +54,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   int tab = 0;
   List<InstalledApp> installed = [];
   Set<String> bypassPackages = {};
+  Set<String> unavailableBypassPackages = {};
   bool loadingApps = false;
   String? routeError;
   String? connectionError;
@@ -77,6 +78,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   int _routeEpoch = 0;
   String _routeQuery = '';
   bool _onlySelectedRoutes = false;
+  bool _onlyUnavailableRoutes = false;
   int _statusEpoch = 0;
   int _profileRequestEpoch = 0;
   int _tunnelIntentEpoch = 0;
@@ -108,11 +110,23 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       !_profileBusy && !_profileEditorOpen && !_statusRefreshing &&
       _diagnostics.isKnown && !_diagnosticsStale;
 
-  void _showNotice(String message) {
+  void _showNotice(String message, {SnackBarAction? action}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message), showCloseIcon: true));
+      ..showSnackBar(SnackBar(content: Text(message), action: action, showCloseIcon: true));
+  }
+
+  void _openRoutesForRepair({required bool onlyUnavailable}) {
+    if (!mounted || !_foreground || _informationOpen || _profileEditorOpen ||
+        _routeConfirmationOpen) return;
+    setState(() {
+      tab = 1;
+      _routeQuery = '';
+      _onlySelectedRoutes = !onlyUnavailable;
+      _onlyUnavailableRoutes = onlyUnavailable;
+    });
+    unawaited(_refreshRoutes());
   }
 
   String _connectionMessage(Object error, {bool disconnecting = false}) {
@@ -139,6 +153,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'Не удалось записать исключения. Перезапустите приложение перед подключением.';
         case 'ROUTES_LOAD_FAILED':
           return 'Не удалось прочитать исключения. Проверьте раздел «Маршруты» перед подключением.';
+        case 'ROUTES_APPS_UNAVAILABLE':
+          return 'Android не подтвердил доступность некоторых приложений. Откройте «Маршруты» и проверьте исключения.';
+        case 'ROUTES_APPS_CHECK_FAILED':
+          return 'Не удалось проверить приложения в исключениях. Откройте «Маршруты» и повторите проверку.';
         case 'WG_DISCONNECT_FAILED':
           return 'Не удалось отключить VPN. Повторите попытку.';
       }
@@ -202,7 +220,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       if (mounted) {
         final message = _connectionMessage(error, disconnecting: disconnecting);
         setState(() => connectionError = message);
-        _showNotice(message);
+        final routeFailureCode = !disconnecting && error is PlatformException ? error.code : null;
+        final routeFailure = const {'ROUTES_APPS_UNAVAILABLE', 'ROUTES_APPS_CHECK_FAILED'}
+            .contains(routeFailureCode);
+        _showNotice(message, action: routeFailure ? SnackBarAction(
+          key: const Key('open_routes_after_connection_error'),
+          label: 'Маршруты',
+          onPressed: () => _openRoutesForRepair(
+            onlyUnavailable: routeFailureCode == 'ROUTES_APPS_UNAVAILABLE'),
+        ) : null);
+        if (routeFailure) unawaited(_loadRoutes());
       }
     } finally {
       if (mounted) {
@@ -573,12 +600,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     try {
       final values = await Future.wait<Object>([
         AndroidAppRoutes.installedApps().timeout(const Duration(seconds: 10)),
-        AndroidAppRoutes.getBypass().timeout(const Duration(seconds: 5)),
+        AndroidAppRoutes.getBypassStatus().timeout(const Duration(seconds: 5)),
       ], eagerError: true);
       if (mounted && _foreground && epoch == _routeEpoch && !_savingRoute) {
         setState(() {
           installed = values[0] as List<InstalledApp>;
-          bypassPackages = values[1] as Set<String>;
+          final status = values[1] as BypassStatus;
+          bypassPackages = status.packages;
+          unavailableBypassPackages = status.unavailablePackages;
           _routesLoaded = true;
           _routesStale = false;
           routeError = null;
@@ -601,6 +630,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'Список исключений изменился. Проверьте обновлённый выбор и повторите действие.';
         case 'ROUTES_STORE_UNAVAILABLE':
           return 'Не удалось записать исключения. Перезапустите приложение перед повторной попыткой.';
+        case 'ROUTES_APPS_CHECK_FAILED':
+          return 'Не удалось проверить доступность приложений. Повторите проверку списка.';
         case 'VPN_ACTIVE':
           return 'Для изменения исключений отключите туннель.';
         case 'VPN_BUSY':
@@ -729,7 +760,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.32.0',
+            version: '0.33.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -841,6 +872,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   Widget routes() => AppRoutesView(
     apps: installed,
     selectedPackages: bypassPackages,
+    unavailablePackages: unavailableBypassPackages,
+    availabilityCurrent: !_routesStale && !loadingApps && routeError == null,
     isAndroid: _isAndroid,
     loading: loadingApps,
     saving: _savingRoute,
@@ -848,10 +881,18 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     canEdit: _canEditRoutes,
     query: _routeQuery,
     onlySelected: _onlySelectedRoutes,
+    onlyUnavailable: _onlyUnavailableRoutes,
     error: routeError,
     disabledReason: _isAndroid ? _routeDisabledReason : null,
     onQueryChanged: (value) => setState(() => _routeQuery = value),
-    onFilterChanged: (value) => setState(() => _onlySelectedRoutes = value),
+    onFilterChanged: (value) => setState(() {
+      _onlySelectedRoutes = value;
+      _onlyUnavailableRoutes = false;
+    }),
+    onUnavailableFilterChanged: (value) => setState(() {
+      _onlyUnavailableRoutes = value;
+      _onlySelectedRoutes = false;
+    }),
     onToggle: _setBypass,
     onRefresh: !_isAndroid || !_foreground || loadingApps || _savingRoute ||
         _routeConfirmationOpen || _profileBusy || _profileEditorOpen

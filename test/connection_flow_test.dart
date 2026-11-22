@@ -63,6 +63,9 @@ class _AndroidBridge {
   PlatformException? saveError;
   Object? privacyError;
   Object? statusError;
+  Object? bypassReadError;
+  Set<String> bypassPackages = {};
+  Set<String> unavailablePackages = {};
   String? statusState;
   bool? statusConnected;
   Map<String, Object?> statistics = _statistics();
@@ -86,7 +89,11 @@ class _AndroidBridge {
       case 'installedApps':
         return [{'packageName': 'example.browser', 'label': 'Test browser'}];
       case 'getBypass':
-        return <String>[];
+        return bypassPackages.toList();
+      case 'getBypassStatus':
+        if (bypassReadError != null) throw bypassReadError!;
+        return {'packages': bypassPackages.toList(),
+          'unavailablePackages': unavailablePackages.intersection(bypassPackages).toList()};
       case 'setBypass':
         return null;
       case 'aiFeedbackSummary':
@@ -256,6 +263,58 @@ void main() {
         .setMockMethodCallHandler(channel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(privacyChannel, null);
+  });
+
+  testWidgets('Unavailable exclusion failure offers route repair without dropping saved apps', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.bypassPackages = {'example.hidden', 'example.deleted'};
+    bridge.unavailablePackages = {'example.deleted'};
+    bridge.connectError = PlatformException(code: 'ROUTES_APPS_UNAVAILABLE',
+      message: 'PRIVATE_PLATFORM_DETAILS', details: {'privateKey': 'SECRET'});
+    await _withApp(tester, () async {
+      final previousReads = bridge.named('getBypassStatus').length;
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Android не подтвердил доступность некоторых приложений.'), findsOneWidget);
+      expect(find.textContaining('PRIVATE_PLATFORM_DETAILS'), findsNothing);
+      expect(find.textContaining('SECRET'), findsNothing);
+      expect(bridge.named('getBypassStatus').length, greaterThan(previousReads));
+      expect(bridge.named('setBypass'), isEmpty);
+      await tester.tap(find.byKey(const Key('open_routes_after_connection_error')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 1);
+      expect(tester.widget<ChoiceChip>(find.byKey(const Key('routes_filter_unavailable'))).selected, isTrue);
+      final toggle = find.byKey(const Key('route_toggle_example.deleted'));
+      await tester.scrollUntilVisible(toggle, 140, scrollable: find.descendant(
+        of: find.byKey(const Key('routes_list')), matching: find.byType(Scrollable)).first);
+      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+      expect(bridge.bypassPackages, {'example.hidden', 'example.deleted'});
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      expect(bridge.named('setBypass'), isEmpty);
+    });
+  });
+
+  testWidgets('Failed availability lookup offers retry without inventing unavailable apps', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.bypassPackages = {'example.hidden'};
+    bridge.connectError = PlatformException(code: 'ROUTES_APPS_CHECK_FAILED',
+      message: 'PRIVATE_PLATFORM_DETAILS');
+    bridge.bypassReadError = bridge.connectError;
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Не удалось проверить приложения в исключениях.'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('open_routes_after_connection_error')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 1);
+      expect(find.byKey(const Key('routes_unavailable_summary')), findsNothing);
+      expect(find.byKey(const Key('routes_filter_unavailable')), findsNothing);
+      expect(find.textContaining('Не удалось проверить доступность приложений.'), findsOneWidget);
+      expect(find.textContaining('PRIVATE_PLATFORM_DETAILS'), findsNothing);
+      expect(bridge.bypassPackages, {'example.hidden'});
+      expect(bridge.named('setBypass'), isEmpty);
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+    });
   });
 
   testWidgets('Connect without a profile opens setup without requesting VPN', (tester) async {

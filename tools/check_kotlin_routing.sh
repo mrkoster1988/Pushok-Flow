@@ -32,3 +32,8 @@ java -jar "$out/profile-catalog-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.kt \
   native/android/tests/RouteSettingsCheck.kt -include-runtime -d "$out/route-settings-tests.jar"
 java -jar "$out/route-settings-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/TunnelConnectionSession.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/RouteAppAvailability.kt \
+  native/android/tests/RouteAppAvailabilityCheck.kt -include-runtime -d "$out/route-availability-tests.jar"
+java -jar "$out/route-availability-tests.jar"

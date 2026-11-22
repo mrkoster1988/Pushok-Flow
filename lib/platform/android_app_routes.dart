@@ -57,6 +57,12 @@ class AndroidAppRoutes {
   static Future<Set<String>> getBypass() async => Set.unmodifiable(
       _packageList(await _channel.invokeMethod<Object?>('getBypass')));
 
+  /// The selected set and Android's package lookup results come from one native
+  /// snapshot. Absence from the separate launcher list is not an availability
+  /// result and must never discard a saved exclusion.
+  static Future<BypassStatus> getBypassStatus() async => BypassStatus.fromPlatform(
+      await _channel.invokeMethod<Object?>('getBypassStatus'));
+
   /// expectedPackages makes the write conditional on the last confirmed list.
   /// Older callers may omit it; this does not start or reconnect the tunnel.
   static Future<void> setBypass(Set<String> packageNames, {
@@ -69,6 +75,28 @@ class AndroidAppRoutes {
       'packages': packages,
       if (expected != null) 'expectedPackages': expected,
     });
+  }
+}
+
+class BypassStatus {
+  BypassStatus._(Set<String> packages, Set<String> unavailablePackages)
+      : packages = Set.unmodifiable(packages),
+        unavailablePackages = Set.unmodifiable(unavailablePackages);
+
+  final Set<String> packages;
+  final Set<String> unavailablePackages;
+
+  factory BypassStatus.fromPlatform(Object? raw) {
+    if (raw is! Map || raw.length != 2 ||
+        !raw.containsKey('packages') || !raw.containsKey('unavailablePackages')) {
+      throw const FormatException('Invalid Android route availability.');
+    }
+    final packages = AndroidAppRoutes._packageList(raw['packages']).toSet();
+    final unavailable = AndroidAppRoutes._packageList(raw['unavailablePackages']).toSet();
+    if (!packages.containsAll(unavailable)) {
+      throw const FormatException('Invalid Android route availability.');
+    }
+    return BypassStatus._(packages, unavailable);
   }
 }
 

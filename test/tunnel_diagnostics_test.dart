@@ -197,7 +197,8 @@ void main() {
   });
 
   test('Only recognized error codes survive and decoded values do not retain the input maps', () {
-    for (final code in ['WG_CONNECT_FAILED', 'WG_DISCONNECT_FAILED', 'WG_STATUS_FAILED']) {
+    for (final code in ['WG_CONNECT_FAILED', 'WG_DISCONNECT_FAILED', 'WG_STATUS_FAILED',
+      'ROUTES_APPS_UNAVAILABLE', 'ROUTES_APPS_CHECK_FAILED']) {
       final value = TunnelDiagnostics.fromPlatform({..._status(), 'lastErrorCode': code});
       expect(value.lastErrorCode, code);
     }

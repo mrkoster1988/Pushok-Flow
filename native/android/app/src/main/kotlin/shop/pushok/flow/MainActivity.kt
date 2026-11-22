@@ -2,6 +2,7 @@ package shop.pushok.flow
 
 import android.os.SystemClock
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.app.Activity
 import io.flutter.plugin.common.MethodCall
@@ -109,15 +110,29 @@ class MainActivity : FlutterActivity() {
                 if (backend == null) backend = GoBackend(applicationContext)
                 val active = Session.connection.connect(
                     readState = { backend?.getState(tunnel) == Tunnel.State.UP },
-                    activate = { backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP },
+                    activate = {
+                        // Never reconnect an already-UP tunnel or diagnose its
+                        // old choices as missing before the session state check.
+                        RouteAppAvailability.requireForConnection(exclusions, ::isRouteAppAvailable)
+                        try {
+                            backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
+                        } catch (_: PackageManager.NameNotFoundException) {
+                            // The app may disappear between preflight and the
+                            // backend's addDisallowedApplication call.
+                            throw TunnelConnectionFailure("ROUTES_APPS_UNAVAILABLE")
+                        }
+                    },
                 )
                 runOnUiThread { result.success(mapOf("connected" to active)) }
             } catch (error: TunnelConnectionFailure) {
-                if (error.code == "VPN_STATE_UNAVAILABLE") {
-                    runOnUiThread { result.error("VPN_STATE_UNAVAILABLE",
+                when (error.code) {
+                    "VPN_STATE_UNAVAILABLE" -> runOnUiThread { result.error("VPN_STATE_UNAVAILABLE",
                         "Не удалось уточнить состояние туннеля. Повторите проверку.", null) }
-                } else {
-                    runOnUiThread { result.error("WG_CONNECT_FAILED", "Не удалось установить туннель. Проверьте параметры сервера.", null) }
+                    "ROUTES_APPS_UNAVAILABLE" -> runOnUiThread { result.error("ROUTES_APPS_UNAVAILABLE",
+                        "Android не подтвердил доступность приложения из исключений. Проверьте раздел «Маршруты».", null) }
+                    "ROUTES_APPS_CHECK_FAILED" -> runOnUiThread { result.error("ROUTES_APPS_CHECK_FAILED",
+                        "Не удалось проверить приложения из исключений. Повторите проверку в «Маршрутах».", null) }
+                    else -> runOnUiThread { result.error("WG_CONNECT_FAILED", "Не удалось установить туннель. Проверьте параметры сервера.", null) }
                 }
             } catch (_: Exception) {
                 Session.connection.failedConnect { backend?.getState(tunnel) == Tunnel.State.UP }
@@ -158,6 +173,18 @@ class MainActivity : FlutterActivity() {
             override fun replace(packages: Set<String>): Boolean =
                 prefs.edit().putStringSet("flow_bypass_packages", packages).commit()
         }, Session.routeSettingsState)
+    }
+
+    private fun isRouteAppAvailable(packageName: String): Boolean = try {
+        // A package without a launcher can still be installed and routable.
+        // Use the same default flags as VpnService.Builder, not archived or
+        // uninstalled packages. A visibility-filtered app remains "unavailable",
+        // never a claim that it was definitely removed from the phone.
+        @Suppress("DEPRECATION")
+        packageManager.getApplicationInfo(packageName, 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -202,7 +229,7 @@ class MainActivity : FlutterActivity() {
     private fun routeErrorCode(error: Exception, fallback: String): String {
         val code = (error as? RouteSettingsFailure)?.code
         return if (code in setOf("INVALID_PACKAGES", "ROUTES_CHANGED", "ROUTES_LOAD_FAILED",
-                "ROUTES_STORE_UNAVAILABLE", "VPN_ACTIVE", "VPN_STATE_UNAVAILABLE")) code!! else fallback
+                "ROUTES_STORE_UNAVAILABLE", "ROUTES_APPS_CHECK_FAILED", "VPN_ACTIVE", "VPN_STATE_UNAVAILABLE")) code!! else fallback
     }
 
     private fun mutateRoutes(result: MethodChannel.Result, request: RouteSettingsRequest) {
@@ -442,6 +469,15 @@ class MainActivity : FlutterActivity() {
                         } catch (error: Exception) {
                             runOnUiThread { result.error(routeErrorCode(error, "ROUTES_LOAD_FAILED"),
                                 "Не удалось прочитать исключения приложений", null) }
+                        }
+                    }
+                    "getBypassStatus" -> io.execute {
+                        try {
+                            val status = RouteAppAvailability.inspect(routeStore.read(), ::isRouteAppAvailable)
+                            runOnUiThread { result.success(status.toChannel()) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error(routeErrorCode(error, "ROUTES_APPS_CHECK_FAILED"),
+                                "Не удалось проверить приложения из исключений", null) }
                         }
                     }
                     "setBypass" -> {

@@ -87,6 +87,65 @@ void main() {
     }
   });
 
+  test('Availability snapshot preserves non-launcher selections and cannot be mutated', () async {
+    response = {
+      'packages': ['example.hidden', 'example.deleted', 'example.browser'],
+      'unavailablePackages': ['example.deleted'],
+    };
+    final status = await AndroidAppRoutes.getBypassStatus();
+    expect(calls.single.method, 'getBypassStatus');
+    expect(status.packages.toList(), ['example.browser', 'example.deleted', 'example.hidden']);
+    expect(status.unavailablePackages, {'example.deleted'});
+    expect(status.unavailablePackages.contains('example.hidden'), isFalse);
+    expect(() => status.packages.clear(), throwsUnsupportedError);
+    expect(() => status.unavailablePackages.clear(), throwsUnsupportedError);
+    (response as Map)['packages'] = [];
+    expect(status.packages, hasLength(3));
+  });
+
+  test('Availability rejects partial, duplicate, oversized and non-subset payloads', () async {
+    final valid = <String, Object?>{
+      'packages': ['example.browser'], 'unavailablePackages': <String>[],
+    };
+    for (final invalid in <Object?>[
+      null, [], {}, {'packages': ['example.browser']},
+      {...valid, 'privateDetails': 'PRIVATE_PLATFORM_DETAILS'},
+      {...valid, 'packages': ['example.browser', 'example.browser']},
+      {...valid, 'packages': ['invalid package']},
+      {...valid, 'packages': List.generate(4097, (i) => 'example.app$i')},
+      {...valid, 'unavailablePackages': null},
+      {...valid, 'unavailablePackages': [42]},
+      {...valid, 'unavailablePackages': ['example.browser', 'example.browser']},
+      {...valid, 'unavailablePackages': ['example.unselected']},
+      {...valid, 'unavailablePackages': ['PRIVATE_PLATFORM_DETAILS\n']},
+      {...valid, 'unavailablePackages': List.generate(4097, (i) => 'example.app$i')},
+    ]) {
+      response = invalid;
+      await expectLater(AndroidAppRoutes.getBypassStatus(), throwsFormatException);
+    }
+    try {
+      BypassStatus.fromPlatform({'packages': ['PRIVATE_PLATFORM_DETAILS\n'],
+        'unavailablePackages': <String>[]});
+      fail('Invalid snapshot must be rejected.');
+    } on FormatException catch (error) {
+      expect(error.source, isNull);
+      expect(error.toString(), isNot(contains('PRIVATE_PLATFORM_DETAILS')));
+    }
+  });
+
+  test('Empty availability is valid and a lookup failure never becomes an empty snapshot', () async {
+    response = {'packages': <String>[], 'unavailablePackages': <String>[]};
+    final status = await AndroidAppRoutes.getBypassStatus();
+    expect(status.packages, isEmpty);
+    expect(status.unavailablePackages, isEmpty);
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      throw PlatformException(code: 'ROUTES_APPS_CHECK_FAILED');
+    });
+    await expectLater(AndroidAppRoutes.getBypassStatus(),
+      throwsA(isA<PlatformException>().having((error) => error.code,
+        'code', 'ROUTES_APPS_CHECK_FAILED')));
+  });
+
   test('Conditional writes include sorted expected and requested packages', () async {
     await AndroidAppRoutes.setBypass({'example.zulu', 'example.alpha'},
       expectedPackages: {'missing.saved_app', 'example.alpha'});

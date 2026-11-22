@@ -49,15 +49,26 @@ class TunnelConnectionSession(
             connectedSinceElapsedMs = nowElapsedMs()
             lastErrorCode = null
             return true
-        } catch (_: Exception) {
-            failedConnect(readState)
-            throw TunnelConnectionFailure("WG_CONNECT_FAILED")
+        } catch (error: Exception) {
+            // Only these fixed route diagnoses may survive an activation
+            // failure. Other exception types/messages remain private.
+            val code = when ((error as? TunnelConnectionFailure)?.code) {
+                "ROUTES_APPS_UNAVAILABLE" -> "ROUTES_APPS_UNAVAILABLE"
+                "ROUTES_APPS_CHECK_FAILED" -> "ROUTES_APPS_CHECK_FAILED"
+                else -> "WG_CONNECT_FAILED"
+            }
+            recordFailedConnect(readState, code)
+            throw TunnelConnectionFailure(code)
         }
     }
 
     /** Also used when preparing a new configuration fails before backend mutation. */
     fun failedConnect(readState: () -> Boolean) {
-        lastErrorCode = "WG_CONNECT_FAILED"
+        recordFailedConnect(readState, "WG_CONNECT_FAILED")
+    }
+
+    private fun recordFailedConnect(readState: () -> Boolean, code: String) {
+        lastErrorCode = code
         // A failed setState can restore an earlier tunnel. Its exception alone
         // says nothing about the resulting UP/DOWN state.
         observe(readState)

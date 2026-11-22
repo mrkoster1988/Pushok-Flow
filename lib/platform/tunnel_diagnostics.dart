@@ -11,6 +11,8 @@ const _safeErrorCodes = <String>{
   'WG_CONNECT_FAILED',
   'WG_DISCONNECT_FAILED',
   'WG_STATUS_FAILED',
+  'ROUTES_APPS_UNAVAILABLE',
+  'ROUTES_APPS_CHECK_FAILED',
 };
 
 int? _nonNegativeInteger(Object? value, {int maximum = _maxNativeInteger}) =>

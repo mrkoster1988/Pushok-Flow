@@ -10,6 +10,8 @@ class AppRoutesView extends StatefulWidget {
     super.key,
     required this.apps,
     required this.selectedPackages,
+    this.unavailablePackages = const {},
+    this.availabilityCurrent = true,
     required this.isAndroid,
     required this.loading,
     required this.saving,
@@ -17,8 +19,10 @@ class AppRoutesView extends StatefulWidget {
     required this.canEdit,
     required this.query,
     required this.onlySelected,
+    this.onlyUnavailable = false,
     required this.onQueryChanged,
     required this.onFilterChanged,
+    this.onUnavailableFilterChanged,
     required this.onToggle,
     this.error,
     this.disabledReason,
@@ -28,6 +32,8 @@ class AppRoutesView extends StatefulWidget {
 
   final List<InstalledApp> apps;
   final Set<String> selectedPackages;
+  final Set<String> unavailablePackages;
+  final bool availabilityCurrent;
   final bool isAndroid;
   final bool loading;
   final bool saving;
@@ -35,8 +41,10 @@ class AppRoutesView extends StatefulWidget {
   final bool canEdit;
   final String query;
   final bool onlySelected;
+  final bool onlyUnavailable;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<bool> onFilterChanged;
+  final ValueChanged<bool>? onUnavailableFilterChanged;
   final void Function(String packageName, bool selected) onToggle;
   final String? error;
   final String? disabledReason;
@@ -122,14 +130,21 @@ class _AppRoutesViewState extends State<AppRoutesView> {
           ChoiceChip(
             key: const Key('routes_filter_all'),
             label: const Text('Все'),
-            selected: !widget.onlySelected,
+            selected: !widget.onlySelected && !widget.onlyUnavailable,
             onSelected: (_) => widget.onFilterChanged(false),
           ),
           ChoiceChip(
             key: const Key('routes_filter_selected'),
             label: const Text('Выбранные'),
-            selected: widget.onlySelected,
+            selected: widget.onlySelected && !widget.onlyUnavailable,
             onSelected: (_) => widget.onFilterChanged(true),
+          ),
+          if (widget.unavailablePackages.isNotEmpty || widget.onlyUnavailable) ChoiceChip(
+            key: const Key('routes_filter_unavailable'),
+            label: const Text('Недоступные'),
+            selected: widget.onlyUnavailable,
+            onSelected: widget.onUnavailableFilterChanged == null
+                ? null : (_) => widget.onUnavailableFilterChanged!(true),
           ),
         ]),
         const SizedBox(height: 8),
@@ -140,6 +155,19 @@ class _AppRoutesViewState extends State<AppRoutesView> {
             : 'Исключения ещё не загружены',
           key: const Key('route_count'),
           style: const TextStyle(color: PushokPalette.muted)),
+        if (widget.loaded && widget.unavailablePackages.isNotEmpty) Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Semantics(liveRegion: true, child: Text(
+            widget.availabilityCurrent
+                ? 'Недоступно для Pushok Flow: ${widget.unavailablePackages.length}. '
+                    'Приложения могли быть удалены или недоступны. '
+                    'Уберите исключения, если они больше не нужны.'
+                : 'Последняя проверка: недоступно ${widget.unavailablePackages.length}. '
+                    'Обновите список, чтобы уточнить доступность.',
+            key: const Key('routes_unavailable_summary'),
+            style: const TextStyle(color: PushokPalette.orange),
+          )),
+        ),
         if (widget.loaded && widget.selectedPackages.isNotEmpty) Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
@@ -174,7 +202,7 @@ class _AppRoutesViewState extends State<AppRoutesView> {
     ]),
   );
 
-  Widget _entry(InstalledApp app, {required bool missing}) => Padding(
+  Widget _entry(InstalledApp app, {required bool missing, required bool unavailable}) => Padding(
     key: ValueKey('route_entry_${app.packageName}'),
     padding: const EdgeInsets.only(top: 8),
     child: PushokPanel(
@@ -191,13 +219,21 @@ class _AppRoutesViewState extends State<AppRoutesView> {
           child: Text(app.label, maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
         subtitle: Tooltip(
-          message: missing
-              ? 'Нет в списке приложений. Сохранённое исключение.'
-              : app.packageName,
+          message: unavailable
+              ? (widget.availabilityCurrent
+                  ? 'Недоступно для Pushok Flow. Android не подтвердил доступность приложения. '
+                      'Уберите исключение, если оно больше не нужно.'
+                  : 'Было недоступно. Обновите список, чтобы уточнить доступность.')
+              : missing ? 'Нет в списке приложений. Сохранённое исключение.'
+                  : app.packageName,
           excludeFromSemantics: true,
-          child: Text(missing
-              ? 'Нет в списке приложений. Сохранённое исключение.'
-              : app.packageName,
+          child: Text(unavailable
+              ? (widget.availabilityCurrent
+                  ? 'Недоступно для Pushok Flow. Проверьте исключение.'
+                  : 'Было недоступно. Обновите список.')
+              : missing ? 'Нет в списке приложений. Сохранённое исключение.'
+                  : app.packageName,
+            style: unavailable ? const TextStyle(color: PushokPalette.orange) : null,
             maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
         value: widget.selectedPackages.contains(app.packageName),
@@ -219,6 +255,7 @@ class _AppRoutesViewState extends State<AppRoutesView> {
     final query = widget.query.trim().toLowerCase();
     final visible = entries.where((app) =>
       (!widget.onlySelected || widget.selectedPackages.contains(app.packageName)) &&
+      (!widget.onlyUnavailable || widget.unavailablePackages.contains(app.packageName)) &&
       (query.isEmpty || app.label.toLowerCase().contains(query) ||
           app.packageName.toLowerCase().contains(query))).toList();
 
@@ -226,6 +263,10 @@ class _AppRoutesViewState extends State<AppRoutesView> {
     if (widget.loaded && !widget.loading && widget.error == null && visible.isEmpty) {
       if (query.isNotEmpty) {
         emptyMessage = 'Ничего не найдено. Измените запрос или фильтр.';
+      } else if (widget.onlyUnavailable) {
+        emptyMessage = widget.availabilityCurrent
+            ? 'Недоступных исключений больше нет. Можно повторить подключение.'
+            : 'Обновите список, чтобы проверить недоступные исключения.';
       } else if (widget.onlySelected) {
         emptyMessage = 'Исключений пока нет. Выберите приложения в списке «Все».';
       } else {
@@ -246,7 +287,8 @@ class _AppRoutesViewState extends State<AppRoutesView> {
         if (widget.isAndroid && widget.loaded) SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) => _entry(visible[index],
-              missing: !installedPackages.contains(visible[index].packageName)),
+              missing: !installedPackages.contains(visible[index].packageName),
+              unavailable: widget.unavailablePackages.contains(visible[index].packageName)),
             childCount: visible.length,
             findChildIndexCallback: (key) {
               if (key is! ValueKey<String>) return null;

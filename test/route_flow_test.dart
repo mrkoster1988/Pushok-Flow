@@ -8,6 +8,7 @@ import 'package:pushok_flow/main.dart';
 class _RoutesBridge {
   final calls = <MethodCall>[];
   Set<String> selected = {'example.mail'};
+  Set<String> unavailable = {};
   Completer<Object?>? nextRead;
   Completer<void>? writeGate;
   Object? appsError;
@@ -30,11 +31,14 @@ class _RoutesBridge {
           {'packageName': 'example.mail', 'label': 'Почта'},
         ];
       case 'getBypass':
+        return selected.toList();
+      case 'getBypassStatus':
         if (readError != null) throw readError!;
         final read = nextRead;
         nextRead = null;
         if (read != null) return read.future;
-        return selected.toList();
+        return {'packages': selected.toList(),
+          'unavailablePackages': unavailable.intersection(selected).toList()};
       case 'setBypass':
         if (writeGate != null) await writeGate!.future;
         beforeWrite?.call();
@@ -150,6 +154,62 @@ void main() {
     });
   });
 
+  testWidgets('unavailable exclusion is removed only explicitly and preserves other saved apps', (tester) async {
+    bridge.selected = {'example.mail', 'example.hidden', 'example.deleted'};
+    bridge.unavailable = {'example.deleted'};
+    await _withRoutes(tester, () async {
+      expect(bridge.named('setBypass'), isEmpty);
+      final filter = find.byKey(const Key('routes_filter_unavailable'));
+      await _reveal(tester, filter);
+      await tester.tap(filter);
+      await tester.pumpAndSettle();
+      expect(_toggle('example.hidden'), findsNothing);
+      await _reveal(tester, _toggle('example.deleted'));
+      await tester.tap(_toggle('example.deleted'));
+      await tester.pumpAndSettle();
+      expect(bridge.selected, {'example.mail', 'example.hidden'});
+      expect(bridge.named('setBypass'), hasLength(1));
+      expect(bridge.named('setBypass').single.arguments, {
+        'packages': ['example.hidden', 'example.mail'],
+        'expectedPackages': ['example.deleted', 'example.hidden', 'example.mail'],
+      });
+      expect(find.text('Недоступных исключений больше нет. Можно повторить подключение.'),
+        findsOneWidget);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('availability check failure preserves old diagnosis and recovery never changes choices', (tester) async {
+    bridge.selected = {'example.mail', 'example.deleted'};
+    bridge.unavailable = {'example.deleted'};
+    await _withRoutes(tester, () async {
+      bridge.readError = PlatformException(code: 'ROUTES_APPS_CHECK_FAILED',
+        message: 'PRIVATE_PLATFORM_DETAILS');
+      final refresh = find.byKey(const Key('refresh_routes'));
+      await _reveal(tester, refresh);
+      await tester.tap(refresh);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Последняя проверка: недоступно 1.'), findsOneWidget);
+      expect(find.textContaining('Не удалось проверить доступность приложений.'), findsOneWidget);
+      expect(find.textContaining('PRIVATE_PLATFORM_DETAILS'), findsNothing);
+      await _reveal(tester, _toggle('example.deleted'));
+      expect(tester.widget<SwitchListTile>(_toggle('example.deleted')).value, isTrue);
+      expect(tester.widget<SwitchListTile>(_toggle('example.deleted')).onChanged, isNull);
+      bridge.readError = null;
+      bridge.unavailable.clear();
+      await _reveal(tester, refresh);
+      await tester.tap(refresh);
+      await tester.pumpAndSettle();
+      await _reveal(tester, _toggle('example.deleted'));
+      expect(tester.widget<SwitchListTile>(_toggle('example.deleted')).value, isTrue);
+      expect(tester.widget<SwitchListTile>(_toggle('example.deleted')).onChanged, isNotNull);
+      expect(find.byKey(const Key('routes_unavailable_summary')), findsNothing);
+      expect(bridge.selected, {'example.mail', 'example.deleted'});
+      expect(bridge.named('setBypass'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+    });
+  });
+
   testWidgets('failed durable write retains previous selection and blocks more edits', (tester) async {
     await _withRoutes(tester, () async {
       bridge.writeError = PlatformException(code: 'ROUTES_STORE_UNAVAILABLE',
@@ -198,12 +258,15 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await tester.pump();
       bridge.selected = {'example.browser'};
+      bridge.unavailable = {'example.browser'};
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      oldRead.complete(['example.mail']);
+      oldRead.complete({'packages': ['example.mail'], 'unavailablePackages': ['example.mail']});
       await tester.pumpAndSettle();
       await _reveal(tester, _toggle('example.browser'));
       expect(tester.widget<SwitchListTile>(_toggle('example.browser')).value, isTrue);
+      expect(find.descendant(of: _toggle('example.browser'),
+        matching: find.text('Недоступно для Pushok Flow. Проверьте исключение.')), findsOneWidget);
       await _reveal(tester, _toggle('example.mail'));
       expect(tester.widget<SwitchListTile>(_toggle('example.mail')).value, isFalse);
     });

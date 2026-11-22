@@ -186,7 +186,45 @@ class PublicPublisherTests(unittest.TestCase):
             self.assertEqual([x['matches'] for x in observations['attempts']], [False, True])
             self.assertEqual((root/'observed/public-update.json').read_bytes(), expected)
 
-    def test_public_check_bounds_http_failures_and_records_safe_reason(self):
+    def test_public_check_waits_past_eight_stale_responses_without_republishing(self):
+        document, _, _ = fixture()
+        expected = (json.dumps(restore.manifest(document['release']), indent=2)+'\n').encode()
+        stale = json.dumps(document['previousManifest']).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'update.json').write_bytes(expected)
+            responses = [self.Response(stale) for _ in range(8)] + [self.Response(expected)]
+            with mock.patch.object(publish.urllib.request, 'urlopen', side_effect=responses) as opened, \
+                 mock.patch.object(publish.time, 'sleep') as sleep, mock.patch('builtins.print'), \
+                 mock.patch.object(publish, 'api') as api:
+                publish.verify_public(document, root, root/'observed')
+            attempts = json.loads((root/'observed/public-update-observations.json').read_text())['attempts']
+            self.assertEqual(opened.call_count, 9)
+            self.assertEqual(sleep.call_count, 8)
+            self.assertEqual([x['matches'] for x in attempts], [False]*8 + [True])
+            self.assertEqual((root/'observed/public-update.json').read_bytes(), expected)
+            api.assert_not_called()
+
+    def test_public_check_still_fails_after_bounded_stale_responses(self):
+        document, _, _ = fixture()
+        expected = (json.dumps(restore.manifest(document['release']), indent=2)+'\n').encode()
+        stale = json.dumps(document['previousManifest']).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'update.json').write_bytes(expected)
+            with mock.patch.object(publish.urllib.request, 'urlopen', side_effect=lambda *a, **k: self.Response(stale)) as opened, \
+                 mock.patch.object(publish.time, 'sleep') as sleep, mock.patch('builtins.print'), \
+                 mock.patch.object(publish, 'api') as api:
+                with self.assertRaisesRegex(ValueError, 'not confirmed'):
+                    publish.verify_public(document, root, root/'observed')
+            attempts = json.loads((root/'observed/public-update-observations.json').read_text())['attempts']
+            self.assertEqual(opened.call_count, 24)
+            self.assertEqual(sleep.call_count, 23)
+            self.assertFalse(any(x['matches'] for x in attempts))
+            self.assertFalse((root/'observed/public-update.json').exists())
+            api.assert_not_called()
+
+    def test_public_check_stops_on_http_denial_and_records_safe_reason(self):
         document, _, _ = fixture()
         expected = (json.dumps(restore.manifest(document['release']), indent=2)+'\n').encode()
         failure = publish.urllib.error.HTTPError(restore.MANIFEST_URL, 403, 'private-untrusted-message', {}, None)
@@ -200,9 +238,9 @@ class PublicPublisherTests(unittest.TestCase):
                     publish.verify_public(document, root, root/'observed')
             recorded = (root/'observed/public-update-observations.json').read_text()
             attempts = json.loads(recorded)['attempts']
-            self.assertEqual(opened.call_count, 8)
-            self.assertEqual(sleep.call_count, 7)
-            self.assertEqual(len(attempts), 8)
+            self.assertEqual(opened.call_count, 1)
+            sleep.assert_not_called()
+            self.assertEqual(len(attempts), 1)
             self.assertTrue(all(x['httpStatus'] == 403 and x['failure'] == 'HTTP_ERROR' for x in attempts))
             self.assertNotIn('private-untrusted-message', recorded)
             api.assert_not_called()

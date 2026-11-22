@@ -20,6 +20,10 @@ from restore_public_release import (CERTIFICATE, MANIFEST_URL, REPOSITORY,
 API_ROOT = f'https://api.github.com/repos/{REPOSITORY}/'
 API_VERSION = '2026-03-10'
 MAX_API_BYTES = 2 * 1024 * 1024
+# The v0.31/v0.32 latest redirect stayed stale beyond the old 35-second
+# interval window. Allow bounded CDN propagation without accepting old bytes.
+PUBLIC_MANIFEST_ATTEMPTS = 24
+PUBLIC_MANIFEST_RETRY_SECONDS = 5
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -293,7 +297,7 @@ def verify_public(document, dist, diagnostics):
     observations = {'expectedVersion': document['release']['versionName'],
         'expectedSizeBytes': len(expected), 'expectedSha256': hashlib.sha256(expected).hexdigest(),
         'requestUrl': MANIFEST_URL, 'attempts': []}
-    for attempt in range(8):
+    for attempt in range(PUBLIC_MANIFEST_ATTEMPTS):
         observation = {'attempt': attempt+1, 'matches': False}
         try:
             current, raw = public_manifest(observation)
@@ -304,7 +308,10 @@ def verify_public(document, dist, diagnostics):
             return
         except (OSError, ValueError):
             observation.setdefault('failure', 'MANIFEST_MISMATCH')
-            if attempt == 7:
+            if observation.get('httpStatus') in (403, 429):
+                raise ValueError('Public updater endpoint was denied or rate-limited; '
+                    f'last HTTP={observation["httpStatus"]}; no immediate retry was attempted') from None
+            if attempt == PUBLIC_MANIFEST_ATTEMPTS - 1:
                 raise ValueError('Public updater endpoint is not confirmed; '
                     f'last HTTP={observation.get("httpStatus", "unavailable")}, '
                     f'version={observation.get("observedVersion", "unavailable")}; '
@@ -313,8 +320,8 @@ def verify_public(document, dist, diagnostics):
             observations['attempts'].append(observation)
             (diagnostics/'public-update-observations.json').write_text(json.dumps(observations, indent=2)+'\n')
             print('Public updater observation: '+json.dumps(observation, ensure_ascii=False))
-        if attempt < 7:
-            time.sleep(5)
+        if attempt < PUBLIC_MANIFEST_ATTEMPTS - 1:
+            time.sleep(PUBLIC_MANIFEST_RETRY_SECONDS)
 
 
 def verify_discovery(document, dist, diagnostics):

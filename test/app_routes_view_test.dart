@@ -12,6 +12,8 @@ const _apps = [
 Future<void> _pumpRoutes(WidgetTester tester, {
   List<InstalledApp> apps = _apps,
   Set<String> selected = const {},
+  Set<String> unavailable = const {},
+  bool availabilityCurrent = true,
   bool loaded = true,
   bool loading = false,
   bool saving = false,
@@ -19,6 +21,7 @@ Future<void> _pumpRoutes(WidgetTester tester, {
   bool isAndroid = true,
   String query = '',
   bool onlySelected = false,
+  bool onlyUnavailable = false,
   String? error,
   String? disabledReason,
   VoidCallback? onRefresh,
@@ -36,11 +39,19 @@ Future<void> _pumpRoutes(WidgetTester tester, {
       padding: const EdgeInsets.all(14),
       child: StatefulBuilder(builder: (context, setState) => AppRoutesView(
         apps: apps, selectedPackages: selected, isAndroid: isAndroid,
+        unavailablePackages: unavailable, availabilityCurrent: availabilityCurrent,
         loading: loading, saving: saving, loaded: loaded, canEdit: canEdit,
-        query: query, onlySelected: onlySelected, error: error,
+        query: query, onlySelected: onlySelected, onlyUnavailable: onlyUnavailable, error: error,
         disabledReason: disabledReason, onRefresh: onRefresh, onClear: onClear,
         onQueryChanged: (value) => setState(() => query = value),
-        onFilterChanged: (value) => setState(() => onlySelected = value),
+        onFilterChanged: (value) => setState(() {
+          onlySelected = value;
+          onlyUnavailable = false;
+        }),
+        onUnavailableFilterChanged: (value) => setState(() {
+          onlyUnavailable = value;
+          onlySelected = false;
+        }),
         onToggle: onToggle ?? (_, _) {},
       )),
     )),
@@ -108,6 +119,77 @@ void main() {
     await _pumpRoutes(tester, query: 'browser');
     expect(tester.widget<TextField>(find.byKey(const Key('route_search'))).controller!.text, 'browser');
     expect(find.text('Браузер'), findsOneWidget);
+  });
+
+  testWidgets('Unavailable filter uses native availability and never launcher absence', (tester) async {
+    final changes = <(String, bool)>[];
+    await _pumpRoutes(tester,
+      selected: {'example.hidden', 'example.deleted', 'example.mail'},
+      unavailable: {'example.deleted'},
+      onToggle: (package, selected) => changes.add((package, selected)));
+    expect(find.textContaining('Недоступно для Pushok Flow: 1.'), findsOneWidget);
+    await _tap(tester, 'routes_filter_unavailable');
+    expect(find.byKey(const Key('route_toggle_example.hidden')), findsNothing);
+    expect(find.byKey(const Key('route_toggle_example.mail')), findsNothing);
+    final deleted = find.byKey(const Key('route_toggle_example.deleted'));
+    await tester.scrollUntilVisible(deleted, 140, scrollable: _listScrollable());
+    expect(find.descendant(of: deleted,
+      matching: find.text('Недоступно для Pushok Flow. Проверьте исключение.')), findsOneWidget);
+    expect(changes, isEmpty);
+    await _tap(tester, 'route_toggle_example.deleted');
+    expect(changes, [('example.deleted', false)]);
+    expect(tester.widget<SwitchListTile>(deleted).value, isTrue);
+
+    await _tap(tester, 'routes_filter_selected');
+    final hidden = find.byKey(const Key('route_toggle_example.hidden'));
+    await tester.scrollUntilVisible(hidden, 140, scrollable: _listScrollable());
+    expect(find.descendant(of: hidden,
+      matching: find.text('Нет в списке приложений. Сохранённое исключение.')), findsOneWidget);
+    expect(changes, hasLength(1));
+  });
+
+  testWidgets('Stale availability stays labelled as old and a fresh empty filter is explicit', (tester) async {
+    await _pumpRoutes(tester, selected: {'example.deleted'},
+      unavailable: {'example.deleted'}, availabilityCurrent: false,
+      canEdit: false, error: 'Не удалось проверить доступность приложений.');
+    expect(find.textContaining('Последняя проверка: недоступно 1.'), findsOneWidget);
+    expect(find.textContaining('Недоступно для Pushok Flow: 1.'), findsNothing);
+    final toggle = find.byKey(const Key('route_toggle_example.deleted'));
+    await tester.scrollUntilVisible(toggle, 140, scrollable: _listScrollable());
+    expect(tester.widget<SwitchListTile>(toggle).onChanged, isNull);
+    expect(find.descendant(of: toggle,
+      matching: find.text('Было недоступно. Обновите список.')), findsOneWidget);
+    expect(find.descendant(of: toggle,
+      matching: find.text('Недоступно для Pushok Flow. Проверьте исключение.')), findsNothing);
+    await _pumpRoutes(tester, onlyUnavailable: true, availabilityCurrent: false);
+    expect(find.text('Обновите список, чтобы проверить недоступные исключения.'), findsOneWidget);
+    expect(find.text('Недоступных исключений больше нет. Можно повторить подключение.'), findsNothing);
+    await _pumpRoutes(tester, onlyUnavailable: true);
+    expect(find.text('Недоступных исключений больше нет. Можно повторить подключение.'),
+      findsOneWidget);
+    expect(find.byType(SwitchListTile), findsNothing);
+  });
+
+  testWidgets('Unavailable guidance and removal fit a compact phone with large text', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var toggles = 0;
+    final package = 'example.${'a' * 240}';
+    await _pumpRoutes(tester, selected: {package}, unavailable: {package},
+      textScale: 2.2, onToggle: (_, _) => toggles++);
+    await _tap(tester, 'routes_filter_unavailable');
+    final tile = find.byKey(ValueKey('route_toggle_$package'));
+    await tester.scrollUntilVisible(tile, 160, scrollable: _listScrollable());
+    final toggle = find.descendant(of: tile, matching: find.byType(Switch));
+    await tester.ensureVisible(toggle);
+    await tester.pump();
+    expect(toggle.hitTestable(), findsOneWidget);
+    await tester.tap(toggle);
+    await tester.pump();
+    expect(toggles, 1);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Empty list, empty selected filter and no matches have distinct guidance', (tester) async {
