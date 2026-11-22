@@ -202,6 +202,14 @@ Future<void> _openRoutes(WidgetTester tester) async {
     of: find.byType(NavigationBar), matching: find.text('Маршруты'),
   ));
   await tester.pumpAndSettle();
+  // Route rows are lazy and follow the recommendations card. Inspect the
+  // actual row after bringing it into view, including while changes are locked.
+  await tester.scrollUntilVisible(
+    find.byKey(const Key('route_toggle_example.browser')), 160,
+    scrollable: find.descendant(of: find.byKey(const Key('routes_list')),
+      matching: find.byType(Scrollable)).first,
+  );
+  await tester.pumpAndSettle();
 }
 
 Future<void> _openServers(WidgetTester tester) async {

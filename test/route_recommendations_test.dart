@@ -109,15 +109,19 @@ void main() {
     final status = RecommendationStatus.fromPlatform(_status())
         .withError('RECOMMENDATIONS_NETWORK_ERROR');
     await tester.pumpWidget(MaterialApp(theme: buildPushokTheme(),
-      home: MediaQuery(data: const MediaQueryData(
-        textScaler: TextScaler.linear(2),
-      ), child: Scaffold(body: ListView(padding: const EdgeInsets.all(14), children: [
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(2)),
+        child: child!,
+      ),
+      home: Scaffold(body: ListView(padding: const EdgeInsets.all(14), children: [
         RouteRecommendationsCard(status: status, loading: false, refreshing: false,
           onRefresh: () => refreshes++),
-      ]))),
+      ])),
     ));
     final button = find.byKey(const Key('refresh_recommendations'));
     await tester.ensureVisible(button);
+    await tester.pump();
+    expect(button.hitTestable(), findsOneWidget);
     await tester.tap(button);
     await tester.pump();
     expect(refreshes, 1);
