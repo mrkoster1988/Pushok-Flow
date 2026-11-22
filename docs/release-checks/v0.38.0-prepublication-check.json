@@ -1,0 +1,66 @@
+{
+  "recordedAtUtc": "2026-11-22T15:56:10.720666+00:00",
+  "status": "verified_signed_awaiting_publication",
+  "apkSourceCommit": "7106ce056809e9eccc87cf25a7320957be84ceff",
+  "stagingDocument": "release-staging/v0.38.0.json",
+  "stagingDocumentSha256": "f87f1b7d3ec56ed8d3c07da69ff1c40020426aacb08a0e78ef41e2b0db7cb860",
+  "verifiedSignedApk": {
+    "packageName": "shop.pushok.flow",
+    "versionName": "0.38.0",
+    "versionCode": 38,
+    "minSdk": 24,
+    "certificateSha256": "8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+    "sha256": "71b245180d746cb61c7140e9cbde24f1bf81c4973eb688e119eb2b8ce405411a",
+    "sizeBytes": 167714866
+  },
+  "sourceChecks": {
+    "runId": 45040082900,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45040082900",
+    "conclusion": "success",
+    "pythonTests": 207,
+    "flutterTests": 249,
+    "analyzer": "No issues found"
+  },
+  "androidCandidate": {
+    "runId": 45040082951,
+    "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45040082951",
+    "conclusion": "success",
+    "completedAtUtc": "2026-11-22T15:54:04Z",
+    "kotlinSuites": 15,
+    "artifactId": 14761816603,
+    "artifactSizeBytes": 67959083,
+    "artifactSha256": "e54485c4f3fecc5f0b562fa7d3918cfec38cff68fda0e647e0ee30e8c1419484",
+    "candidateApkSha256": "abf60145bcee6b2305f1839691404b80e5b2724ea4ed9bebb6a6fc3f686b70b6"
+  },
+  "localVerification": {
+    "persistentCertificateMatchesPreviousRelease": true,
+    "apkPayloadUnchangedBySigning": true,
+    "publicDeltaExactRoundTrip": true,
+    "zipalign16KiB": "passed",
+    "packageVersionMinSdkNonDebuggable": "passed",
+    "privateUpdateCallbacksAndPersistentScheduler": "passed"
+  },
+  "qrImageRegressionEvidence": {
+    "path": "docs/development-checks/qr-image-regressions-v038.json",
+    "beforeAfterCases": 9,
+    "source": "synthetic QR images; no user profile secrets or gallery images"
+  },
+  "publication": {
+    "status": "awaiting_user_authorization",
+    "workflowDispatched": false,
+    "latestPublishedTag": "v0.36.0",
+    "latestPublishedReleaseId": 454349540,
+    "reason": "A previous automatic approval review rejected public release workflow submission without explicit public release authorization; that submission was not retried and v0.38.0 publication has not been dispatched."
+  },
+  "physicalDeviceAcceptance": {
+    "status": "pending",
+    "scope": [
+      "import of the user image and physical camera capture",
+      "actual editor display versus FLAG_SECURE screen recording",
+      "background scheduling and download under device restrictions",
+      "unattended installation and confirmation fallback",
+      "update preserves existing profiles and settings",
+      "real connection and per-application routes"
+    ]
+  }
+}
