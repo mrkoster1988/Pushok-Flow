@@ -14,6 +14,7 @@ MAIN_ACTIVITY = 'shop.pushok.flow.MainActivity'
 UPDATE_PROVIDER = 'shop.pushok.flow.UpdateFileProvider'
 UPDATE_INSTALL_RECEIVER = 'shop.pushok.flow.UpdateInstallReceiver'
 UPDATE_REPLACED_RECEIVER = 'shop.pushok.flow.UpdateReplacedReceiver'
+UPDATE_FOREGROUND_SERVICE = 'androidx.work.impl.foreground.SystemForegroundService'
 TOOLS = '{http://schemas.android.com/tools}'
 MEDIA_PERMISSIONS = {
     'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -71,6 +72,14 @@ def validate(path: Path) -> None:
             'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION',
             'android.permission.ACCESS_NETWORK_STATE'} <= permissions:
         raise ValueError('Background update installation or network permission missing')
+    foreground = [item for item in app.findall('service')
+                  if item.get(ANDROID + 'name') == UPDATE_FOREGROUND_SERVICE]
+    if len(foreground) != 1 or foreground[0].get(ANDROID + 'exported') != 'false' or \
+            foreground[0].get(ANDROID + 'foregroundServiceType') != 'dataSync' or \
+            foreground[0].get(ANDROID + 'process') not in (None, 'shop.pushok.flow') or not {
+                'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+                'android.permission.POST_NOTIFICATIONS'} <= permissions:
+        raise ValueError('Update foreground download service must be private, dataSync and correctly permitted')
     for name, expected_action in ((UPDATE_INSTALL_RECEIVER, None),
                                    (UPDATE_REPLACED_RECEIVER, 'android.intent.action.MY_PACKAGE_REPLACED')):
         receivers = [item for item in app.findall('receiver')

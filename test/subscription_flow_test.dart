@@ -91,13 +91,19 @@ Future<void> _pump(WidgetTester tester, _Bridge bridge) async {
   const routes = MethodChannel('shop.pushok.flow/app_routes');
   const subscriptions = MethodChannel('shop.pushok.flow/subscriptions');
   const privacy = MethodChannel('shop.pushok.flow/profile_privacy');
+  const account = MethodChannel('shop.pushok.flow/account');
   messenger.setMockMethodCallHandler(routes, bridge.routes);
   messenger.setMockMethodCallHandler(subscriptions, bridge.subscription);
   messenger.setMockMethodCallHandler(privacy, bridge.privacy);
+  messenger.setMockMethodCallHandler(account, (call) async => {
+    'state': 'signed_out', 'busy': false, 'errorCode': null, 'pending': null,
+    'profile': null, 'refreshedAt': null, 'sessionExpiresAt': null, 'stale': false,
+  });
   addTearDown(() {
     messenger.setMockMethodCallHandler(routes, null);
     messenger.setMockMethodCallHandler(subscriptions, null);
     messenger.setMockMethodCallHandler(privacy, null);
+    messenger.setMockMethodCallHandler(account, null);
   });
   await tester.pumpWidget(const PushokFlowApp(isAndroid: true, animationsEnabled: false));
   await tester.pumpAndSettle();
@@ -155,10 +161,12 @@ void main() {
     expect(find.textContaining('@pushok_app'), findsOneWidget);
     expect(find.text('Открыть кабинет MTProxy'), findsOneWidget);
     expect(find.textContaining('Регистрация, оплата и подписки'), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('open_pushok_account')));
     await tester.tap(find.byKey(const Key('open_pushok_account')));
     await tester.pumpAndSettle();
     expect(bridge.calls.where((call) => call == 'openPushokAccount').length, 1);
     expect(bridge.calls, isNot(contains('openPushokHub')));
+    await tester.ensureVisible(find.byKey(const Key('open_pushok_hub')));
     await tester.tap(find.byKey(const Key('open_pushok_hub')));
     await tester.pumpAndSettle();
     expect(bridge.calls.where((call) => call == 'openPushokHub').length, 1);

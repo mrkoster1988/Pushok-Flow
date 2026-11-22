@@ -179,11 +179,10 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                 if (readState().phase != "installing") when (command) {
                     "restore" -> Unit
                     "check" -> checkRemote()
-                    "download" -> downloadCandidate(readState().manifest ?: throw UpdateFailure("UPDATE_NOT_READY"))
                     else -> throw UpdateFailure("UPDATE_NOT_READY")
                 }
             } catch (error: UpdateFailure) { failOperation(error.code) }
-            catch (_: Exception) { failOperation(if (command == "download") "UPDATE_DOWNLOAD_FAILED" else "UPDATE_NETWORK_ERROR") }
+            catch (_: Exception) { failOperation("UPDATE_NETWORK_ERROR") }
             finally { activeWork = null; busy.set(false) }
             if (command != "restore" && enabled) {
                 try { BackgroundUpdateScheduler.configure(context, true, immediate = true) }
@@ -193,11 +192,41 @@ internal class UpdateCoordinator private constructor(private val context: Contex
         }
     }
 
+    /** A user download is durable before the channel call completes, even with automation disabled.
+     * Only WorkManager may execute the transfer; this short queue just captures the verified manifest. */
+    fun requestDownload(callback: (Map<String, Any?>) -> Unit) {
+        if (!busy.compareAndSet(false, true)) { callback(snapshot("UPDATE_BUSY")); return }
+        io.execute {
+            try {
+                restoreOnce()
+                reconcileInstallAttempt()
+                if (readState().phase == "installing") throw UpdateFailure("UPDATE_BUSY")
+                val manifest = readState().manifest ?: throw UpdateFailure("UPDATE_NOT_READY")
+                val current = installedPackage()
+                UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
+                UpdatePolicy.requireDeviceCompatible(manifest, Build.SUPPORTED_ABIS.toList())
+                UpdatePolicy.requireNewer(manifest, versionCode(current))
+                if (retainedReady?.manifest == manifest) changeState { retainedReady!! }
+                else {
+                    // The payload, URL, hash and signing identity survive process death together.
+                    // KEEP is scoped to this exact artifact, never to an unrelated newer update.
+                    BackgroundUpdateScheduler.download(context, manifest,
+                        JSONObject(UpdatePolicy.manifestFields(manifest)).toString())
+                    changeState { it.copy(phase = "downloading", errorCode = null, checkStage = null) }
+                }
+            } catch (error: UpdateFailure) { failOperation(error.code) }
+            catch (_: Exception) { failOperation("UPDATE_SCHEDULER_UNAVAILABLE") }
+            finally { busy.set(false) }
+            main.post { callback(snapshot()) }
+        }
+    }
+
     /** WorkManager owns cancellation/deadline; its thread waits for the shared I/O queue. */
-    fun runAutomatic(cancellation: UpdateWorkCancellation, reconcileOnly: Boolean = false): String? {
-        if ((!reconcileOnly && !enabled) || cancellation.cancelled.get() || (reconcileOnly && attempt == null)) return null
+    fun runScheduled(cancellation: UpdateWorkCancellation, reconcileOnly: Boolean = false,
+        manualManifest: String? = null): String? {
+        if ((cancellation.automatic && !enabled) || cancellation.cancelled.get() || (reconcileOnly && attempt == null)) return null
         val future = io.submit<String?> {
-            if (!reconcileOnly && !enabled) return@submit null
+            if (cancellation.automatic && !enabled) return@submit null
             if (!busy.compareAndSet(false, true)) return@submit "UPDATE_BUSY"
             activeWork = cancellation
             try {
@@ -205,10 +234,17 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                 restoreOnce()
                 reconcileInstallAttempt()
                 if (reconcileOnly || readState().phase == "installing") return@submit null
-                checkRemote()
-                val current = readState()
-                if (current.phase == "available" && current.manifest != null) downloadCandidate(current.manifest)
-                if (readState().phase == "ready") tryAutomaticInstall()
+                if (manualManifest != null) {
+                    val manifest = cachedManifestFromJson(parseJson(manualManifest.toByteArray(StandardCharsets.UTF_8)))
+                    // A process/update restart can outlive the job that originally selected this build.
+                    if (manifest.versionCode <= versionCode(installedPackage())) return@submit null
+                    downloadCandidate(manifest)
+                } else {
+                    checkRemote()
+                    val current = readState()
+                    if (current.phase == "available" && current.manifest != null) downloadCandidate(current.manifest)
+                }
+                if (enabled && readState().phase == "ready") tryAutomaticInstall()
                 null
             } catch (error: UpdateFailure) { failOperation(error.code); error.code }
             catch (_: Exception) { failOperation("UPDATE_NETWORK_ERROR"); "UPDATE_NETWORK_ERROR" }
@@ -313,6 +349,9 @@ internal class UpdateCoordinator private constructor(private val context: Contex
         changeState { UpdateState("downloading", manifest, downloadedBytes = received,
             totalBytes = manifest.sizeBytes, checkedAtMillis = it.checkedAtMillis) }
         try {
+            // This callback belongs to the Worker, not to an Activity or the Flutter polling timer.
+            activeWork?.downloadProgress?.invoke(manifest, received)
+            ensureActive()
             if (received < manifest.sizeBytes) {
                 val deadline = boundedDeadline(UpdateAutomationPolicy.WORK_BUDGET_MS)
                 withConnection(URI(manifest.apkUrl), manifest, deadline, offset = received) { remote ->
@@ -335,6 +374,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                                     try { file.write(buffer, 0, count) }
                                     catch (_: IOException) { throw UpdateFailure("UPDATE_STORAGE_ERROR") }
                                     changeState { it.copy(downloadedBytes = received) }
+                                    activeWork?.downloadProgress?.invoke(manifest, received)
                                 }
                             }
                         } finally {

@@ -90,6 +90,7 @@ class MainActivity : FlutterActivity() {
     private val secureStore by lazy { SecureWireGuardStore(applicationContext) }
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
     private val appUpdates by lazy { AppUpdates(this) }
+    private val flowAccount by lazy { FlowAccount(this) }
     private val routeRecommendations by lazy { RouteRecommendations(this) }
     private val profileScreenProtection by lazy { ProfileScreenProtection(this) }
     private val profileImport by lazy { WireGuardProfileImport(this) { profileScreenProtection.isActive } }
@@ -102,12 +103,14 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         appUpdates.setForeground(true)
+        flowAccount.setForeground(true)
         routeRecommendations.setForeground(true)
         profileSubscriptions.setForeground(true)
     }
 
     override fun onPause() {
         appUpdates.setForeground(false)
+        flowAccount.setForeground(false)
         routeRecommendations.setForeground(false)
         profileSubscriptions.setForeground(false)
         super.onPause()
@@ -233,6 +236,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         profileImport.dispose()
         appUpdates.dispose()
+        flowAccount.dispose()
         routeRecommendations.dispose()
         profileSubscriptions.dispose()
         profileScreenProtection.dispose()
@@ -276,6 +280,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        flowAccount.dispose()
         profileImport.dispose()
         routeRecommendations.dispose()
         profileSubscriptions.dispose()
@@ -373,6 +378,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
+        flowAccount.register(flutterEngine.dartExecutor.binaryMessenger)
         routeRecommendations.register(flutterEngine.dartExecutor.binaryMessenger)
         profileSubscriptions.register(flutterEngine.dartExecutor.binaryMessenger)
         profileSubscriptions.acceptLink(intent.takeIf { it?.action == Intent.ACTION_VIEW }?.dataString)

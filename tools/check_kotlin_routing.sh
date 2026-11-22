@@ -26,6 +26,16 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/UpdateAutomationPolicy.kt \
   native/android/tests/UpdateAutomationPolicyCheck.kt -include-runtime -d "$out/update-automation-tests.jar"
 java -jar "$out/update-automation-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/UpdateAutomationPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/UpdateWorker.kt \
+  native/android/tests/update_stubs/*.kt native/android/tests/UpdateWorkerCheck.kt \
+  -nowarn -include-runtime -d "$out/update-worker-tests.jar"
+java -jar "$out/update-worker-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
+  native/android/tests/FlowAccountCheck.kt -include-runtime -d "$out/account-tests.jar"
+java -jar "$out/account-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileProtectionPolicy.kt \
   native/android/tests/ProfileProtectionPolicyCheck.kt -include-runtime -d "$out/profile-protection-tests.jar"
 java -jar "$out/profile-protection-tests.jar"

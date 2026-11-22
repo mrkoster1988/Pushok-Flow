@@ -19,6 +19,7 @@ XRAY_SERVICE = 'shop.pushok.flow.XrayVpnService'
 AUTO_UPDATE_VERSION_CODE = 37
 COMPACT_NATIVE_VERSION_CODE = 39
 ABI_VARIANT_VERSION_CODE = 40
+FOREGROUND_DOWNLOAD_VERSION_CODE = 44
 NATIVE_ABIS = ('arm64-v8a', 'armeabi-v7a', 'x86_64')
 REQUIRED_NATIVE_LIBRARIES = (
     'libflutter.so', 'libapp.so', 'libgojni.so',
@@ -29,6 +30,12 @@ UPDATE_REPLACED_RECEIVER = 'shop.pushok.flow.UpdateReplacedReceiver'
 UPDATE_PROVIDER = 'shop.pushok.flow.UpdateFileProvider'
 WORK_JOB_SERVICE = 'androidx.work.impl.background.systemjob.SystemJobService'
 WORK_INITIALIZER_PROVIDER = 'androidx.startup.InitializationProvider'
+WORK_FOREGROUND_SERVICE = 'androidx.work.impl.foreground.SystemForegroundService'
+DOWNLOAD_PERMISSIONS = {
+    'android.permission.FOREGROUND_SERVICE',
+    'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+    'android.permission.POST_NOTIFICATIONS',
+}
 UPDATE_PERMISSIONS = {
     'android.permission.REQUEST_INSTALL_PACKAGES',
     'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION',
@@ -232,6 +239,9 @@ def check_apk(path: Path, aapt: str | None = None, expected_abi: str | None = No
     if version_code >= AUTO_UPDATE_VERSION_CODE:
         check_update_manifest(manifest.stdout, declared_permissions)
         print('APK private update callbacks, persistent scheduler and install permissions verified')
+    if version_code >= FOREGROUND_DOWNLOAD_VERSION_CODE:
+        check_update_download_manifest(manifest.stdout, declared_permissions)
+        print('APK private dataSync download service and notification permissions verified')
     # The separate JIT debug workflow has no AOT libapp.so. The persistent
     # release verifier independently rejects every debuggable APK.
     if version_code >= COMPACT_NATIVE_VERSION_CODE and not debuggable:
@@ -324,6 +334,27 @@ def check_update_manifest(tree: str, permissions: set[str]) -> None:
                 if string_attribute(item, 'name') == 'androidx.work.WorkManagerInitializer']
     if len(metadata) != 1 or string_attribute(metadata[0], 'value') != 'androidx.startup':
         raise ValueError('WorkManager default initializer missing or duplicated')
+
+
+def check_update_download_manifest(tree: str, permissions: set[str]) -> None:
+    if not DOWNLOAD_PERMISSIONS <= permissions:
+        raise ValueError('Foreground download permissions missing')
+    declarations = element_attributes(tree, 'uses-permission')
+    for name in sorted(DOWNLOAD_PERMISSIONS):
+        matches = [item for item in declarations if string_attribute(item, 'name') == name]
+        if len(matches) != 1 or has_attribute(matches[0], 'maxSdkVersion'):
+            raise ValueError('Foreground download permission must be declared once without maxSdkVersion')
+    services = [block for block in element_blocks(tree, 'service')
+                if string_attribute(element_attributes(block, 'service')[0], 'name') == WORK_FOREGROUND_SERVICE]
+    if len(services) != 1:
+        raise ValueError('Expected exactly one WorkManager SystemForegroundService')
+    attributes = element_attributes(services[0], 'service')[0]
+    foreground = attribute_value(attributes, 'foregroundServiceType') or ''
+    if not is_false_attribute(attributes, 'exported') or \
+            not re.match(r'^(?:\(type 0x1[01]\)0x1\b|"dataSync")', foreground) or \
+            (has_attribute(attributes, 'process') and string_attribute(attributes, 'process') != 'shop.pushok.flow') or \
+            is_false_attribute(attributes, 'enabled') or element_blocks(services[0], 'intent-filter'):
+        raise ValueError('WorkManager SystemForegroundService must be private dataSync in app process')
 
 
 def check_xray_manifest(tree: str, permissions: set[str]) -> None:

@@ -9,6 +9,7 @@ VPN_SERVICE = "com.wireguard.android.backend.GoBackend$VpnService"
 UPDATE_PROVIDER = "shop.pushok.flow.UpdateFileProvider"
 UPDATE_INSTALL_RECEIVER = "shop.pushok.flow.UpdateInstallReceiver"
 UPDATE_REPLACED_RECEIVER = "shop.pushok.flow.UpdateReplacedReceiver"
+UPDATE_FOREGROUND_SERVICE = "androidx.work.impl.foreground.SystemForegroundService"
 QR_ACTIVITY = "shop.pushok.flow.WireGuardQrActivity"
 XRAY_SERVICE = "shop.pushok.flow.XrayVpnService"
 MAIN_ACTIVITY = "shop.pushok.flow.MainActivity"
@@ -105,11 +106,25 @@ def patch_manifest(path: Path) -> None:
                             "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION",
                             "android.permission.CAMERA", "android.permission.ACCESS_NETWORK_STATE",
                             "android.permission.FOREGROUND_SERVICE",
+                            "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                            "android.permission.POST_NOTIFICATIONS",
                             "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"):
         if not any(permission.get(ANDROID + "name") == permission_name
                    for permission in manifest.findall("uses-permission")):
             permission = ET.Element("uses-permission", {ANDROID + "name": permission_name})
             manifest.insert(list(manifest).index(app), permission)
+
+    # WorkManager owns APK transfers while the Activity is backgrounded/destroyed.
+    foreground_services = [item for item in app.findall("service")
+                           if item.get(ANDROID + "name") == UPDATE_FOREGROUND_SERVICE]
+    foreground = foreground_services[0] if foreground_services else ET.SubElement(app, "service")
+    for duplicate in foreground_services[1:]:
+        app.remove(duplicate)
+    foreground.clear()
+    foreground.set(ANDROID + "name", UPDATE_FOREGROUND_SERVICE)
+    foreground.set(ANDROID + "exported", "false")
+    foreground.set(ANDROID + "foregroundServiceType", "dataSync")
+    foreground.set("{" + TOOLS_URI + "}node", "merge")
 
     xray_services = [item for item in app.findall("service")
                      if item.get(ANDROID + "name") in (XRAY_SERVICE, ".XrayVpnService", "XrayVpnService")]

@@ -16,6 +16,7 @@ import 'ui/wireguard_profiles_card.dart';
 import 'ui/subscriptions_card.dart';
 import 'ui/subscription_editor.dart';
 import 'ui/app_updates_card.dart';
+import 'ui/account_card.dart';
 import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
 import 'ui/route_recommendations_card.dart';
@@ -1178,7 +1179,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.43.0',
+            version: '0.44.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -1424,20 +1425,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     ])),
   ]);
   Widget profile() => ListView(children: [
-    card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      const ListTile(contentPadding: EdgeInsets.zero,
-        leading: Icon(Icons.person_outline, color: PushokPalette.teal),
-        title: Text('Аккаунт Pushok'),
-        subtitle: Text('Вход и регистрация в существующем кабинете MTProxy')),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(key: const Key('open_pushok_account'),
-        onPressed: _isAndroid && _foreground && !_openingPushok ? _openPushokAccount : null,
-        icon: const Icon(Icons.open_in_new), label: const Text('Открыть кабинет MTProxy')),
-      TextButton.icon(key: const Key('open_pushok_hub'),
-        onPressed: _isAndroid && _foreground && !_openingPushok ? _openPushokHub : null,
-        icon: const Icon(Icons.hub_outlined),
-        label: const Text('Pushok · ${FlowSubscriptions.hubUsername}')),
-    ])),
+    PushokAccountCard(isAndroid: _isAndroid,
+      onOpenCabinet: _isAndroid && _foreground && !_openingPushok ? _openPushokAccount : null,
+      onOpenHub: _isAndroid && _foreground && !_openingPushok ? _openPushokHub : null),
     const SizedBox(height: 12),
     AppUpdatesCard(isAndroid: _isAndroid),
   ]);

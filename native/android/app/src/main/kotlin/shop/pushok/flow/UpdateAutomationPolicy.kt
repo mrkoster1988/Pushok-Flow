@@ -5,6 +5,13 @@ internal object UpdateAutomationPolicy {
     const val WORK_BUDGET_MS = 9 * 60_000L
     const val INSTALL_TIMEOUT_MS = 15 * 60_000L
 
+    fun downloadPercent(received: Long, total: Long): Int {
+        if (total !in 1..UpdatePolicy.MAX_APK_BYTES || received !in 0..total) {
+            throw UpdateFailure("UPDATE_CHECKSUM_MISMATCH")
+        }
+        return (received * 100 / total).toInt()
+    }
+
     fun waitingReason(enabled: Boolean, sdk: Int, permission: Boolean,
         confirmation: Boolean, connection: Boolean, foreground: Boolean): String? = when {
         !enabled -> null
@@ -40,7 +47,8 @@ internal object UpdateAutomationPolicy {
     }
 
     fun retry(code: String?, attempt: Int): Boolean = attempt < 5 && code in setOf(
-        "UPDATE_NETWORK_ERROR", "UPDATE_DOWNLOAD_FAILED", "UPDATE_INTERRUPTED", "UPDATE_RATE_LIMITED", "UPDATE_BUSY")
+        "UPDATE_NETWORK_ERROR", "UPDATE_DOWNLOAD_FAILED", "UPDATE_INTERRUPTED", "UPDATE_RATE_LIMITED", "UPDATE_BUSY",
+        "UPDATE_SCHEDULER_UNAVAILABLE")
 }
 
 /** A process-wide lock shared by both VPN engines and automatic installation.

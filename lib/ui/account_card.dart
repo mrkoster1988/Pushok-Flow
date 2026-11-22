@@ -1,0 +1,233 @@
+import 'dart:async';
+
+import 'package:material_ui/material_ui.dart';
+
+import '../design/pushok_theme.dart';
+import '../platform/account.dart';
+import '../platform/subscriptions.dart';
+
+class PushokAccountCard extends StatefulWidget {
+  const PushokAccountCard({super.key, required this.isAndroid, this.account,
+    this.onOpenCabinet, this.onOpenHub});
+  final bool isAndroid;
+  final FlowAccount? account;
+  final VoidCallback? onOpenCabinet;
+  final VoidCallback? onOpenHub;
+
+  @override
+  State<PushokAccountCard> createState() => _PushokAccountCardState();
+}
+
+class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindingObserver {
+  late final FlowAccount _account;
+  FlowAccountStatus? _status;
+  String? _error;
+  bool _busy = false;
+  bool _foreground = true;
+  int _epoch = 0;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _account = widget.account ?? FlowAccount(isAndroid: widget.isAndroid);
+    WidgetsBinding.instance.addObserver(this);
+    final state = WidgetsBinding.instance.lifecycleState;
+    _foreground = state == null || state == AppLifecycleState.resumed;
+    if (widget.isAndroid) unawaited(_read());
+  }
+
+  @override
+  void dispose() {
+    _epoch++;
+    _poll?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _epoch++;
+    _poll?.cancel();
+    _foreground = state == AppLifecycleState.resumed;
+    // A response from before switching to Telegram must not overwrite the
+    // fresh, durable native snapshot read on return.
+    _busy = false;
+    if (_foreground && widget.isAndroid) unawaited(_read());
+  }
+
+  void _schedulePoll() {
+    _poll?.cancel();
+    final pending = _status?.pending;
+    if (!mounted || !_foreground || _busy || pending == null || !widget.isAndroid) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final delay = (pending.nextPollAt - now).clamp(1000, 60000).toInt();
+    _poll = Timer(Duration(milliseconds: delay), () => unawaited(_run(_account.pollLogin)));
+  }
+
+  Future<void> _read() async {
+    await _run(_account.status);
+    final status = _status;
+    if (!mounted || !_foreground || _busy || status?.state != FlowAccountState.connected) return;
+    final age = DateTime.now().millisecondsSinceEpoch - (status!.refreshedAt ?? 0);
+    if (status.stale || age > 60000) await _run(_account.refresh);
+  }
+
+  Future<void> _run(Future<FlowAccountStatus> Function() action) async {
+    if (!mounted || !_foreground || _busy || !widget.isAndroid) return;
+    final epoch = ++_epoch;
+    _poll?.cancel();
+    setState(() { _busy = true; _error = null; });
+    try {
+      final status = await action();
+      if (!mounted || !_foreground || epoch != _epoch) return;
+      setState(() => _status = status);
+    } catch (error) {
+      if (!mounted || !_foreground || epoch != _epoch) return;
+      setState(() => _error = flowAccountErrorMessage(error));
+    } finally {
+      if (mounted && epoch == _epoch) {
+        setState(() => _busy = false);
+        _schedulePoll();
+      }
+    }
+  }
+
+  Future<void> _openLogin() => _run(() async {
+    await _account.openLogin();
+    return _account.status();
+  });
+
+  void _help() {
+    showDialog<void>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Аккаунт Pushok'),
+      content: const SingleChildScrollView(child: Text(
+        'Вход использует существующий аккаунт MTProxy. Подтвердите запрос '
+        'в его кабинете и сравните код с кодом в Flow.\n\n'
+        'Flow получает имя, роль, признак подтверждения телефона и баланс '
+        'кабинета MTProxy. Списание денег и управление рекламой отсюда недоступны. '
+        'Сессия действует 12 часов.\n\n'
+        'Баланс MTProxy и подключение серверов Flow учитываются отдельно. '
+        'Серверы по-прежнему добавляются в разделе «Серверы».'
+      )),
+      actions: [TextButton(onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Понятно'))],
+    ));
+  }
+
+  Widget _walletValue(String title, String amount, String key) => Expanded(
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+      const SizedBox(height: 5),
+      FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+        child: Text(amount, key: ValueKey(key),
+          style: const TextStyle(color: PushokPalette.teal, fontSize: 17, fontWeight: FontWeight.w700))),
+    ]),
+  );
+
+  Widget _profile(FlowAccountProfile profile) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        const Icon(Icons.person_outline, size: 30, color: PushokPalette.teal),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(profile.displayName, key: const Key('account_display_name'),
+            maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          Text(profile.roleLabel, style: const TextStyle(color: PushokPalette.muted)),
+        ])),
+        if (profile.phoneVerified) const Tooltip(message: 'Телефон подтверждён в кабинете',
+          child: Icon(Icons.verified, color: PushokPalette.glowCyan, size: 22)),
+      ]),
+      const SizedBox(height: 18),
+      const Text('Баланс кабинета MTProxy', style: TextStyle(fontWeight: FontWeight.w600)),
+      const SizedBox(height: 10),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _walletValue('Рубли', '${formatFlowWalletAmount(profile.wallet.rubles)} ₽', 'account_wallet_rub'),
+        const SizedBox(width: 10),
+        _walletValue('Бонусы', formatFlowWalletAmount(profile.wallet.bonuses), 'account_wallet_bonus'),
+        const SizedBox(width: 10),
+        _walletValue('Stars', formatFlowWalletAmount(profile.wallet.stars, fractional: false), 'account_wallet_xtr'),
+      ]),
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _status;
+    final pending = status?.pending;
+    final enabled = widget.isAndroid && _foreground && !_busy && !(status?.busy ?? false);
+    final error = _error ?? (status?.errorCode == null ? null : flowAccountErrorMessage(status!.errorCode!));
+    return PushokPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        const Expanded(child: Text('Аккаунт Pushok',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700))),
+        IconButton(key: const Key('account_info'), onPressed: _help,
+          tooltip: 'Об аккаунте', icon: const Icon(Icons.info_outline, color: PushokPalette.teal)),
+      ]),
+      const SizedBox(height: 8),
+      if (!widget.isAndroid)
+        const Text('Вход доступен в приложении для Android.', style: TextStyle(color: PushokPalette.muted))
+      else if (status == null && _busy)
+        const Padding(padding: EdgeInsets.symmetric(vertical: 12),
+          child: Center(child: CircularProgressIndicator()))
+      else if (status?.state == FlowAccountState.connected) ...[
+        if (status!.profile != null) _profile(status.profile!)
+        else const Text('Аккаунт подключён. Обновите профиль, чтобы получить данные кабинета.'),
+        if (status.stale) const Padding(padding: EdgeInsets.only(top: 10),
+          child: Text('Показаны сохранённые данные. Требуется обновление.',
+            key: Key('account_stale'), style: TextStyle(color: PushokPalette.muted))),
+        const SizedBox(height: 12),
+        Wrap(spacing: 10, runSpacing: 6, children: [
+          OutlinedButton.icon(key: const Key('refresh_flow_account'),
+            onPressed: enabled ? () => unawaited(_run(_account.refresh)) : null,
+            icon: const Icon(Icons.refresh), label: const Text('Обновить профиль')),
+          TextButton.icon(key: const Key('logout_flow_account'),
+            onPressed: enabled ? () => unawaited(_run(_account.logout)) : null,
+            icon: const Icon(Icons.logout), label: const Text('Выйти')),
+        ]),
+      ] else if (pending != null) ...[
+        const Text('Подтвердите вход в кабинете MTProxy и вернитесь в Flow.'),
+        const SizedBox(height: 12),
+        const Text('Код должен совпадать в обоих приложениях:', style: TextStyle(color: PushokPalette.muted)),
+        const SizedBox(height: 6),
+        SelectableText(pending.displayCode, key: const Key('flow_account_code'),
+          style: const TextStyle(color: PushokPalette.teal, fontSize: 21,
+            fontWeight: FontWeight.w700, letterSpacing: 1)),
+        const SizedBox(height: 10),
+        const Text('Ожидаем подтверждения…', key: Key('flow_account_waiting'),
+          style: TextStyle(color: PushokPalette.muted)),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(key: const Key('reopen_flow_login'),
+          onPressed: enabled ? () => unawaited(_openLogin()) : null,
+          icon: const Icon(Icons.open_in_new), label: const Text('Открыть подтверждение')),
+        TextButton(key: const Key('cancel_flow_login'),
+          onPressed: enabled ? () => unawaited(_run(_account.cancelLogin)) : null,
+          child: const Text('Отменить вход')),
+      ] else ...[
+        const Text('Войдите через Telegram, чтобы видеть свой профиль и баланс кабинета MTProxy.',
+          style: TextStyle(color: PushokPalette.muted)),
+        const SizedBox(height: 12),
+        FilledButton.icon(key: const Key('begin_flow_login'),
+          onPressed: enabled && status != null ? () => unawaited(_run(_account.beginLogin)) : null,
+          icon: const Icon(Icons.login), label: const Text('Войти через Telegram')),
+      ],
+      if (_busy && status != null) const Padding(padding: EdgeInsets.only(top: 8),
+        child: LinearProgressIndicator(minHeight: 2)),
+      if (error != null) ...[
+        const SizedBox(height: 10),
+        Text(error, key: const Key('flow_account_error'), style: const TextStyle(color: PushokPalette.orange)),
+        if (status == null) TextButton(onPressed: enabled ? () => unawaited(_read()) : null,
+          child: const Text('Повторить')),
+      ],
+      const SizedBox(height: 12),
+      OutlinedButton.icon(key: const Key('open_pushok_account'),
+        onPressed: _foreground ? widget.onOpenCabinet : null,
+        icon: const Icon(Icons.open_in_new), label: const Text('Открыть кабинет MTProxy')),
+      TextButton.icon(key: const Key('open_pushok_hub'),
+        onPressed: _foreground ? widget.onOpenHub : null,
+        icon: const Icon(Icons.hub_outlined),
+        label: const Text('Pushok · ${FlowSubscriptions.hubUsername}')),
+    ]));
+  }
+}

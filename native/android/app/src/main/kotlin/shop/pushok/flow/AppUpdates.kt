@@ -1,8 +1,10 @@
 package shop.pushok.flow
 
 import android.app.Activity
+import android.Manifest
 import android.content.ClipData
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -44,7 +46,10 @@ class AppUpdates(activity: Activity) {
                         result.success(coordinator.snapshot())
                     }
                     "checkForUpdates" -> request(result) { done -> coordinator.runManual("check", done) }
-                    "downloadUpdate" -> request(result) { done -> coordinator.runManual("download", done) }
+                    "downloadUpdate" -> {
+                        requestDownloadNotifications()
+                        request(result) { done -> coordinator.requestDownload(done) }
+                    }
                     "setAutomaticUpdates" -> {
                         val enabled = (call.arguments as? Map<*, *>)?.get("enabled") as? Boolean
                         if (enabled == null) result.error("UPDATE_ARGUMENT_INVALID", "Нужен параметр enabled", null)
@@ -85,6 +90,20 @@ class AppUpdates(activity: Activity) {
         if (disposed.get()) { result.success(coordinator.snapshot("UPDATE_INTERRUPTED")); return }
         results.add(result)
         launch { status -> if (results.remove(result) && !disposed.get()) result.success(status) }
+    }
+
+    private fun requestDownloadNotifications() {
+        if (Build.VERSION.SDK_INT < 33) return
+        try {
+            val activity = liveActivity()
+            if (activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+            val preferences = context.getSharedPreferences("pushok_flow_updates", android.content.Context.MODE_PRIVATE)
+            if (preferences.getBoolean("notification_permission_asked", false)) return
+            preferences.edit().putBoolean("notification_permission_asked", true).apply()
+            activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7344)
+        } catch (_: Exception) {
+            // Notification permission is optional. Download ownership must never depend on a dialog result.
+        }
     }
 
     private fun openInstallPermission(result: MethodChannel.Result) {

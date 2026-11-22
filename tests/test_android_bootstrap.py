@@ -155,9 +155,29 @@ dependencies {
         self.assertEqual(len(self.launcher_queries(manifest)), 1)
         self.assertEqual(sorted(p.get(ANDROID + "name") for p in manifest.findall("uses-permission")),
                          ["android.permission.ACCESS_NETWORK_STATE", "android.permission.CAMERA",
-                          "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
-                          "android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
+                          "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                          "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+                          "android.permission.INTERNET", "android.permission.POST_NOTIFICATIONS",
+                          "android.permission.REQUEST_INSTALL_PACKAGES",
                           "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION"])
+
+    def test_update_foreground_service_is_private_data_sync_and_idempotent(self):
+        self.write_manifest(services=f'''<service android:name="{PATCH.UPDATE_FOREGROUND_SERVICE}"
+            android:exported="true" android:process=":other" android:foregroundServiceType="location" />
+            <service android:name="{PATCH.UPDATE_FOREGROUND_SERVICE}" />''')
+        self.patch()
+        manifest = self.patch()
+        services = [item for item in manifest.findall('application/service')
+                    if item.get(ANDROID + 'name') == PATCH.UPDATE_FOREGROUND_SERVICE]
+        self.assertEqual(len(services), 1)
+        self.assertEqual(services[0].get(ANDROID + 'exported'), 'false')
+        self.assertEqual(services[0].get(ANDROID + 'foregroundServiceType'), 'dataSync')
+        self.assertIsNone(services[0].get(ANDROID + 'process'))
+        MANIFEST_CHECK.validate(self.manifest)
+        services[0].set(ANDROID + 'foregroundServiceType', 'specialUse')
+        ET.ElementTree(manifest).write(self.manifest)
+        with self.assertRaisesRegex(ValueError, 'foreground download'):
+            MANIFEST_CHECK.validate(self.manifest)
 
     def test_update_provider_is_private_and_preserves_other_providers(self):
         self.write_manifest(services='''<provider android:name="shop.pushok.flow.UpdateFileProvider"
@@ -240,7 +260,7 @@ dependencies {
                 app = self.patch().find("application")
                 self.assertEqual(app.get(ANDROID + "allowBackup"), "false")
                 self.assertEqual([service.get(ANDROID + "name") for service in app.findall("service")],
-                                 [".OtherService", PATCH.XRAY_SERVICE])
+                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, PATCH.XRAY_SERVICE])
 
     def test_update_receivers_are_private_deduplicated_and_keep_unrelated_receiver(self):
         self.write_manifest(services='''<receiver android:name=".UpdateInstallReceiver"
@@ -452,6 +472,7 @@ class BootstrapScriptTests(unittest.TestCase):
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",
             "UpdateAutomationPolicy.kt",
+            "FlowAccount.kt", "FlowAccountPolicy.kt", "FlowAccountSessionManager.kt", "FlowAccountStore.kt", "FlowAccountClient.kt",
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportReader.kt", "ProfileQrDecoder.kt",
             "ProfileQrCameraDecoder.kt", "ProfileQrImageReader.kt", "ProfileQrSession.kt", "WireGuardQrActivity.kt",

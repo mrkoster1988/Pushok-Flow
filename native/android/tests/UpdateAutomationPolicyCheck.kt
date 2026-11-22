@@ -34,6 +34,12 @@ fun main() {
     check(!UpdateAutomationPolicy.retry("UPDATE_INTERRUPTED", 5))
     check(!UpdateAutomationPolicy.retry("UPDATE_SIGNATURE_MISMATCH", 0))
     check(!UpdateAutomationPolicy.retry("UPDATE_INSTALL_FAILED", 0))
+    check(UpdateAutomationPolicy.retry("UPDATE_SCHEDULER_UNAVAILABLE", 0))
+    check(UpdateAutomationPolicy.downloadPercent(0, 1000) == 0)
+    check(UpdateAutomationPolicy.downloadPercent(400, 1000) == 40)
+    check(UpdateAutomationPolicy.downloadPercent(1000, 1000) == 100)
+    invalid { UpdateAutomationPolicy.downloadPercent(1001, 1000) }
+    invalid { UpdateAutomationPolicy.downloadPercent(0, 0) }
 
     // Permission dialogs/CONNECTING already hold this lease before Android exposes a VPN network.
     val gate = UpdateAutomationGuard()

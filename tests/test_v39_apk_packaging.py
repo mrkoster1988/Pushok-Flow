@@ -149,7 +149,9 @@ class CompactNativeApkGate(unittest.TestCase):
                 'check_qr_import_manifest', 'check_xray_manifest', 'check_xray_libraries', 'check_update_manifest')}
             compact = stack.enter_context(patch.object(VERIFY, 'check_compact_native_packaging',
                                                        wraps=VERIFY.check_compact_native_packaging))
+            download = stack.enter_context(patch.object(VERIFY, 'check_update_download_manifest'))
             VERIFY.check_apk(self.apk, aapt='fixture-aapt')
+            self.assertEqual(download.call_count, 1 if version >= 44 else 0)
             return previous, compact
 
     def test_historical_apks_keep_their_existing_packaging_contract(self):
