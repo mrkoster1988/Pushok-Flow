@@ -265,7 +265,27 @@ class MainActivity : FlutterActivity() {
     private val prefs by lazy { getSharedPreferences("pushok_flow_routes", MODE_PRIVATE) }
     private val routeStore by lazy {
         RouteSettingsStore(object : RouteSettingsStorage {
-            override fun read(): Set<*> = prefs.getStringSet("flow_bypass_packages", emptySet()).orEmpty()
+            override fun read(): Set<*> {
+                val key = "flow_bypass_packages"
+                // A saved empty set is intentional. Never overwrite earlier choices,
+                // including those saved by a user who disabled every exclusion.
+                if (!prefs.contains(key)) {
+                    val installed = try {
+                        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                        @Suppress("DEPRECATION")
+                        packageManager.queryIntentActivities(intent, 0)
+                            .map { it.activityInfo.packageName }
+                    } catch (_: Exception) {
+                        // Do not mark setup complete when Android cannot enumerate apps.
+                        throw RouteSettingsFailure("ROUTES_LOAD_FAILED")
+                    }
+                    val selected = RouteInitialRecommendations.installedOnly(installed)
+                    if (!prefs.edit().putStringSet(key, selected).commit()) {
+                        throw RouteSettingsFailure("ROUTES_STORE_UNAVAILABLE")
+                    }
+                }
+                return prefs.getStringSet(key, emptySet()).orEmpty()
+            }
             override fun replace(packages: Set<String>): Boolean =
                 prefs.edit().putStringSet("flow_bypass_packages", packages).commit()
         }, Session.routeSettingsState)

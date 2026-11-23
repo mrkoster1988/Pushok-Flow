@@ -20,6 +20,20 @@ class RecommendationFailure implements Exception {
 
 /// A verified native catalogue. It is advisory and never a saved route list.
 class RecommendationStatus {
+  /// Offline starter recommendations. These are a display fallback, not
+  /// automatically applied when an online catalogue is refreshed.
+  static const Set<String> bundledPackages = {
+    'com.idamob.tinkoff.android',
+    'com.vk.im',
+    'com.vkontakte.android',
+    'com.wildberries.ru',
+    'ru.alfabank.mobile.android',
+    'ru.oneme.app',
+    'ru.ozon.app.android',
+    'ru.sberbankmobile',
+    'ru.vtb24.mobilebanking.android',
+  };
+
   const RecommendationStatus._({
     required this.rulesVersion,
     required this.packages,

@@ -107,3 +107,24 @@ object RouteAppLabels {
         return result.toString().trim { it.isWhitespace() || it == '\uFEFF' }.ifEmpty { fallback }
     }
 }
+
+
+// Versioned, bundled offline starter list. Only installed/visible apps are
+// applied and only when Android has no previously saved bypass preference.
+// The separately signed online catalogue stays advisory, never auto-applies.
+object RouteInitialRecommendations {
+    val packages: Set<String> = linkedSetOf(
+        "com.idamob.tinkoff.android",
+        "com.vk.im",
+        "com.vkontakte.android",
+        "com.wildberries.ru",
+        "ru.alfabank.mobile.android",
+        "ru.oneme.app",
+        "ru.ozon.app.android",
+        "ru.sberbankmobile",
+        "ru.vtb24.mobilebanking.android",
+    )
+
+    fun installedOnly(visiblePackages: Collection<String>): Set<String> =
+        visiblePackages.filterTo(linkedSetOf()) { it in packages }
+}

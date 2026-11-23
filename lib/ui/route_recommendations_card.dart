@@ -88,11 +88,12 @@ class RouteRecommendationsCard extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 6),
-        const Text('Обновляются внутри приложения без установки. '
-            'Вы сами выбираете исключения.',
+        const Text('Встроенный список доступен сразу. При первом запуске '
+            'установленные рекомендованные приложения включаются для прямого доступа. '
+            'Вы можете изменить выбор в любой момент.',
           style: TextStyle(color: PushokPalette.muted)),
         const SizedBox(height: 8),
-        Text(status.rulesVersion == 0 ? 'Рекомендации ещё не загружены'
+        Text(status.rulesVersion == 0 ? 'Встроенные рекомендации доступны офлайн'
             : 'Версия рекомендаций: ${status.rulesVersion}',
           key: const Key('recommendations_version'),
           style: const TextStyle(color: PushokPalette.muted)),
