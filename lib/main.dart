@@ -82,7 +82,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   final _informationRevision = ValueNotifier<int>(0);
   bool _informationOpen = false;
   Timer? _healthPoll;
-  bool connected = false;
+  // Ownership drives Stop/edit guards; actual local UP comes only from diagnostics.
+  bool _ownsTunnel = false;
   bool connecting = false;
   bool _profileBusy = false;
   bool _profileEditorOpen = false;
@@ -112,7 +113,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   bool get _isAndroid => widget.isAndroid ?? Platform.isAndroid;
   bool get _nativeBusy => _diagnostics.isKnown &&
       _diagnostics.transitioning && !_diagnosticsStale;
-  bool get _tunnelConfirmed => connected && _diagnostics.isKnown &&
+  TunnelRecovery get _recovery => _diagnostics.isKnown && !_diagnosticsStale
+      ? _diagnostics.recovery : TunnelRecovery.none;
+  bool get _recovering => _recovery != TunnelRecovery.none;
+  bool get _tunnelConfirmed => _ownsTunnel && _diagnostics.connected && _diagnostics.isKnown &&
       !_diagnosticsStale && !_nativeBusy && !connecting;
   // A new connection requires a current DOWN observation. On startup/resume,
   // the last screen state cannot authorize reconfiguring an existing tunnel.
@@ -120,23 +124,23 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   bool get _canToggleTunnel => _isAndroid && _foreground && !_informationOpen &&
       !connecting && !_nativeBusy && !_profileBusy && !_profileEditorOpen &&
       !_savingRoute && !_routeConfirmationOpen &&
-      (connected || (!_statusRefreshing && _diagnostics.isKnown &&
-          !_diagnosticsStale && !_diagnostics.connected));
+      (_ownsTunnel || (!_statusRefreshing && _diagnostics.isKnown &&
+          !_diagnosticsStale && !_diagnostics.ownsTunnel));
   // An isolated service can survive a restart of this UI process. Unknown
   // startup state must forbid Connect but still allow an explicit recovery Stop.
   bool get _canRecoverTunnel => _isAndroid && _foreground && _informationOpen &&
       !connecting && !_nativeBusy && !_profileBusy && !_profileEditorOpen &&
       !_savingRoute && !_routeConfirmationOpen && !_statusRefreshing &&
-      (!_diagnostics.isKnown || _diagnosticsStale);
+      (!_diagnostics.isKnown || _diagnosticsStale || _recovering);
   bool get _canManageProfiles => _isAndroid && _foreground &&
       !_informationOpen &&
-      !connected && !connecting && !_nativeBusy && !_profileBusy &&
+      !_ownsTunnel && !connecting && !_nativeBusy && !_profileBusy &&
       !_savingRoute && !_routeConfirmationOpen &&
       !_profileEditorOpen && !_statusRefreshing && _profiles != null &&
       _profilesError == null && _diagnostics.isKnown && !_diagnosticsStale;
   bool get _canEditRoutes => _isAndroid && _foreground && _routesLoaded &&
       !_routesStale && !loadingApps && !_savingRoute && !_routeConfirmationOpen &&
-      routeError == null && !connected && !connecting && !_nativeBusy &&
+      routeError == null && !_ownsTunnel && !connecting && !_nativeBusy &&
       !_profileBusy && !_profileEditorOpen && !_statusRefreshing &&
       _diagnostics.isKnown && !_diagnosticsStale;
 
@@ -214,7 +218,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   Future<void> _toggleTunnel({String? profile}) async {
     if (!_canToggleTunnel) return;
     final tunnelIntent = ++_tunnelIntentEpoch;
-    final disconnecting = connected;
+    final disconnecting = _ownsTunnel;
     final requestEpoch = _profileRequestEpoch;
     var needsProfile = false;
     _statusEpoch++;
@@ -228,7 +232,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       if (disconnecting) {
         await WireGuardTunnel.disconnect();
         if (mounted) setState(() {
-          connected = false;
+          _ownsTunnel = false;
           _diagnostics = const TunnelDiagnostics(isKnown: true, connected: false,
               statistics: TunnelStatistics.inactive());
         });
@@ -251,10 +255,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           final ok = await WireGuardTunnel.connect(config, expectedProfileId: active.id);
           if (!mounted) return;
           setState(() {
-            connected = ok;
+            _ownsTunnel = ok;
             // The connect acknowledgement is not a protocol/traffic sample.
             // The following status read supplies the actual engine metadata.
-            _diagnostics = TunnelDiagnostics(isKnown: true, connected: ok,
+            _diagnostics = TunnelDiagnostics(isKnown: false, connected: false, ownsTunnel: ok,
                 protocol: TunnelProtocol.unknown);
           });
           if (!ok) {
@@ -306,7 +310,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       // preliminary status. This action never loads a profile or starts a tunnel.
       await WireGuardTunnel.disconnect();
       if (mounted) setState(() {
-        connected = false;
+        _ownsTunnel = false;
         _diagnostics = const TunnelDiagnostics(isKnown: true, connected: false,
             protocol: TunnelProtocol.unknown, statistics: TunnelStatistics.inactive());
       });
@@ -360,7 +364,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     _healthPoll?.cancel();
     if (!_isAndroid || !_foreground) return;
     _healthPoll = Timer.periodic(const Duration(seconds: 10), (_) {
-      if ((connected || _nativeBusy || !_diagnostics.isKnown) &&
+      if ((_ownsTunnel || _nativeBusy || !_diagnostics.isKnown) &&
           !connecting && mounted && _foreground) _refreshProfileStatus();
     });
   }
@@ -581,7 +585,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _saveSubscriptionDraft(String url, String name) async {
-    if (!mounted || !_foreground || connected || connecting || _nativeBusy) {
+    if (!mounted || !_foreground || _ownsTunnel || connecting || _nativeBusy) {
       throw PlatformException(code: 'VPN_ACTIVE');
     }
     // A slow read from before confirmation must not overwrite the imported list.
@@ -773,17 +777,17 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           _diagnostics = info;
           _diagnosticsStale = !info.isKnown;
           if (info.isKnown) {
-            connected = info.connected;
-          } else if (info.connected) {
-            // Retain an explicit last-known UP state for the Disconnect action.
+            _ownsTunnel = info.ownsTunnel;
+          } else if (info.ownsTunnel) {
+            // Retain explicit last-known ownership for the Disconnect action.
             // An unknown read must never claim a successful disconnect.
-            connected = true;
+            _ownsTunnel = true;
           }
           lastErrorCode = info.lastErrorCode;
         });
       } catch (_) {
         if (mounted && _foreground && epoch == _statusEpoch) setState(() {
-          _diagnostics = TunnelDiagnostics.unavailable(connected: connected);
+          _diagnostics = TunnelDiagnostics.unavailable(ownsTunnel: _ownsTunnel);
           _diagnosticsStale = true;
           lastErrorCode = null;
         });
@@ -844,7 +848,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         return;
       }
       if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
-      if (connected || connecting || _nativeBusy) {
+      if (_ownsTunnel || connecting || _nativeBusy) {
         _showNotice('Для изменения профиля отключите VPN.');
         return;
       }
@@ -936,7 +940,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       }
       // The user may act while the post-save catalog refresh is pending.
       // An older Save-and-Connect intent must never toggle a newer tunnel off.
-      if (tunnelIntent != _tunnelIntentEpoch || connected || connecting) return;
+      if (tunnelIntent != _tunnelIntentEpoch || _ownsTunnel || connecting) return;
       await _toggleTunnel(profile: saved);
     } else {
       _showNotice('Профиль сохранён на устройстве. Можно подключаться.');
@@ -1010,7 +1014,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         ));
       // Confirmation from an earlier foreground session cannot delete on return.
       if (confirmed != true || !mounted || !_foreground ||
-          intentEpoch != _profileRequestEpoch || connected || connecting || _nativeBusy) return;
+          intentEpoch != _profileRequestEpoch || _ownsTunnel || connecting || _nativeBusy) return;
       await WireGuardTunnel.deleteProfile(profileId: profile.id);
       if (mounted) {
         _statusEpoch++;
@@ -1161,7 +1165,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   String? get _routeDisabledReason {
     if (_savingRoute) return 'Сохраняем исключения…';
-    if (connected || connecting || _nativeBusy) {
+    if (_ownsTunnel || connecting || _nativeBusy) {
       return 'Для изменения исключений отключите туннель.';
     }
     if (_diagnosticsStale || !_diagnostics.isKnown || _statusRefreshing) {
@@ -1200,7 +1204,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.46.0',
+            version: '0.47.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -1305,10 +1309,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         onTap: _canToggleTunnel ? () => _toggleTunnel() : null,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(_tunnelConfirmed ? Icons.check_circle_outline
-              : connected ? Icons.info_outline : Icons.power_settings_new,
+              : _ownsTunnel ? Icons.info_outline : Icons.power_settings_new,
             color: _tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan, size: 54),
           const SizedBox(height: 10),
-          Text(connecting ? (connected ? 'Отключение' : 'Подключение') : connected ? 'Отключить' : 'Подключить',
+          Text(connecting ? (_ownsTunnel ? 'Отключение' : 'Подключение') : _ownsTunnel ? 'Отключить' : 'Подключить',
             textAlign: TextAlign.center, style: const TextStyle(color: Colors.white,
               fontWeight: FontWeight.w800, fontSize: 20)),
         ]),
@@ -1316,17 +1320,19 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     )),
     const SizedBox(height: 18),
     Center(child: PushokStatusChip(
-      label: connecting ? (connected ? 'Отключение туннеля' : 'Соединение устанавливается')
+      label: connecting ? (_ownsTunnel ? 'Отключение туннеля' : 'Соединение устанавливается')
           : _nativeBusy ? 'Состояние изменяется'
+          : _recovery == TunnelRecovery.waitingNetwork ? 'Ожидание сети'
+          : _recovery == TunnelRecovery.reconnecting ? 'Восстанавливается'
           : _isAndroid && (_diagnosticsStale || !_diagnostics.isKnown)
               ? 'Статус уточняется'
-              : connected ? 'Туннель включён' : 'Статус: отключено',
-      icon: connecting || _nativeBusy ? Icons.sync
+              : _tunnelConfirmed ? 'Туннель включён' : 'Статус: отключено',
+      icon: connecting || _nativeBusy || _recovering ? Icons.sync
           : _diagnosticsStale ? Icons.info_outline
-          : connected ? Icons.shield_outlined : Icons.circle,
-      color: connecting || _nativeBusy ? PushokPalette.glowCyan
+          : _ownsTunnel ? Icons.shield_outlined : Icons.circle,
+      color: connecting || _nativeBusy || _recovering ? PushokPalette.glowCyan
           : _diagnosticsStale ? PushokPalette.muted
-          : connected ? PushokPalette.mint : PushokPalette.orange)),
+          : _ownsTunnel ? PushokPalette.mint : PushokPalette.orange)),
   ]));
 
   Widget routes() => AppRoutesView(
@@ -1413,7 +1419,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       onSelect: _selectProfile,
       onDelete: _deleteProfile,
     ),
-    if (connected || connecting || _nativeBusy) const Padding(
+    if (_ownsTunnel || connecting || _nativeBusy) const Padding(
       padding: EdgeInsets.only(top: 12),
       child: Text('Для изменения профилей отключите туннель.',
           style: TextStyle(color: PushokPalette.muted)),

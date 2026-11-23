@@ -34,6 +34,11 @@ Map<String, Object?> _snapshot({bool active = true, int rx = 2048}) => {
   'statistics': active ? _statistics(rx: rx) : {'status': 'inactive'},
 };
 
+Map<String, Object?> _recoverySnapshot(String phase) => {
+  ..._snapshot(), 'protocol': 'vless', 'connected': false,
+  'ownsTunnel': true, 'state': phase,
+};
+
 const _firstProfileId = '11111111-1111-4111-8111-111111111111';
 const _secondProfileId = '22222222-2222-4222-8222-222222222222';
 
@@ -72,6 +77,7 @@ class _AndroidBridge {
   String? statusState;
   String? statusProtocol;
   bool? statusConnected;
+  bool? statusOwnsTunnel;
   Map<String, Object?> statistics = _statistics();
   bool invalidPrivacyToken = false;
   Completer<void>? connectGate;
@@ -168,6 +174,7 @@ class _AndroidBridge {
         if (statusGate != null) return await statusGate!.future;
         return {
           'connected': statusConnected ?? connected,
+          if (statusOwnsTunnel != null) 'ownsTunnel': statusOwnsTunnel,
           'state': statusState ?? (connected ? 'connected' : 'disconnected'),
           if (statusProtocol != null) 'protocol': statusProtocol,
           'uptimeSeconds': connected ? 12 : 0,
@@ -196,8 +203,9 @@ class _AndroidBridge {
   }
 }
 
-Future<void> _withApp(WidgetTester tester, Future<void> Function() body) async {
-  await tester.binding.setSurfaceSize(const Size(390, 844));
+Future<void> _withApp(WidgetTester tester, Future<void> Function() body,
+    {Size size = const Size(390, 844)}) async {
+  await tester.binding.setSurfaceSize(size);
   await tester.pumpWidget(const PushokFlowApp(isAndroid: true, animationsEnabled: false));
   await tester.pumpAndSettle();
   try {
@@ -947,6 +955,173 @@ void main() {
       await tester.pumpAndSettle();
       expect(_diagnosticValue(tester, 'tunnel_rx_value'), '2,0 КиБ');
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('START acknowledgement retains ownership without publishing UP before the waiting status', (tester) async {
+    bridge.savedProfile = _vlessProfile;
+    bridge.connectGate = Completer<void>();
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pump();
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      final pending = Completer<Object?>();
+      bridge.statusGate = pending;
+      bridge.statusProtocol = 'vless';
+      bridge.statusState = 'waiting_network';
+      bridge.statusConnected = false;
+      bridge.statusOwnsTunnel = true;
+      bridge.connectGate!.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Туннель включён'), findsNothing);
+      expect(find.text('Статус: отключено'), findsNothing);
+      expect(find.text('Статус уточняется'), findsOneWidget);
+      expect(find.text('Отключить'), findsOneWidget);
+      bridge.statusGate = null;
+      pending.complete(_recoverySnapshot('waiting_network'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ожидание сети'), findsOneWidget);
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('Waiting diagnostics expose the full reason and a working Stop on a fresh UI', (tester) async {
+    bridge.statusProtocol = 'vless';
+    bridge.statusState = 'waiting_network';
+    bridge.statusConnected = false;
+    bridge.statusOwnsTunnel = true;
+    await _withApp(tester, () async {
+      await _showDiagnostics(tester);
+      expect(find.text('Нет сети · подключение сохранено'), findsOneWidget);
+      final stop = find.byKey(const Key('recover_tunnel_disconnect'));
+      expect(tester.widget<OutlinedButton>(stop).onPressed, isNotNull);
+      bridge.statusState = 'disconnected';
+      bridge.statusOwnsTunnel = false;
+      await tester.tap(stop);
+      await tester.pumpAndSettle();
+      expect(bridge.named('disconnectWireGuard'), hasLength(1));
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(find.byKey(const Key('recover_tunnel_disconnect')), findsNothing);
+      expect(find.text('Туннель выключен.'), findsOneWidget);
+    });
+  });
+
+  for (final width in [320.0, 360.0]) {
+    testWidgets('Handover status remains readable at width $width', (tester) async {
+      bridge.statusProtocol = 'vless';
+      bridge.statusState = 'waiting_network';
+      bridge.statusConnected = false;
+      bridge.statusOwnsTunnel = true;
+      await _withApp(tester, () async {
+        expect(find.text('Ожидание сети'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        bridge.statusState = 'reconnecting';
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pumpAndSettle();
+        expect(find.text('Восстанавливается'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }, size: Size(width, 640));
+    });
+  }
+
+  for (final phase in ['waiting_network', 'reconnecting']) {
+    testWidgets('VLESS $phase keeps polling and blocks profile, subscription and route edits', (tester) async {
+      bridge.savedProfile = _vlessProfile;
+      bridge.statusProtocol = 'vless';
+      bridge.statusState = phase;
+      bridge.statusConnected = false;
+      bridge.statusOwnsTunnel = true;
+      await _withApp(tester, () async {
+        expect(find.text(phase == 'waiting_network'
+            ? 'Ожидание сети' : 'Восстанавливается'), findsOneWidget);
+        expect(find.text('Туннель включён'), findsNothing);
+        expect(find.text('Статус: отключено'), findsNothing);
+        expect(find.text('Отключить'), findsOneWidget);
+        expect(tester.widget<InkWell>(find.byKey(const Key('pushok_connect_button'))).onTap, isNotNull);
+        final reads = bridge.named('vpnStatus').length;
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pumpAndSettle();
+        expect(bridge.named('vpnStatus').length, greaterThan(reads));
+        await _openServers(tester);
+        expect(tester.widget<OutlinedButton>(find.byKey(const Key('add_wireguard_profile'))).onPressed, isNull);
+        expect(tester.widget<OutlinedButton>(find.byKey(const Key('add_subscription'))).onPressed, isNull);
+        await _openRoutes(tester);
+        expect(tester.widget<SwitchListTile>(find.byKey(const Key('route_toggle_example.browser'))).onChanged, isNull);
+        expect(bridge.named('connectWireGuard'), isEmpty);
+        expect(bridge.named('loadWireGuardProfile'), isEmpty);
+        expect(bridge.named('disconnectWireGuard'), isEmpty);
+        expect(bridge.named('setBypass'), isEmpty);
+        expect(tester.takeException(), isNull);
+      });
+    });
+
+    testWidgets('Stop during VLESS $phase rejects a queued old status and never restarts', (tester) async {
+      bridge.savedProfile = _vlessProfile;
+      bridge.statusProtocol = 'vless';
+      bridge.statusState = phase;
+      bridge.statusConnected = false;
+      bridge.statusOwnsTunnel = true;
+      await _withApp(tester, () async {
+        final pending = Completer<Object?>();
+        bridge.statusGate = pending;
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pump();
+        final stop = tester.widget<InkWell>(find.byKey(const Key('pushok_connect_button'))).onTap!;
+        bridge.disconnectGate = Completer<void>();
+        stop();
+        stop();
+        await tester.pump();
+        expect(bridge.named('disconnectWireGuard'), hasLength(1));
+        expect(tester.widget<InkWell>(find.byKey(const Key('pushok_connect_button'))).onTap, isNull);
+        bridge.statusState = 'disconnected';
+        bridge.statusOwnsTunnel = false;
+        bridge.statusGate = null;
+        bridge.disconnectGate!.complete();
+        await tester.pump();
+        pending.complete(phase == 'waiting_network'
+            ? {..._snapshot(), 'protocol': 'vless', 'ownsTunnel': true}
+            : _recoverySnapshot(phase));
+        await tester.pumpAndSettle();
+        expect(find.text('Статус: отключено'), findsOneWidget);
+        expect(find.text('Туннель включён'), findsNothing);
+        expect(find.text('Восстанавливается'), findsNothing);
+        expect(find.text('Ожидание сети'), findsNothing);
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pumpAndSettle();
+        expect(bridge.named('disconnectWireGuard'), hasLength(1));
+        expect(bridge.named('connectWireGuard'), isEmpty);
+        expect(bridge.named('loadWireGuardProfile'), isEmpty);
+        expect(tester.takeException(), isNull);
+      });
+    });
+  }
+
+  testWidgets('Unknown read during VLESS waiting retains Stop and a later observation recovers without Connect', (tester) async {
+    bridge.statusProtocol = 'vless';
+    bridge.statusState = 'waiting_network';
+    bridge.statusConnected = false;
+    bridge.statusOwnsTunnel = true;
+    await _withApp(tester, () async {
+      bridge.statusError = PlatformException(code: 'XRAY_STATE_UNAVAILABLE', message: 'PRIVATE_NATIVE_DETAIL');
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(find.text('Статус уточняется'), findsOneWidget);
+      expect(find.text('Отключить'), findsOneWidget);
+      expect(tester.widget<InkWell>(find.byKey(const Key('pushok_connect_button'))).onTap, isNotNull);
+      expect(find.text('Статус: отключено'), findsNothing);
+      expect(find.textContaining('PRIVATE_NATIVE_DETAIL'), findsNothing);
+      bridge.statusError = null;
+      bridge.statusState = 'connected';
+      bridge.statusConnected = true;
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(find.text('Туннель включён'), findsOneWidget);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
     });
   });
 

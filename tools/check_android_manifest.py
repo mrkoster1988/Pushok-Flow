@@ -114,7 +114,7 @@ def validate(path: Path) -> None:
         raise ValueError('Xray and WireGuard Go runtimes must use separate processes')
     if xray[0].get(ANDROID + 'foregroundServiceType') != 'specialUse' or not {
             'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
-            'android.permission.ACCESS_NETWORK_STATE'} <= permissions:
+            'android.permission.ACCESS_NETWORK_STATE', 'android.permission.CHANGE_NETWORK_STATE'} <= permissions:
         raise ValueError('Xray foreground service or network permission missing')
     if not any(item.get(ANDROID + 'name') == 'android.net.VpnService' for item in xray[0].findall('intent-filter/action')):
         raise ValueError('Xray VPN service action missing')

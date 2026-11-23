@@ -29,6 +29,8 @@ class MainActivity : FlutterActivity() {
         }
         @Volatile var backend: GoBackend? = null
         @Volatile var xray: XrayTunnelClient? = null
+        // Accessed on connection.io. Kept separate from the session ownership latch.
+        var xrayStatus: XrayTunnelStatus? = null
         var protocol = TunnelConnectionSession.Protocol.WIREGUARD
         val operationInProgress = ProfileOperationGate()
         val routeSettingsState = RouteSettingsState()
@@ -42,17 +44,19 @@ class MainActivity : FlutterActivity() {
     private val xray: XrayTunnelClient
         get() = Session.xray ?: XrayTunnelClient(applicationContext).also { Session.xray = it }
 
-    private fun readTunnelState(): Boolean {
+    /** Control-plane occupancy, including a VLESS connection waiting for a network. */
+    private fun readTunnelOccupied(): Boolean {
         try {
             val wireGuardUp = backend?.getState(tunnel) == Tunnel.State.UP
-            val xrayUp = xray.isUp()
+            val xrayState = xray.status().also { Session.xrayStatus = it }
             // Ambiguous service state must not authorize profile/route mutations or an automatic APK install.
-            if (wireGuardUp && xrayUp) throw IllegalStateException("VPN_STATE_UNAVAILABLE")
+            if (wireGuardUp && xrayState.ownsTunnel) throw IllegalStateException("VPN_STATE_UNAVAILABLE")
             if (wireGuardUp) Session.protocol = TunnelConnectionSession.Protocol.WIREGUARD
-            if (xrayUp) Session.protocol = TunnelConnectionSession.Protocol.VLESS
-            val active = wireGuardUp || xrayUp
-            appUpdates.observeTunnel(active)
-            return active
+            if (xrayState.ownsTunnel) Session.protocol = TunnelConnectionSession.Protocol.VLESS
+            if (!xrayState.known) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
+            val occupied = wireGuardUp || xrayState.ownsTunnel
+            appUpdates.observeTunnel(occupied)
+            return occupied
         } catch (error: Exception) {
             appUpdates.observeTunnel(true)
             throw error
@@ -73,7 +77,7 @@ class MainActivity : FlutterActivity() {
         try { if (xray.stop()) failed = true }
         catch (_: Exception) { failed = true }
         if (failed) throw IllegalStateException("TUNNEL_STOP_FAILED")
-        return readTunnelState()
+        return readTunnelOccupied()
     }
 
     private fun validateConnectionProfile(raw: String): ConnectionProfile.Kind {
@@ -186,7 +190,7 @@ class MainActivity : FlutterActivity() {
                 } else null
                 val active = Session.connection.connect(
                     protocol = requestedProtocol,
-                    readState = ::readTunnelState,
+                    readState = ::readTunnelOccupied,
                     activate = {
                         // Never reconnect an already-UP tunnel or diagnose its
                         // old choices as missing before the session state check.
@@ -223,7 +227,7 @@ class MainActivity : FlutterActivity() {
                         "Не удалось установить туннель. Проверьте параметры сервера.", null) }
                 }
             } catch (error: Exception) {
-                Session.connection.failedConnect(requestedProtocol, ::readTunnelState)
+                Session.connection.failedConnect(requestedProtocol, ::readTunnelOccupied)
                 // Never send raw exceptions: they might include the private key or full configuration.
                 runOnUiThread { result.error(profileErrorCode(error, requestedProtocol.connectError),
                     "Не удалось установить туннель. Проверьте параметры сервера.", null) }
@@ -306,9 +310,9 @@ class MainActivity : FlutterActivity() {
         io.execute {
             val failure = try {
                 // A failed state read is not proof that the tunnel is down.
-                val state = Session.connection.observe(::readTunnelState)
+                val state = Session.connection.observe(::readTunnelOccupied)
                 if (!state.known) throw ProfileCatalogFailure("VPN_STATE_UNAVAILABLE")
-                if (state.connected) throw ProfileCatalogFailure("VPN_ACTIVE")
+                if (state.occupied) throw ProfileCatalogFailure("VPN_ACTIVE")
                 action()
                 null
             } catch (error: Exception) {
@@ -329,9 +333,9 @@ class MainActivity : FlutterActivity() {
         if (token == null) { completed("VPN_BUSY"); return }
         io.execute {
             val failure = try {
-                val state = Session.connection.observe(::readTunnelState)
+                val state = Session.connection.observe(::readTunnelOccupied)
                 if (!state.known) throw ProfileCatalogFailure("VPN_STATE_UNAVAILABLE")
-                if (state.connected) throw ProfileCatalogFailure("VPN_ACTIVE")
+                if (state.occupied) throw ProfileCatalogFailure("VPN_ACTIVE")
                 action()
                 null
             } catch (error: Exception) {
@@ -357,9 +361,9 @@ class MainActivity : FlutterActivity() {
         }
         io.execute {
             val failure = try {
-                val state = Session.connection.observe(::readTunnelState)
+                val state = Session.connection.observe(::readTunnelOccupied)
                 if (!state.known) throw RouteSettingsFailure("VPN_STATE_UNAVAILABLE")
-                if (state.connected) throw RouteSettingsFailure("VPN_ACTIVE")
+                if (state.occupied) throw RouteSettingsFailure("VPN_ACTIVE")
                 routeStore.replace(request)
                 null
             } catch (error: Exception) {
@@ -395,12 +399,12 @@ class MainActivity : FlutterActivity() {
                     }
                     "vpnStatus" -> io.execute {
                         val currentBackend = backend
-                        val initial = Session.connection.observe(::readTunnelState)
+                        val initial = Session.connection.observe(::readTunnelOccupied)
                         var stateKnown = initial.known
-                        var active = initial.connected
+                        var occupied = initial.occupied
                         var samples: List<TunnelHealth.PeerSample>? = null
                         var sampledSessionStartMs: Long? = null
-                        if (stateKnown && active && !Session.operationInProgress.get() &&
+                        if (stateKnown && occupied && !Session.operationInProgress.get() &&
                             Session.protocol == TunnelConnectionSession.Protocol.WIREGUARD) {
                             sampledSessionStartMs = Session.connection.connectedSinceElapsedMs
                             samples = try {
@@ -419,8 +423,8 @@ class MainActivity : FlutterActivity() {
                             }
                             // A service can stop during the native statistics read. Discard its
                             // metrics if the tunnel state changed before the snapshot is returned.
-                            val afterStatistics = Session.connection.observe(::readTunnelState)
-                            active = afterStatistics.connected
+                            val afterStatistics = Session.connection.observe(::readTunnelOccupied)
+                            occupied = afterStatistics.occupied
                             stateKnown = afterStatistics.known
                             if (!stateKnown) samples = null
                         }
@@ -428,11 +432,17 @@ class MainActivity : FlutterActivity() {
                         // Every Activity uses the same queue. An external service stop
                         // can still invalidate a statistics sample before its second read.
                         if (sampledSessionStartMs != currentSessionStartMs) samples = null
+                        val isVless = Session.protocol == TunnelConnectionSession.Protocol.VLESS
+                        val xrayState = Session.xrayStatus.takeIf { isVless }
+                        val active = stateKnown && if (isVless) xrayState?.connected == true else occupied
+                        // Unknown observations may retain ownership, but cannot publish actual UP.
+                        occupied = occupied || (!stateKnown && xrayState?.ownsTunnel == true)
                         val status = TunnelHealth.snapshot(active, Session.operationInProgress.get(),
-                            currentSessionStartMs, SystemClock.elapsedRealtime(), lastErrorCode,
+                            currentSessionStartMs, SystemClock.elapsedRealtime(), xrayState?.lastErrorCode ?: lastErrorCode,
                             stateKnown = stateKnown, peerSamples = samples,
                             nowEpochMs = System.currentTimeMillis(),
-                            isVless = Session.protocol == TunnelConnectionSession.Protocol.VLESS)
+                            isVless = isVless, ownsTunnel = occupied,
+                            networkState = xrayState?.state?.wireName)
                         runOnUiThread { result.success(status) }
                     }
                     "listWireGuardProfiles" -> io.execute {
@@ -550,7 +560,7 @@ class MainActivity : FlutterActivity() {
                             try {
                                 Session.connection.disconnect(
                                     protocol = Session.protocol,
-                                    readState = ::readTunnelState,
+                                    readState = ::readTunnelOccupied,
                                     deactivate = ::stopTunnels,
                                 )
                                 runOnUiThread { result.success(mapOf("connected" to false)) }

@@ -24,7 +24,8 @@ fun main() {
     val status = TunnelHealth.snapshot(true, false, 1000L, 10500L, null)
     check(status["state"] == "connected")
     check(status["uptimeSeconds"] == 9L)
-    check(status.keys == setOf("connected", "state", "uptimeSeconds", "lastErrorCode", "statistics", "protocol"))
+    check(status.keys == setOf("connected", "ownsTunnel", "state", "uptimeSeconds", "lastErrorCode", "statistics", "protocol"))
+    check(status["ownsTunnel"] == true)
     check(status["protocol"] == "wireguard")
     check(TunnelHealth.snapshot(false, true, null, 500L, "WG_CONNECT_FAILED")["state"] == "transitioning")
 
@@ -95,5 +96,27 @@ fun main() {
     check(vless["protocol"] == "vless")
     check(vless["connected"] == true && vless["uptimeSeconds"] == 4L)
     unavailable(vless["statistics"] as Map<*, *>)
+    // Physical handover preserves ownership without inventing actual UP or old counters.
+    for (phase in listOf("waiting_network", "reconnecting")) {
+        val recovery = TunnelHealth.snapshot(false, false, 1000L, 5000L, null,
+            isVless = true, ownsTunnel = true, networkState = phase, peerSamples = peers)
+        check(recovery["state"] == phase && recovery["connected"] == false && recovery["ownsTunnel"] == true)
+        check(recovery["uptimeSeconds"] == 0L)
+        unavailable(recovery["statistics"] as Map<*, *>)
+        val stopping = TunnelHealth.snapshot(false, true, 1000L, 5000L, null,
+            isVless = true, ownsTunnel = true, networkState = phase)
+        check(stopping["state"] == "transitioning")
+        unavailable(stopping["statistics"] as Map<*, *>)
+    }
+    val unknownOwner = TunnelHealth.snapshot(false, false, 1000L, 5000L, "XRAY_STATUS_FAILED",
+        stateKnown = false, isVless = true, ownsTunnel = true, networkState = "reconnecting")
+    check(unknownOwner["state"] == "unknown" && unknownOwner["ownsTunnel"] == true)
+    unavailable(unknownOwner["statistics"] as Map<*, *>)
+    for ((isVless, phase) in listOf(true to "connected", false to "waiting_network")) {
+        val contradictory = TunnelHealth.snapshot(false, false, null, 5000L, null,
+            isVless = isVless, ownsTunnel = true, networkState = phase)
+        check(contradictory["state"] == "unknown")
+        unavailable(contradictory["statistics"] as Map<*, *>)
+    }
     println("TunnelHealth executable checks passed")
 }

@@ -6,6 +6,8 @@ enum HandshakeStatus { observed, never, unknown }
 
 enum TunnelProtocol { wireguard, vless, unknown }
 
+enum TunnelRecovery { none, waitingNetwork, reconnecting }
+
 const _maxNativeInteger = 0x7fffffffffffffff;
 // Keep seconds safe for callers that use Dart's microsecond-based Duration.
 const _maxDurationSeconds = _maxNativeInteger ~/ 1000000;
@@ -16,6 +18,7 @@ const _safeErrorCodes = <String>{
   'XRAY_CONNECT_FAILED',
   'XRAY_DISCONNECT_FAILED',
   'XRAY_STATUS_FAILED',
+  'XRAY_STATE_UNAVAILABLE',
   'ROUTES_APPS_UNAVAILABLE',
   'ROUTES_APPS_CHECK_FAILED',
 };
@@ -94,17 +97,21 @@ class TunnelDiagnostics {
   const TunnelDiagnostics({
     required this.isKnown,
     required this.connected,
+    bool? ownsTunnel,
     this.protocol = TunnelProtocol.wireguard,
     this.transitioning = false,
+    this.recovery = TunnelRecovery.none,
     this.uptimeSeconds = 0,
     this.lastErrorCode,
     this.statistics = const TunnelStatistics.unavailable(),
-  });
+  }) : ownsTunnel = ownsTunnel ?? connected;
 
-  const TunnelDiagnostics.unavailable({this.connected = false})
+  const TunnelDiagnostics.unavailable({this.connected = false, bool? ownsTunnel})
       : isKnown = false,
+        ownsTunnel = ownsTunnel ?? connected,
         protocol = TunnelProtocol.unknown,
         transitioning = false,
+        recovery = TunnelRecovery.none,
         uptimeSeconds = 0,
         lastErrorCode = null,
         statistics = const TunnelStatistics.unavailable();
@@ -113,8 +120,13 @@ class TunnelDiagnostics {
   /// retained last-known state used to keep a disconnect action available.
   final bool isKnown;
   final bool connected;
+  /// Session/resource ownership also survives a temporary loss of the physical network.
+  /// Only an explicit Stop or a confirmed release permits another connection or edits.
+  final bool ownsTunnel;
   final TunnelProtocol protocol;
   final bool transitioning;
+  final TunnelRecovery recovery;
+  bool get recovering => recovery != TunnelRecovery.none;
   final int uptimeSeconds;
   final String? lastErrorCode;
   final TunnelStatistics statistics;
@@ -122,6 +134,7 @@ class TunnelDiagnostics {
   factory TunnelDiagnostics.fromPlatform(Object? value) {
     if (value is! Map) return const TunnelDiagnostics.unavailable();
     final active = value['connected'];
+    final owned = value.containsKey('ownsTunnel') ? value['ownsTunnel'] : active;
     final state = value['state'];
     final error = _safeErrorCode(value['lastErrorCode']);
     // Payloads from the original bridge do not include a protocol. An explicit
@@ -137,26 +150,45 @@ class TunnelDiagnostics {
     TunnelDiagnostics unknown() => TunnelDiagnostics(
       isKnown: false,
       connected: active is bool && active,
+      ownsTunnel: owned == true || active == true,
       protocol: protocol,
       lastErrorCode: error,
     );
 
-    if (active is! bool || state is! String || protocol == TunnelProtocol.unknown) {
+    if (active is! bool || owned is! bool || state is! String ||
+        protocol == TunnelProtocol.unknown || (active && !owned)) {
       return unknown();
+    }
+    if (state == 'waiting_network' || state == 'reconnecting') {
+      // Recovery requires explicit ownership from the new bridge. It cannot be
+      // inferred from an old Boolean or attached to an unrelated protocol.
+      if (!value.containsKey('ownsTunnel') || active || !owned ||
+          protocol != TunnelProtocol.vless) return unknown();
+      return TunnelDiagnostics(
+        isKnown: true,
+        connected: false,
+        ownsTunnel: true,
+        protocol: protocol,
+        recovery: state == 'waiting_network'
+            ? TunnelRecovery.waitingNetwork : TunnelRecovery.reconnecting,
+        lastErrorCode: error,
+      );
     }
     if (state == 'transitioning') {
       return TunnelDiagnostics(
         isKnown: true,
         connected: active,
+        ownsTunnel: owned,
         protocol: protocol,
         transitioning: true,
         lastErrorCode: error,
       );
     }
-    if (state == 'disconnected' && !active) {
+    if (state == 'disconnected' && !active && !owned) {
       return TunnelDiagnostics(
         isKnown: true,
         connected: false,
+        ownsTunnel: false,
         protocol: protocol,
         lastErrorCode: error,
         statistics: const TunnelStatistics.inactive(),
@@ -170,6 +202,7 @@ class TunnelDiagnostics {
     return TunnelDiagnostics(
       isKnown: true,
       connected: true,
+      ownsTunnel: true,
       protocol: protocol,
       uptimeSeconds: uptime,
       lastErrorCode: error,

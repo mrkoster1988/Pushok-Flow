@@ -28,16 +28,33 @@ class XrayTunnelClient(context: Context) {
             putString("config", XrayConfig.build(profile))
             putStringArrayList("exclusions", ArrayList(exclusions.sorted()))
         }
-        return exchange(XrayIpc.START, arguments, create = true)
+        return exchange(XrayIpc.START, arguments, create = true).getBoolean("connected")
     }
 
     /** Returns the resulting connected state (false after a successful disconnect). */
-    @Synchronized fun stop(): Boolean = exchange(XrayIpc.STOP, Bundle(), create = false)
+    @Synchronized fun stop(): Boolean = exchange(XrayIpc.STOP, Bundle(), create = false).getBoolean("connected")
 
     /** Passive binding discovers a surviving service or briefly creates an idle Java service. */
-    @Synchronized fun isUp(): Boolean = exchange(XrayIpc.STATUS, Bundle(), create = false)
+    @Synchronized internal fun status(): XrayTunnelStatus {
+        val answer = exchange(XrayIpc.STATUS, Bundle(), create = false)
+        @Suppress("DEPRECATION")
+        val fields = answer.keySet().associateWith { answer.get(it) }
+        return XrayTunnelStatus.fromWire(fields)
+    }
 
-    private fun exchange(command: Int, arguments: Bundle, create: Boolean): Boolean {
+    /** Actual local readiness. A waiting connection can still own VPN resources. */
+    @Synchronized fun isUp(): Boolean = status().let {
+        if (!it.known) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
+        it.connected
+    }
+
+    /** Use for exclusion, profile and installation guards, never for an UP indicator. */
+    @Synchronized fun isOccupied(): Boolean = status().let {
+        if (!it.known) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
+        it.ownsTunnel
+    }
+
+    private fun exchange(command: Int, arguments: Bundle, create: Boolean): Bundle {
         check(Looper.myLooper() != Looper.getMainLooper()) { "Tunnel IPC must run on the connection queue" }
         val id = sequence.incrementAndGet()
         val timeout = if (command == XrayIpc.START) XrayIpc.START_TIMEOUT_MS else XrayIpc.QUERY_TIMEOUT_MS
@@ -103,8 +120,10 @@ class XrayTunnelClient(context: Context) {
             if (failure != null) throw XrayTunnelFailure(failure!!)
             val answer = response ?: throw XrayTunnelFailure("XRAY_SERVICE_UNAVAILABLE")
             answer.getString("error")?.let { throw XrayTunnelFailure(it) }
-            if (!answer.containsKey("connected")) throw XrayTunnelFailure("XRAY_SERVICE_UNAVAILABLE")
-            return answer.getBoolean("connected")
+            @Suppress("DEPRECATION")
+            val connected = answer.get("connected")
+            if (connected !is Boolean) throw XrayTunnelFailure("XRAY_SERVICE_UNAVAILABLE")
+            return answer
         } catch (error: Exception) {
             // A START which times out must never activate later without an owner.
             if (command == XrayIpc.START) {

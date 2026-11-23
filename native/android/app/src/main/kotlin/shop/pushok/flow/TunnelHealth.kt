@@ -17,20 +17,29 @@ object TunnelHealth {
     fun snapshot(connected: Boolean, busy: Boolean, startedAtMs: Long?, nowMs: Long,
                  lastErrorCode: String?, stateKnown: Boolean = true,
                  peerSamples: List<PeerSample>? = null,
-                 nowEpochMs: Long = 0L, isVless: Boolean = false): Map<String, Any?> = mapOf(
+                 nowEpochMs: Long = 0L, isVless: Boolean = false,
+                 ownsTunnel: Boolean = connected, networkState: String? = null): Map<String, Any?> {
+        val recovering = isVless && stateKnown && ownsTunnel && !connected &&
+            networkState in setOf("waiting_network", "reconnecting")
+        return mapOf(
         "protocol" to if (isVless) "vless" else "wireguard",
         "connected" to connected,
+        "ownsTunnel" to ownsTunnel,
         "state" to when {
             busy -> "transitioning"
             !stateKnown -> "unknown"
+            recovering -> networkState
             connected -> "connected"
+            ownsTunnel -> "unknown"
             else -> "disconnected"
         },
         "uptimeSeconds" to uptimeSeconds(connected, startedAtMs, nowMs),
         "lastErrorCode" to lastErrorCode,
         // WireGuard handshake samples must never be shown for the Xray backend.
-        "statistics" to statistics(connected, busy, stateKnown, if (isVless) null else peerSamples, nowEpochMs)
-    )
+        "statistics" to statistics(connected, busy || recovering, stateKnown && (!ownsTunnel || connected || recovering),
+            if (isVless) null else peerSamples, nowEpochMs)
+        )
+    }
 
     private fun unavailableStatistics(status: String): Map<String, Any?> = mapOf(
         "status" to status,

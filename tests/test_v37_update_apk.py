@@ -13,6 +13,7 @@ SPEC.loader.exec_module(VERIFY)
 
 PERMISSIONS = VERIFY.UPDATE_PERMISSIONS | {
     'android.permission.INTERNET', 'android.permission.CAMERA',
+    'android.permission.CHANGE_NETWORK_STATE',
     'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
 }
 

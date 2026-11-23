@@ -24,7 +24,7 @@ class TunnelDiagnosticsCard extends StatelessWidget {
 
   bool get _current => !stale && diagnostics.isKnown;
   bool get _active =>
-      _current && diagnostics.connected && !diagnostics.transitioning;
+      _current && diagnostics.connected && !diagnostics.transitioning && !diagnostics.recovering;
   bool get _statisticsAvailable => _active &&
       diagnostics.statistics.status == TunnelStatisticsStatus.available;
   bool get _wireGuard => diagnostics.protocol == TunnelProtocol.wireguard;
@@ -36,6 +36,10 @@ class TunnelDiagnosticsCard extends StatelessWidget {
           : 'Нет свежих данных. Обновите диагностику.';
     }
     if (diagnostics.transitioning) return 'Состояние туннеля изменяется…';
+    if (diagnostics.recovery == TunnelRecovery.waitingNetwork) {
+      return 'Нет сети · подключение сохранено';
+    }
+    if (diagnostics.recovery == TunnelRecovery.reconnecting) return 'Восстанавливается';
     if (!diagnostics.connected) return 'Туннель выключен.';
     if (!_statisticsAvailable) {
       return 'Туннель включён. Статистика пока недоступна.';
@@ -44,7 +48,7 @@ class TunnelDiagnosticsCard extends StatelessWidget {
   }
 
   String get _handshake {
-    if (_current && !diagnostics.connected && !diagnostics.transitioning) {
+    if (_current && !diagnostics.ownsTunnel && !diagnostics.transitioning) {
       return 'Нет активного туннеля';
     }
     if (!_statisticsAvailable) return 'Данные недоступны';
@@ -160,7 +164,7 @@ class TunnelDiagnosticsCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(_summary, key: const Key('tunnel_diagnostics_summary'),
             style: const TextStyle(color: PushokPalette.muted)),
-          if (!_current) ...[
+          if (!_current || diagnostics.recovering) ...[
             const SizedBox(height: 12),
             OutlinedButton.icon(
               key: const Key('recover_tunnel_disconnect'),

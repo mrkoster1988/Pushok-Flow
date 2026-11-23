@@ -80,7 +80,7 @@ fun main() {
                 true
             }
         }
-        check(activations == 0 && !session.connected && session.connectedSinceElapsedMs == null)
+        check(activations == 0 && !session.occupied && session.connectedSinceElapsedMs == null)
         check(session.lastErrorCode == code)
         check(store.read() == selected && storage.writes == 0)
         // Restoring availability permits a deliberate retry; no auto-retry or
@@ -119,9 +119,9 @@ fun main() {
                 error("Unknown state must not activate")
             }
         }
-        check(queriesForConnection == queried && session.connected)
+        check(queriesForConnection == queried && session.occupied)
         session.disconnect({ error("PRIVATE_STATE_ERROR") }) { actual = false; false }
-        check(!actual && !session.connected && queriesForConnection == queried)
+        check(!actual && !session.occupied && queriesForConnection == queried)
     }
 
     // The backend can fail with the same fixed diagnosis after preflight (for
@@ -135,7 +135,7 @@ fun main() {
                 throw TunnelConnectionFailure("ROUTES_APPS_UNAVAILABLE")
             }
         }
-        check(session.connected && session.connectedSinceElapsedMs == null)
+        check(session.occupied && session.connectedSinceElapsedMs == null)
         check(session.lastErrorCode == "ROUTES_APPS_UNAVAILABLE")
     }
     withSession { session ->

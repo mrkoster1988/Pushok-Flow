@@ -20,6 +20,7 @@ AUTO_UPDATE_VERSION_CODE = 37
 COMPACT_NATIVE_VERSION_CODE = 39
 ABI_VARIANT_VERSION_CODE = 40
 FOREGROUND_DOWNLOAD_VERSION_CODE = 44
+XRAY_NETWORK_HANDOVER_VERSION_CODE = 47
 NATIVE_ABIS = ('arm64-v8a', 'armeabi-v7a', 'x86_64')
 REQUIRED_NATIVE_LIBRARIES = (
     'libflutter.so', 'libapp.so', 'libgojni.so',
@@ -231,6 +232,8 @@ def check_apk(path: Path, aapt: str | None = None, expected_abi: str | None = No
         print('APK private QR scanner, camera permission and optional hardware checks passed')
     if version_code >= XRAY_VERSION_CODE:
         check_xray_manifest(manifest.stdout, declared_permissions)
+        if version_code >= XRAY_NETWORK_HANDOVER_VERSION_CODE:
+            check_xray_network_binding_permission(manifest.stdout, declared_permissions)
         if expected_abi is None:
             check_xray_libraries(path)
         else:
@@ -372,6 +375,16 @@ def check_xray_manifest(tree: str, permissions: set[str]) -> None:
     if not {'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
             'android.permission.ACCESS_NETWORK_STATE'} <= permissions:
         raise ValueError('Xray foreground or network permissions missing')
+
+
+def check_xray_network_binding_permission(tree: str, permissions: set[str]) -> None:
+    name = 'android.permission.CHANGE_NETWORK_STATE'
+    if name not in permissions:
+        raise ValueError('Xray physical network binding permission missing')
+    declarations = [attributes for attributes in element_attributes(tree, 'uses-permission')
+                    if string_attribute(attributes, 'name') == name]
+    if len(declarations) != 1 or has_attribute(declarations[0], 'maxSdkVersion'):
+        raise ValueError('Xray network binding permission must be declared once without maxSdkVersion')
 
 
 def check_xray_libraries(path: Path, expected_abi: str | None = None) -> None:

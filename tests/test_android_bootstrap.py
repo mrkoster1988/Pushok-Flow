@@ -155,6 +155,7 @@ dependencies {
         self.assertEqual(len(self.launcher_queries(manifest)), 1)
         self.assertEqual(sorted(p.get(ANDROID + "name") for p in manifest.findall("uses-permission")),
                          ["android.permission.ACCESS_NETWORK_STATE", "android.permission.CAMERA",
+                          "android.permission.CHANGE_NETWORK_STATE",
                           "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                           "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
                           "android.permission.INTERNET", "android.permission.POST_NOTIFICATIONS",
@@ -318,6 +319,15 @@ dependencies {
                 with self.assertRaisesRegex(ValueError, 'Background update'):
                     MANIFEST_CHECK.validate(self.manifest)
 
+    def test_source_gate_requires_physical_network_binding_permission(self):
+        self.write_manifest()
+        manifest = self.patch()
+        manifest.remove(next(item for item in manifest.findall('uses-permission')
+                             if item.get(ANDROID + 'name') == 'android.permission.CHANGE_NETWORK_STATE'))
+        ET.ElementTree(manifest).write(self.manifest)
+        with self.assertRaisesRegex(ValueError, 'Xray foreground service or network permission'):
+            MANIFEST_CHECK.validate(self.manifest)
+
     def test_source_gate_rejects_exposed_or_wrong_update_provider(self):
         for attribute, value in (('exported', 'true'), ('grantUriPermissions', 'false'),
                                  ('authorities', 'example.updates')):
@@ -468,7 +478,7 @@ class BootstrapScriptTests(unittest.TestCase):
 
         self.native_names = (
             "MainActivity.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
-            "XrayConfig.kt", "XrayBootstrapDns.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
+            "XrayConfig.kt", "XrayNetworkPolicy.kt", "XrayNetworkMonitor.kt", "XrayDnsWire.kt", "XrayDnsBridge.kt", "XrayTunnelStatus.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",
             "UpdateAutomationPolicy.kt",

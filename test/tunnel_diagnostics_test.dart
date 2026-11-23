@@ -33,6 +33,49 @@ void _expectNoMeasurements(TunnelDiagnostics value) {
 }
 
 void main() {
+  test('VLESS recovery preserves ownership without a local-UP or old measurement claim', () {
+    for (final phase in ['waiting_network', 'reconnecting']) {
+      final value = TunnelDiagnostics.fromPlatform({
+        ..._status(), 'protocol': 'vless', 'connected': false,
+        'ownsTunnel': true, 'state': phase,
+      });
+      expect(value.isKnown, isTrue);
+      expect(value.connected, isFalse);
+      expect(value.ownsTunnel, isTrue);
+      expect(value.transitioning, isFalse);
+      expect(value.recovery, phase == 'waiting_network'
+          ? TunnelRecovery.waitingNetwork : TunnelRecovery.reconnecting);
+      _expectNoMeasurements(value);
+    }
+  });
+
+  test('Contradictory ownership and foreign recovery phases fail closed', () {
+    for (final payload in [
+      {..._status(), 'ownsTunnel': false},
+      {..._status(), 'ownsTunnel': 'true'},
+      {..._status(), 'ownsTunnel': null},
+      {..._status(), 'ownsTunnel': true, 'connected': false, 'state': 'disconnected'},
+      for (final phase in ['waiting_network', 'reconnecting']) ...[
+        {..._status(), 'protocol': 'vless', 'ownsTunnel': true, 'state': phase},
+        {..._status(), 'protocol': 'vless', 'connected': false, 'ownsTunnel': false, 'state': phase},
+        {..._status(), 'protocol': 'vless', 'connected': false, 'state': phase},
+        {..._status(), 'protocol': 'wireguard', 'connected': false, 'ownsTunnel': true, 'state': phase},
+      ],
+    ]) {
+      final value = TunnelDiagnostics.fromPlatform(payload);
+      expect(value.isKnown, isFalse, reason: '$payload');
+      expect(value.recovering, isFalse);
+      _expectNoMeasurements(value);
+    }
+    final unknown = TunnelDiagnostics.fromPlatform({
+      ..._status(), 'protocol': 'vless', 'connected': false,
+      'ownsTunnel': true, 'state': 'unknown',
+    });
+    expect(unknown.isKnown, isFalse);
+    expect(unknown.ownsTunnel, isTrue);
+    expect(unknown.connected, isFalse);
+  });
+
   test('Protocol decoding keeps VLESS separate from legacy WireGuard and discards alien handshakes', () {
     expect(TunnelDiagnostics.fromPlatform(_status()).protocol, TunnelProtocol.wireguard);
     final vless = TunnelDiagnostics.fromPlatform({..._status(), 'protocol': 'vless'});

@@ -105,6 +105,7 @@ def patch_manifest(path: Path) -> None:
     for permission_name in ("android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
                             "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION",
                             "android.permission.CAMERA", "android.permission.ACCESS_NETWORK_STATE",
+                            "android.permission.CHANGE_NETWORK_STATE",
                             "android.permission.FOREGROUND_SERVICE",
                             "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                             "android.permission.POST_NOTIFICATIONS",

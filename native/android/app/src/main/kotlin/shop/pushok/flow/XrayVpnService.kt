@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -23,7 +22,10 @@ import android.os.SystemClock
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONObject
+import java.net.InetAddress
 import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Must run in :xray. A second independently built Go runtime cannot share WireGuard's process. */
@@ -33,6 +35,10 @@ class XrayVpnService : VpnService() {
     private val worker get() = ProcessCore.worker
     private val lease = XrayRequestLease { SystemClock.elapsedRealtime() }
     private val destroyed = AtomicBoolean()
+    private val networks = XrayNetworkState<XrayNetworkMonitor.Snapshot>()
+    private class Desired(val epoch: Long, val hostname: String)
+    @Volatile private var desired: Desired? = null
+    private var networkMonitor: XrayNetworkMonitor? = null
     private val descriptorLock = Any()
     private var tun: ParcelFileDescriptor? = null
     @Volatile private var coreLoaded = false
@@ -50,7 +56,7 @@ class XrayVpnService : VpnService() {
         if (intent?.action == XrayIpc.STOP_ACTION) {
             terminate()
         } else if (intent?.action == XrayIpc.PREPARE && !destroyed.get()) {
-            try { showNotification(false) } catch (_: Exception) { terminate() }
+            try { showNotification("starting") } catch (_: Exception) { terminate() }
             // An abandoned bind must not leave an idle foreground service behind.
             val observed = lease.current()
             main.postDelayed({ if (!connected && startingId == 0 && lease.owns(observed)) terminate() },
@@ -70,10 +76,23 @@ class XrayVpnService : VpnService() {
         when (message.what) {
             XrayIpc.CANCEL -> if (id == startingId) terminate()
             XrayIpc.START -> {
-                if (stopping) { reply(reply, id, false, "XRAY_SERVICE_UNAVAILABLE"); return true }
+                if (stopping || startingId != 0 || desired != null || nativeActive) {
+                    reply(reply, id, false, "XRAY_SERVICE_UNAVAILABLE")
+                    return true
+                }
                 val data = Bundle(message.data)
                 val generation = lease.invalidate()
                 startingId = id
+                try {
+                    beginNetworks(data)
+                } catch (_: Exception) {
+                    clearNetworks()
+                    startingId = 0
+                    data.clear()
+                    reply(reply, id, false, "XRAY_CONNECT_FAILED")
+                    finishService()
+                    return true
+                }
                 val remaining = (deadline - SystemClock.elapsedRealtime()).coerceIn(0, XrayIpc.START_TIMEOUT_MS)
                 // Closing the application's FD alone is insufficient: core owns a duplicate.
                 // Kill ONLY the isolated service process if native startup cannot be cancelled.
@@ -108,14 +127,14 @@ class XrayVpnService : VpnService() {
                         lease.deliver(
                             completion,
                             available = { canDeliver(completion) },
-                            onUp = { try { showNotification(true) } catch (_: Exception) { terminate() } },
+                            onUp = { try { showNotification(localStatus().state) } catch (_: Exception) { terminate() } },
                             reply = { up, error ->
                                 // Keep the startup watchdog armed until delivery. An old
                                 // command (including a reused IPC id) cannot clear a new one.
                                 if (lease.owns(generation) && startingId == id) startingId = 0
                                 reply(reply, id, up, error)
                             },
-                            onDown = { stopping = true; finishService() },
+                            onDown = { stopping = true; clearNetworks(); finishService() },
                             onExpired = ::terminate,
                         )
                     }
@@ -125,6 +144,7 @@ class XrayVpnService : VpnService() {
                 stopping = true
                 lease.invalidate()
                 startingId = 0
+                clearNetworks()
                 armNativeShutdownWatchdog()
                 worker.execute {
                     val owner = ProcessCore.owner
@@ -136,6 +156,15 @@ class XrayVpnService : VpnService() {
                 // Capture at receipt: an old queued STATUS must not adopt the
                 // generation of a START that arrives before its worker runs.
                 val generation = lease.current()
+                val observed = localStatus()
+                // Neither a native call nor a ProfileOperationGate is needed to
+                // say that this service still owns a waiting connection. STOP
+                // remains usable while startup/native work occupies the worker.
+                if (!observed.needsNativeProbe) {
+                    val failure = if (SystemClock.elapsedRealtime() >= deadline) "XRAY_TIMEOUT" else null
+                    replyStatus(reply, id, observed, failure)
+                    return true
+                }
                 worker.execute {
                     var up = false
                     var error: String? = null
@@ -156,8 +185,15 @@ class XrayVpnService : VpnService() {
                         lease.deliver(
                             completion,
                             available = { canDeliver(completion) },
-                            reply = { active, failure -> reply(reply, id, active, failure) },
-                            onDown = { if (completion.error == null && startingId == 0) finishService() },
+                            reply = { _, failure -> replyStatus(reply, id, localStatus(), failure) },
+                            onDown = {
+                                if (completion.error == null && startingId == 0) {
+                                    // This is a confirmed native DOWN, never the
+                                    // known waiting/reconnecting fast path.
+                                    clearNetworks()
+                                    finishService()
+                                }
+                            },
                         )
                     }
                 }
@@ -173,7 +209,7 @@ class XrayVpnService : VpnService() {
 
     private fun canDeliver(completion: XrayRequestLease.Completion): Boolean =
         !destroyed.get() && (!completion.connected ||
-            (!stopping && connected && nativeActive && ProcessCore.owner === this))
+            (!stopping && desired != null && connected && nativeActive && ProcessCore.owner === this))
 
     private fun startCore(data: Bundle, generation: Long, deadline: Long) {
         if (ProcessCore.owner != null && ProcessCore.owner !== this) throw XrayTunnelFailure("XRAY_SERVICE_UNAVAILABLE")
@@ -183,7 +219,6 @@ class XrayVpnService : VpnService() {
             RouteSettingsStore.validatePackages(data.getStringArrayList("exclusions") ?: arrayListOf<String>(), "INVALID_PACKAGES")
         } catch (_: RouteSettingsFailure) { throw XrayTunnelFailure("INVALID_PACKAGES") }
         if (prepare(this) != null) throw XrayTunnelFailure("VPN_DENIED")
-        val resolver = bootstrapDns()
         val builder = Builder().setSession("Pushok Flow").setMtu(XrayConfig.MTU).setBlocking(false)
             .addAddress(XrayConfig.IPV4, 30).addAddress(XrayConfig.IPV6, 126)
             .addRoute("0.0.0.0", 0).addRoute("::", 0)
@@ -191,6 +226,7 @@ class XrayVpnService : VpnService() {
         // Do not exclude the Flow UID: only protected core/bootstrap sockets bypass the tunnel.
         for (pkg in exclusions.distinct()) builder.addDisallowedApplication(pkg)
         if (Build.VERSION.SDK_INT >= 29) builder.setMetered(false)
+        builder.setUnderlyingNetworks(networks.view().selection?.let { arrayOf(it.target.network) } ?: emptyArray())
         requireCurrent(generation, deadline)
         val descriptor = builder.establish() ?: throw XrayTunnelFailure("VPN_DENIED")
         synchronized(descriptorLock) { tun = descriptor }
@@ -199,19 +235,21 @@ class XrayVpnService : VpnService() {
             ProcessCore.owner = this
             nativeActive = true
             requireCurrent(generation, deadline)
+            synchronizeUnderlying(generation, deadline)
             // The core APPENDS controllers. Register once; resolve the current service
             // for every socket so a destroyed service cannot poison a later session.
             if (!ProcessCore.dialerRegistered) {
-                LibXray.registerDialerController(ProcessCore.protector)
+                LibXray.registerDialerController(ProcessCore.outboundController)
                 ProcessCore.dialerRegistered = true
             }
             coreLoaded = true
             if (!ProcessCore.listenerRegistered) {
-                LibXray.registerListenerController(ProcessCore.protector)
+                LibXray.registerListenerController(ProcessCore.localController)
                 ProcessCore.listenerRegistered = true
             }
-            // Endpoint hostname resolution is necessarily a protected bootstrap request.
-            LibXray.setDNS(ProcessCore.protector, resolver)
+            // Process-global resolver pointers are installed only before the
+            // first core. Handover changes the bridge's target, never SetDNS.
+            ProcessCore.ensureDns()
             val config = JSONObject(configText)
                 .put("env", JSONObject().put("xray.tun.fd", descriptor.fd.toString()))
             requireCurrent(generation, deadline)
@@ -225,19 +263,121 @@ class XrayVpnService : VpnService() {
         }
     }
 
-    private fun bootstrapDns(): String {
-        return try {
-            val cm = getSystemService(ConnectivityManager::class.java)
-            val networks = cm.allNetworks.sortedBy { if (it == cm.activeNetwork) 0 else 1 }
-            val server = networks.firstNotNullOfOrNull { network ->
-                val capabilities = cm.getNetworkCapabilities(network)
-                if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
-                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
-                    cm.getLinkProperties(network)?.dnsServers?.firstOrNull()?.hostAddress
-                } else null
+    private fun beginNetworks(data: Bundle) {
+        val text = data.getString("config") ?: throw XrayTunnelFailure("INVALID_VLESS_CONFIG")
+        if (text.length > 131_072) throw XrayTunnelFailure("INVALID_VLESS_CONFIG")
+        // This is private IPC containing XrayConfig's generated single outbound,
+        // not a remotely supplied JSON document. Keep the hostname in memory only.
+        val hostname = JSONObject(text).getJSONArray("outbounds").getJSONObject(0)
+            .getJSONObject("settings").getJSONArray("vnext").getJSONObject(0).getString("address")
+        if (hostname.isBlank() || hostname.length > 253) throw XrayTunnelFailure("INVALID_VLESS_CONFIG")
+        val epoch = networks.begin()
+        desired = Desired(epoch, hostname)
+        val monitor = XrayNetworkMonitor(getSystemService(ConnectivityManager::class.java), main,
+            onChanging = {
+                if (networks.changing(epoch)) {
+                    // An empty list means no usable underlying network. Null
+                    // would instead let Android choose the default (possibly VPN).
+                    if (!publishUnderlying(epoch, null)) networks.fail(epoch)
+                    updateNotification()
+                }
+            },
+            onSelected = { selected ->
+                if (networks.owns(epoch)) {
+                    if (publishUnderlying(epoch, selected)) networks.select(epoch, selected)
+                    else networks.fail(epoch)
+                    updateNotification()
+                }
+            },
+        )
+        networkMonitor = monitor
+        monitor.start()
+    }
+
+    private fun publishUnderlying(epoch: Long, selected: XrayNetworkMonitor.Snapshot?): Boolean =
+        networks.update(epoch) {
+            val established = synchronized(descriptorLock) { tun != null }
+            !established || try {
+                setUnderlyingNetworks(selected?.let { arrayOf(it.network) } ?: emptyArray())
+            } catch (_: Exception) { false }
+        }
+
+    /**
+     * Builder.establish runs on the native worker and can outlive a handover.
+     * Reconcile its initial snapshot on main before Go starts. All later calls
+     * to setUnderlyingNetworks also run there, so an old worker cannot overwrite
+     * the new network after the monitor has published it.
+     */
+    private fun synchronizeUnderlying(generation: Long, deadline: Long) {
+        val done = CountDownLatch(1)
+        var failure: Throwable? = null
+        if (!main.post {
+                try {
+                    requireCurrent(generation, deadline)
+                    val epoch = desired?.epoch ?: throw XrayTunnelFailure("XRAY_TIMEOUT")
+                    if (!publishUnderlying(epoch, networks.view().selection?.target)) {
+                        throw XrayTunnelFailure("XRAY_CONNECT_FAILED")
+                    }
+                    requireCurrent(generation, deadline)
+                } catch (error: Throwable) { failure = error }
+                finally { done.countDown() }
+            }) throw XrayTunnelFailure("XRAY_SERVICE_UNAVAILABLE")
+        try {
+            if (!done.await((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0), TimeUnit.MILLISECONDS)) {
+                throw XrayTunnelFailure("XRAY_TIMEOUT")
             }
-            XrayBootstrapDns.endpoint(server)
-        } catch (_: Exception) { XrayBootstrapDns.FALLBACK_ENDPOINT }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw XrayTunnelFailure("XRAY_TIMEOUT")
+        }
+        requireCurrent(generation, deadline)
+        failure?.let { throw it }
+    }
+
+    /** Main-thread cancellation precedes any queued native cleanup. */
+    private fun clearNetworks() {
+        desired = null
+        networks.stop()
+        networkMonitor?.stop()
+        networkMonitor = null
+        try { if (ProcessCore.owner === this) setUnderlyingNetworks(emptyArray()) } catch (_: Exception) {}
+    }
+
+    private fun ownsSockets(): Boolean =
+        ProcessCore.owner === this && !destroyed.get() && !stopping && desired != null
+
+    private fun bindOutbound(fd: Long): Boolean {
+        val selection = networks.view().selection ?: return false
+        return networks.useCurrent(selection) { target ->
+            ownsSockets() && XrayNetworkSockets.bind(target.network, fd) { protect(it) } && ownsSockets()
+        }
+    }
+
+    private fun dnsTarget(): XrayDnsTarget? {
+        val request = desired ?: return null
+        val selection = networks.view().selection ?: return null
+        if (selection.epoch != request.epoch || !ownsSockets()) return null
+        return object : XrayDnsTarget {
+            override val hostname = request.hostname
+            override fun isCurrent(): Boolean = desired === request && ownsSockets() && networks.isCurrent(selection)
+            override fun resolve(): List<InetAddress> =
+                if (isCurrent()) selection.target.network.getAllByName(hostname).toList() else emptyList()
+        }
+    }
+
+    private fun localStatus(): XrayServiceStatus {
+        val network = networks.view()
+        val owner = ProcessCore.owner
+        val occupied = network.desired || nativeActive || owner?.nativeActive == true ||
+            synchronized(descriptorLock) { tun != null }
+        return XrayServiceStatus.read(
+            occupied = occupied,
+            blocked = destroyed.get() || stopping || (owner != null && owner !== this) || network.failed,
+            coreReady = connected && nativeActive && owner === this,
+            starting = startingId != 0 && network.desired,
+            changing = network.changing,
+            networkAvailable = network.selection != null,
+        )
     }
 
     private fun invoke(method: String, payload: JSONObject? = null): JSONObject {
@@ -256,7 +396,6 @@ class XrayVpnService : VpnService() {
         var stopped = true
         if (coreLoaded && ProcessCore.owner === this) {
             try { invoke("stopXray") } catch (_: Throwable) { stopped = false }
-            if (stopped) try { LibXray.resetDNS() } catch (_: Throwable) {}
         }
         nativeActive = !stopped
         if (stopped && ProcessCore.owner === this) ProcessCore.owner = null
@@ -281,6 +420,7 @@ class XrayVpnService : VpnService() {
         lease.invalidate()
         startingId = 0
         connected = false
+        clearNetworks()
         armNativeShutdownWatchdog()
         worker.execute { stopCore(); main.post { finishService() } }
     }
@@ -301,7 +441,28 @@ class XrayVpnService : VpnService() {
         try { destination.send(response) } catch (_: Exception) {}
     }
 
-    private fun showNotification(up: Boolean) {
+    private fun replyStatus(destination: Messenger?, id: Int, status: XrayServiceStatus, error: String? = null) {
+        if (destination == null) return
+        val value = if (error == null) status else status.withFailure(error)
+        val response = Message.obtain(null, XrayIpc.REPLY, id, 0).apply {
+            data = Bundle().apply {
+                putBoolean("connected", value.connected)
+                putBoolean("ownsTunnel", value.ownsTunnel)
+                putString("state", value.state)
+                if (value.error != null) putString("lastErrorCode", value.error)
+                if (error != null) putString("error", error)
+            }
+        }
+        try { destination.send(response) } catch (_: Exception) {}
+    }
+
+    private fun updateNotification() {
+        if (foreground && !stopping && !destroyed.get()) {
+            try { showNotification(localStatus().state) } catch (_: Exception) { terminate() }
+        }
+    }
+
+    private fun showNotification(state: String) {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(NotificationChannel(CHANNEL, "Подключение Pushok Flow",
@@ -313,7 +474,13 @@ class XrayVpnService : VpnService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)
         val notification = builder.setSmallIcon(R.drawable.ic_flow_tunnel).setContentTitle("Pushok Flow")
-            .setContentText(if (up) "Туннель включён · VLESS" else "Подключение…")
+            .setContentText(when (state) {
+                "connected" -> "Туннель включён · VLESS"
+                "waiting_network" -> "Ожидание сети · VLESS"
+                "reconnecting" -> if (startingId != 0) "Подключение…" else "Восстановление сети · VLESS"
+                "unknown" -> "Проверка состояния · VLESS"
+                else -> "Подключение…"
+            })
             .setContentIntent(content).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(Notification.VISIBILITY_SECRET)
             .addAction(Notification.Action.Builder(null, "Отключить", stop).build()).build()
@@ -328,6 +495,7 @@ class XrayVpnService : VpnService() {
         destroyed.set(true)
         lease.invalidate()
         connected = false
+        clearNetworks()
         armNativeShutdownWatchdog()
         // Never close the owner FD concurrently with native startup: the core may
         // still be duplicating it. The shared worker closes it after stopXray.
@@ -345,12 +513,31 @@ class XrayVpnService : VpnService() {
         @Volatile var owner: XrayVpnService? = null
         var dialerRegistered = false
         var listenerRegistered = false
-        val protector by lazy {
+        private var dnsAttempted = false
+        private var dnsInstalled = false
+        private var dns: XrayDnsBridge? = null
+
+        fun ensureDns() {
+            if (dnsInstalled) return
+            if (dnsAttempted) throw XrayTunnelFailure("XRAY_SERVICE_UNAVAILABLE")
+            val bridge = XrayDnsBridge { owner?.dnsTarget() }
+            dns = bridge
+            // Local bind/selector setup can be retried if it never reached Go.
+            // Once the global setter is attempted, it must not be repeated.
+            dnsAttempted = true
+            LibXray.setDNS(localController, bridge.endpoint)
+            dnsInstalled = true
+        }
+
+        // Pinned Xray's outbound TCP and UDP paths both invoke dialer
+        // Controllers; its separate listener slice is protect-only.
+        val outboundController by lazy { DialerController { fd -> owner?.bindOutbound(fd) ?: false } }
+        val localController by lazy {
             DialerController { fd ->
                 val current = owner
                 try {
                     fd in 0..Int.MAX_VALUE.toLong() && current != null &&
-                        !current.destroyed.get() && current.protect(fd.toInt())
+                        current.ownsSockets() && current.protect(fd.toInt()) && current.ownsSockets()
                 } catch (_: Exception) { false }
             }
         }

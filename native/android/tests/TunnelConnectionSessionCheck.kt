@@ -29,7 +29,7 @@ fun main() {
         var starts = 0
         val read = { actual }
         check(session.connect(read) { starts++; actual = true; true })
-        check(session.connected && session.connectedSinceElapsedMs == 1000L)
+        check(session.occupied && session.connectedSinceElapsedMs == 1000L)
         advance(9000L)
         check(session.connect(read) { starts++; actual = true; true })
         check(starts == 1 && session.connectedSinceElapsedMs == 1000L)
@@ -37,22 +37,22 @@ fun main() {
         // Failure while preparing a configuration cannot mark the live tunnel
         // DOWN or discard its existing uptime.
         session.failedConnect(read)
-        check(session.connected && session.connectedSinceElapsedMs == 1000L)
+        check(session.occupied && session.connectedSinceElapsedMs == 1000L)
         check(session.lastErrorCode == "WG_CONNECT_FAILED")
         session.failedConnect { error("PRIVATE_PROFILE") }
-        check(session.connected && session.connectedSinceElapsedMs == 1000L)
+        check(session.occupied && session.connectedSinceElapsedMs == 1000L)
         val unavailable = session.observe { error("PRIVATE_ENDPOINT") }
-        check(!unavailable.known && unavailable.connected)
+        check(!unavailable.known && unavailable.occupied)
 
         rejects("VPN_STATE_UNAVAILABLE") {
             session.connect({ error("PRIVATE_KEY") }) { starts++; true }
         }
-        check(starts == 1 && session.connected && session.connectedSinceElapsedMs == 1000L)
+        check(starts == 1 && session.occupied && session.connectedSinceElapsedMs == 1000L)
 
         // Disconnect remains callable when status cannot currently be read.
         var reads = 0
         session.disconnect({ reads++; error("PRIVATE_PROFILE") }) { actual = false; false }
-        check(reads == 0 && !actual && !session.connected)
+        check(reads == 0 && !actual && !session.occupied)
         check(session.connectedSinceElapsedMs == null && session.lastErrorCode == null)
     }
 
@@ -76,10 +76,10 @@ fun main() {
                 error("PRIVATE_ROLLBACK_CONFIG")
             }
         }
-        check(session.connected && session.connectedSinceElapsedMs == null)
+        check(session.occupied && session.connectedSinceElapsedMs == null)
         check(session.lastErrorCode == "WG_CONNECT_FAILED")
         session.disconnect({ actual }) { actual = false; false }
-        check(!session.connected && session.lastErrorCode == null)
+        check(!session.occupied && session.lastErrorCode == null)
     }
 
     // A thrown activation and a non-UP return are both failures. Reconciliation
@@ -90,7 +90,7 @@ fun main() {
                 if (throws) error("PRIVATE_FAILURE") else false
             }
         }
-        check(!session.connected && session.connectedSinceElapsedMs == null)
+        check(!session.occupied && session.connectedSinceElapsedMs == null)
     }
 
     // If both activation and its subsequent state read fail after known DOWN,
@@ -103,7 +103,7 @@ fun main() {
             session.connect(read) { readable = false; error("PRIVATE_ACTIVATION_FAILURE") }
         }
         val ambiguous = session.observe(read)
-        check(!ambiguous.known && !ambiguous.connected)
+        check(!ambiguous.known && !ambiguous.occupied)
         check(session.connectedSinceElapsedMs == null && session.lastErrorCode == "WG_CONNECT_FAILED")
     }
 
@@ -113,23 +113,23 @@ fun main() {
         rejects("WG_DISCONNECT_FAILED") {
             session.disconnect({ actual }) { error("PRIVATE_FAILURE") }
         }
-        check(session.connected && session.connectedSinceElapsedMs == 1000L)
+        check(session.occupied && session.connectedSinceElapsedMs == 1000L)
         check(session.lastErrorCode == "WG_DISCONNECT_FAILED")
         // The returned state itself must also confirm DOWN.
         rejects("WG_DISCONNECT_FAILED") {
             session.disconnect({ actual }) { true }
         }
-        check(session.connected)
+        check(session.occupied)
         rejects("WG_DISCONNECT_FAILED") {
             session.disconnect({ error("PRIVATE_FAILURE") }) { error("PRIVATE_FAILURE") }
         }
-        check(session.connected && session.connectedSinceElapsedMs == 1000L)
+        check(session.occupied && session.connectedSinceElapsedMs == 1000L)
         // If DOWN really happened before the exception, the subsequent read is
         // valid evidence even though the operation still reports failure.
         rejects("WG_DISCONNECT_FAILED") {
             session.disconnect({ actual }) { actual = false; error("PRIVATE_FAILURE") }
         }
-        check(!session.connected && session.connectedSinceElapsedMs == null)
+        check(!session.occupied && session.connectedSinceElapsedMs == null)
     }
 
     withSession { session, _ ->
@@ -137,7 +137,7 @@ fun main() {
         session.connect({ actual }) { actual = true; true }
         actual = false // Android/service stopped the tunnel independently.
         val stopped = session.observe { actual }
-        check(stopped.known && !stopped.connected && session.connectedSinceElapsedMs == null)
+        check(stopped.known && !stopped.occupied && session.connectedSinceElapsedMs == null)
     }
 
     // Two Activity-like clients use the production session queue. Hold an old
@@ -170,10 +170,10 @@ fun main() {
         try {
             check(!newConnectStarted.await(100, TimeUnit.MILLISECONDS))
         } finally { finishOldRead.countDown() }
-        check(!oldStatus.get(5, TimeUnit.SECONDS).connected)
+        check(!oldStatus.get(5, TimeUnit.SECONDS).occupied)
         check(newConnection.get(5, TimeUnit.SECONDS))
         check(oldThread != null && oldThread === newThread)
-        check(actual.get() && session.connected && session.connectedSinceElapsedMs == 1000L)
+        check(actual.get() && session.occupied && session.connectedSinceElapsedMs == 1000L)
     }
     // A second backend shares the same lifecycle and reports only its fixed codes.
     withSession { session, _ ->
@@ -192,9 +192,9 @@ fun main() {
         rejects("XRAY_DISCONNECT_FAILED") {
             session.disconnect(protocol, { active }) { error("PRIVATE_UUID") }
         }
-        check(session.connected && session.lastErrorCode == "XRAY_DISCONNECT_FAILED")
+        check(session.occupied && session.lastErrorCode == "XRAY_DISCONNECT_FAILED")
         session.disconnect(protocol, { active }) { active = false; false }
-        check(!session.connected && session.lastErrorCode == null)
+        check(!session.occupied && session.lastErrorCode == null)
         rejects("ROUTES_APPS_UNAVAILABLE") {
             session.connect(protocol, { false }) { throw TunnelConnectionFailure("ROUTES_APPS_UNAVAILABLE") }
         }

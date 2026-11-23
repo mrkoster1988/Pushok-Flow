@@ -34,6 +34,7 @@ Future<void> _showCard(WidgetTester tester, {
   bool refreshing = false,
   bool stale = false,
   VoidCallback? onRefresh,
+  VoidCallback? onDisconnect,
   Size size = const Size(390, 844),
   double scale = 1,
 }) async {
@@ -52,6 +53,7 @@ Future<void> _showCard(WidgetTester tester, {
         refreshing: refreshing,
         stale: stale,
         onRefresh: onRefresh,
+        onDisconnect: onDisconnect,
       ),
     )),
   ));
@@ -66,6 +68,28 @@ String _value(WidgetTester tester, String key) =>
     tester.widget<Text>(find.byKey(Key(key))).data!;
 
 void main() {
+  for (final recovery in [TunnelRecovery.waitingNetwork, TunnelRecovery.reconnecting]) {
+    testWidgets('VLESS $recovery hides old counters and keeps explicit Stop available', (tester) async {
+      var stops = 0;
+      await _showCard(tester, onDisconnect: () => stops++, diagnostics: TunnelDiagnostics(
+        isKnown: true, connected: false, ownsTunnel: true, protocol: TunnelProtocol.vless,
+        recovery: recovery, uptimeSeconds: 90, statistics: _observed.statistics,
+      ));
+      expect(find.text(recovery == TunnelRecovery.waitingNetwork
+          ? 'Нет сети · подключение сохранено' : 'Восстанавливается'), findsOneWidget);
+      expect(find.text('Туннель выключен.'), findsNothing);
+      expect(find.textContaining('Туннель включён.'), findsNothing);
+      expect(_value(tester, 'tunnel_rx_value'), '—');
+      expect(_value(tester, 'tunnel_tx_value'), '—');
+      expect(_value(tester, 'tunnel_uptime_value'), '—');
+      expect(find.byKey(const Key('tunnel_handshake_value')), findsNothing);
+      final stop = find.byKey(const Key('recover_tunnel_disconnect'));
+      expect(tester.widget<OutlinedButton>(stop).onPressed, isNotNull);
+      await tester.tap(stop);
+      expect(stops, 1);
+    });
+  }
+
   testWidgets('VLESS shows local tunnel status without a WireGuard handshake or invented counters',
       (tester) async {
     await _showCard(tester, diagnostics: const TunnelDiagnostics(

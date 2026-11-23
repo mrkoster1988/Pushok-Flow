@@ -153,9 +153,27 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayLifecycle.kt \
   native/android/tests/XrayLifecycleCheck.kt -include-runtime -d "$out/xray-lifecycle-tests.jar"
 java -jar "$out/xray-lifecycle-tests.jar"
 
-kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayBootstrapDns.kt \
-  native/android/tests/XrayBootstrapDnsCheck.kt -include-runtime -d "$out/xray-bootstrap-dns-tests.jar"
-java -jar "$out/xray-bootstrap-dns-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayNetworkPolicy.kt \
+  native/android/tests/XrayNetworkPolicyCheck.kt -include-runtime -d "$out/xray-network-policy-tests.jar"
+java -jar "$out/xray-network-policy-tests.jar"
+
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayNetworkPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/XrayNetworkMonitor.kt \
+  native/android/tests/xray_network_stubs/*.kt \
+  native/android/tests/XrayNetworkMonitorCheck.kt -include-runtime -d "$out/xray-network-monitor-tests.jar"
+java -jar "$out/xray-network-monitor-tests.jar"
+
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayDnsWire.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/XrayDnsBridge.kt \
+  native/android/tests/XrayDnsWireCheck.kt \
+  native/android/tests/XrayDnsBridgeCheck.kt -include-runtime -d "$out/xray-dns-tests.jar"
+java -cp "$out/xray-dns-tests.jar" shop.pushok.flow.XrayDnsWireCheckKt
+java -cp "$out/xray-dns-tests.jar" shop.pushok.flow.XrayDnsBridgeCheckKt
+
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayTunnelStatus.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/XrayLifecycle.kt \
+  native/android/tests/XrayTunnelStatusCheck.kt -include-runtime -d "$out/xray-status-tests.jar"
+java -jar "$out/xray-status-tests.jar"
 
 json_core="$out/json-core.jar"
 if [[ -n "${FLOW_JSON_CORE_JAR:-}" ]]; then

@@ -35,15 +35,16 @@ class SessionSafetyTests(TestCase):
         src = ACTIVITY.read_text()
         routes = src.split('private fun mutateRoutes(', 1)[1].split('override fun configureFlutterEngine', 1)[0]
         self.assertIn('Session.operationInProgress.acquire()', routes)
-        self.assertIn('Session.connection.observe(::readTunnelState)', routes)
-        read_state = src.split('private fun readTunnelState()', 1)[1].split('private fun stopTunnels', 1)[0]
+        self.assertIn('Session.connection.observe(::readTunnelOccupied)', routes)
+        read_state = src.split('private fun readTunnelOccupied()', 1)[1].split('private fun stopTunnels', 1)[0]
         self.assertIn('backend?.getState(tunnel)', read_state)
-        self.assertIn('xray.isUp()', read_state)
+        self.assertIn('xray.status()', read_state)
+        self.assertIn('wireGuardUp || xrayState.ownsTunnel', read_state)
         self.assertIn('Session.connection.observe', routes)
         self.assertIn('if (!state.known) throw RouteSettingsFailure("VPN_STATE_UNAVAILABLE")', routes)
-        self.assertIn('if (state.connected) throw RouteSettingsFailure("VPN_ACTIVE")', routes)
+        self.assertIn('if (state.occupied) throw RouteSettingsFailure("VPN_ACTIVE")', routes)
         self.assertLess(routes.index('if (!state.known)'), routes.index('routeStore.replace(request)'))
-        self.assertLess(routes.index('if (state.connected)'), routes.index('routeStore.replace(request)'))
+        self.assertLess(routes.index('if (state.occupied)'), routes.index('routeStore.replace(request)'))
         self.assertIn('releaseOperation(token)', routes)
 
     def test_error_does_not_leak_profile_to_ui(self):

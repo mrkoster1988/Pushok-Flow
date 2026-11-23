@@ -52,6 +52,16 @@ class XrayApkGates(unittest.TestCase):
             with self.subTest(missing=missing), self.assertRaises(ValueError):
                 VERIFY.check_xray_manifest(xray_service(), self.permissions-{missing})
 
+    def test_handover_permission_must_apply_to_every_supported_sdk(self):
+        name = 'android.permission.CHANGE_NETWORK_STATE'
+        declaration = f'E: uses-permission\n  A: android:name="{name}"\n'
+        VERIFY.check_xray_network_binding_permission(declaration, {name})
+        for xml, permissions in ((declaration, set()), ('', {name}),
+                                 (declaration + declaration, {name}),
+                                 (declaration + '  A: android:maxSdkVersion=(type 0x10)0x1c\n', {name})):
+            with self.subTest(xml=xml, permissions=permissions), self.assertRaisesRegex(ValueError, 'Xray'):
+                VERIFY.check_xray_network_binding_permission(xml, permissions)
+
     def test_elf_alignment_and_congruence(self):
         FETCH.verify_elf_16k(elf64())
         for data in (elf64(4096), elf64(0), elf64(24576), elf64(offset=1), b'not an ELF', elf64()[:60]):
