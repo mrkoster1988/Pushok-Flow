@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "version": "0.53.0",
+  "recordedAtUtc": "2026-11-23T09:58:12.869214+00:00",
+  "sourceBaseCommit": "72be7c444c146d6053bacda96e14e7c6bcd4f045",
+  "status": "passed",
+  "scope": "Flutter widgets and app MethodChannel fixtures with synthetic addresses. Native QR camera/photo execution, physical phone acceptance and real subscription download are not performed.",
+  "targetedFlutterTests": 44,
+  "newWidgetCases": 17,
+  "newIntegrationCases": 2,
+  "sourceAndTestsSha256": {
+    "test/subscription_editor_test.dart": "3fbda0551b48a5eedd9c43ab7b81fd94b0950f95483fc6f51b693afc9b7c6222",
+    "test/subscriptions_card_test.dart": "71e7855d9df0cdf9004f3cc80020d8864b205e56458f241dc2dea955d150c75c",
+    "test/subscription_flow_test.dart": "339ec516e1168ecb18624830ac60457b9ee58857024a2a5c8d5db1409e924897",
+    "lib/ui/subscription_editor.dart": "d1f4ea9aff6d2d7d49c9595f664fa40f3d891da8fbde4aa202c595b723d36fe9",
+    "lib/ui/subscriptions_card.dart": "daec17f766b692fe8faa848ba82baaa0f1766f72b491baeda6234c0d48eb6c56",
+    "lib/main.dart": "8daf1da8896abab14dbb939d3623351aa6ceb4954fc18bb7761a05b2d0fc45ff"
+  },
+  "targetedTest": {
+    "runner": "Flutter CLI",
+    "arguments": [
+      "test",
+      "--no-pub",
+      "test/subscription_editor_test.dart",
+      "test/subscriptions_card_test.dart",
+      "test/subscription_flow_test.dart"
+    ],
+    "exitCode": 0,
+    "startedAtUtc": "2026-11-23T09:54:37.701042+00:00",
+    "completedAtUtc": "2026-11-23T09:54:55.134197+00:00",
+    "log": "targeted-subscription-tests.log"
+  },
+  "targetedAnalyzer": {
+    "runner": "Flutter CLI",
+    "arguments": [
+      "analyze",
+      "--no-pub",
+      "lib/ui/subscription_editor.dart",
+      "lib/ui/subscriptions_card.dart",
+      "test/subscription_editor_test.dart",
+      "test/subscriptions_card_test.dart",
+      "test/subscription_flow_test.dart"
+    ],
+    "exitCode": 0,
+    "startedAtUtc": "2026-11-23T09:55:51.519501+00:00",
+    "completedAtUtc": "2026-11-23T09:55:55.236129+00:00",
+    "log": "targeted-subscription-analyze.log"
+  },
+  "beforeImplementationObservation": {
+    "exitCode": 1,
+    "scope": "Direct camera integration observed before the subscription UI implementation; failed because scan_subscription_qr was absent. Not a full immutable-source baseline gate.",
+    "log": "direct-subscription-before.log"
+  },
+  "initialTargetedAttempt": {
+    "exitCode": 1,
+    "passed": 36,
+    "failed": 8,
+    "reason": "Test harness assertions: a text finder inspected masked EditableText controllers; lifecycle simulation omitted Flutter hidden transitions. Corrected without production changes.",
+    "log": "initial-targeted-subscription-tests.log"
+  },
+  "logSha256": {
+    "direct-subscription-before.log": "53b327c8c05e8b9495ef6e2d6b369a604c4294b21237f739796538f811ebf5ec",
+    "targeted-subscription-tests.log": "d5be0a00b08ac851986868227bfa32a53a84a1e6c1eb83e4b4cdb01f9a1f2fe8",
+    "targeted-subscription-analyze.log": "aa05a0b0867fdacc5fe0d999a0c7454d347e00bc2efce5422b9694eaf4eeb2c6",
+    "initial-targeted-subscription-tests.log": "abca1268abb02bd9f0dd68be1cd78f4d7cf88a520286be360a066cbe7389fcd6"
+  },
+  "verifiedBehaviors": [
+    "Direct camera and photo entry use the protected subscription form",
+    "Only an explicit confirmation starts subscription download",
+    "Normal native results before or after resume remain masked and preserve the name",
+    "Cancellation, wrong QR and safe errors preserve the existing draft",
+    "Close, Back and disposal cancel once and reject late callbacks",
+    "Busy, lifecycle and current-route guards prevent competing actions",
+    "Manual paste and editing remain available",
+    "Controls fit 360x640 with text scale 1.6"
+  ],
+  "limits": {
+    "nativeQrExecution": "not_performed",
+    "physicalDeviceAcceptance": "not_performed",
+    "realSubscriptionDownload": "not_performed",
+    "originTlsStatus": "unverified",
+    "privateUserQrIncluded": false,
+    "fullReleaseGates": "recorded separately after completion"
+  }
+}

@@ -56,6 +56,9 @@ class SubscriptionsCard extends StatelessWidget {
         '(${FlowSubscriptions.botUsername}).\n\n'
         'Для подключения Flow добавьте HTTPS-ссылку подписки своего провайдера '
         'или панели с поддерживаемыми ссылками VLESS. '
+        'В форме «Добавить подписку» можно сканировать QR камерой или выбрать '
+        '«QR из фото». Распознанная ссылка остаётся скрытой; серверы загружаются '
+        'только после нажатия «Добавить подписку». '
         'Аккаунт MTProxy сам по себе не предоставляет серверы для Flow.\n\n'
         'Flow загружает список серверов и сохраняет его на устройстве. '
         'Автообновление проверяет список при открытии приложения, когда подключение '
@@ -143,7 +146,7 @@ class SubscriptionsCard extends StatelessWidget {
               onPressed: loading || _busy ? null : onRefreshList,
               icon: const Icon(Icons.refresh)),
           ]),
-          const Text('Добавьте ссылку, чтобы получать актуальные серверы.',
+          const Text('Добавьте ссылку или QR-код подписки, чтобы получать актуальные серверы.',
             style: TextStyle(color: PushokPalette.muted)),
           if (loading || _busy) const Padding(padding: EdgeInsets.only(top: 12),
             child: Row(children: [

@@ -57,9 +57,10 @@ void main() {
   testWidgets('Native busy and connected states block changes but keep account access', (tester) async {
     for (final state in [(busy: true, enabled: true), (busy: false, enabled: false)]) {
       await _pump(tester, SubscriptionsCard(status: _status(busy: state.busy),
-        mutationsEnabled: state.enabled, onRefresh: (_) {}, onDelete: (_) {},
+        mutationsEnabled: state.enabled, onAdd: () {}, onRefresh: (_) {}, onDelete: (_) {},
         onOpenAccount: () {}));
-      for (final key in ['refresh_subscription_$_id', 'delete_subscription_$_id']) {
+      for (final key in ['add_subscription', 'refresh_subscription_$_id',
+        'delete_subscription_$_id']) {
         expect(tester.widget<OutlinedButton>(find.byKey(ValueKey(key))).onPressed, isNull);
       }
       expect(tester.widget<OutlinedButton>(find.byKey(const Key('manage_pushok_subscription'))).onPressed,

@@ -617,6 +617,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           side: BorderSide(color: PushokPalette.glowCyan)),
         builder: (context) => SubscriptionEditor(draft: draft,
+          onScanQr: WireGuardTunnel.scanProfileQr,
+          onImportQrImage: WireGuardTunnel.importProfileQrImage,
+          onCancelImport: WireGuardTunnel.cancelProfileImport,
           onSave: _saveSubscriptionDraft),
       );
       unawaited(navigator.push<bool>(route));
@@ -1262,7 +1265,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.52.0',
+            version: '0.53.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,

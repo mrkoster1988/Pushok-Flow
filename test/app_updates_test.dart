@@ -41,7 +41,7 @@ Map<String, Object?> _status({
   'releaseNotes': releaseNotes,
 };
 
-Map<String, Object?> _notes({String version = '0.49.0', int build = 49,
+Map<String, Object?> _notes({String version = '0.50.0', int build = 50,
   List<String> changes = const ['Новое проверочное изменение.']}) => {
   'versionName': version, 'versionCode': build, 'changes': changes,
   'publishedOn': '2026-11-23',
@@ -301,8 +301,8 @@ void main() {
   });
 
   test('Late native notes cannot replace the version retained after a failed recheck', () async {
-    bridge.state = _status(phase: 'available', installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.49.0', availableBuild: 49, releaseNotes: _notes());
+    bridge.state = _status(phase: 'available', installedVersion: '0.49.0', installedBuild: 49,
+      availableVersion: '0.50.0', availableBuild: 50, releaseNotes: _notes());
     final updates = AppUpdates(isAndroid: true);
     await updates.updateStatus();
     final oldRead = Completer<Map<String, Object?>>();
@@ -311,17 +311,17 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     final oldState = Map<String, Object?>.of(bridge.state);
     bridge.checkGate = Completer<Map<String, Object?>>()..complete(_status(
-      phase: 'available', installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.50.0', availableBuild: 50,
-      releaseNotes: _notes(version: '0.50.0', build: 50, changes: ['Описание версии 50.'])));
-    expect((await updates.checkForUpdates()).releaseNotes!.versionCode, 50);
+      phase: 'available', installedVersion: '0.49.0', installedBuild: 49,
+      availableVersion: '0.51.0', availableBuild: 51,
+      releaseNotes: _notes(version: '0.51.0', build: 51, changes: ['Описание версии 51.'])));
+    expect((await updates.checkForUpdates()).releaseNotes!.versionCode, 51);
     oldRead.complete(oldState);
     await oldResponse;
     bridge.checkError = PlatformException(code: 'UPDATE_NETWORK_ERROR');
     final failed = await updates.checkForUpdates();
-    expect(failed.availableBuild, 50);
-    expect(failed.releaseNotes!.versionCode, 50);
-    expect(failed.releaseNotes!.changes, ['Описание версии 50.']);
+    expect(failed.availableBuild, 51);
+    expect(failed.releaseNotes!.versionCode, 51);
+    expect(failed.releaseNotes!.changes, ['Описание версии 51.']);
   });
 
   test('Missing native support and malformed channel data return safe states', () async {
@@ -907,18 +907,18 @@ void main() {
 
   testWidgets('Installed changes and the recent history are available without a network check', (tester) async {
     bridge.state = _status(phase: 'current', automatic: false, permission: true,
-      installedVersion: '0.52.0', installedBuild: 52);
+      installedVersion: '0.53.0', installedBuild: 53);
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.52.0'), findsOneWidget);
-      expect(find.text('Улучшено распознавание серых и малоконтрастных QR-кодов камерой.'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.53.0'), findsOneWidget);
+      expect(find.text('QR подписки можно сканировать камерой или выбрать из фото прямо в форме добавления подписки.'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
-      expect(find.byKey(const ValueKey('history_release_48')), findsNothing);
+      expect(find.byKey(const ValueKey('history_release_49')), findsNothing);
       final history = find.byKey(const Key('app_release_history'));
       await tester.ensureVisible(history);
       await tester.tap(find.text('История обновлений'));
       await tester.pumpAndSettle();
-      for (final build in [52, 51, 50, 49, 48]) {
+      for (final build in [53, 52, 51, 50, 49]) {
         expect(find.byKey(ValueKey('history_release_$build')), findsOneWidget);
       }
       expect(bridge.count('checkForUpdates'), 0);
@@ -926,22 +926,22 @@ void main() {
       await tester.ensureVisible(history);
       await tester.tap(find.text('История обновлений'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('history_release_48')), findsNothing);
+      expect(find.byKey(const ValueKey('history_release_49')), findsNothing);
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
     });
   });
 
   testWidgets('Newer release changes appear before download and remain distinct from installed changes', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.49.0', availableBuild: 49,
+      installedVersion: '0.49.0', installedBuild: 49,
+      availableVersion: '0.50.0', availableBuild: 50,
       releaseNotes: _notes(changes: ['Будущее изменение.', '<b>Обычный текст без HTML.</b>']));
     await _withCard(tester, () async {
-      expect(find.text('Изменения в версии 0.49.0'), findsOneWidget);
+      expect(find.text('Изменения в версии 0.50.0'), findsOneWidget);
       expect(find.text('Будущее изменение.'), findsOneWidget);
       expect(find.text('<b>Обычный текст без HTML.</b>'), findsOneWidget);
       expect(find.text('Опубликовано 23.11.2026'), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.48.0'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.49.0'), findsOneWidget);
       final notes = find.byKey(const Key('available_release_notes'));
       final download = find.byKey(const Key('download_app_update'));
       expect(tester.getBottomLeft(notes).dy, lessThan(tester.getTopLeft(download).dy));
@@ -953,9 +953,9 @@ void main() {
 
   testWidgets('Missing or mismatched notes do not borrow installed changes for a newer version', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.53.0', availableBuild: 53,
-      releaseNotes: _notes(version: '0.48.0', build: 48, changes: ['Неверная версия описания.']));
+      installedVersion: '0.49.0', installedBuild: 49,
+      availableVersion: '0.54.0', availableBuild: 54,
+      releaseNotes: _notes(version: '0.49.0', build: 49, changes: ['Неверная версия описания.']));
     await _withCard(tester, () async {
       expect(find.byKey(const Key('available_release_notes_missing')), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
@@ -967,20 +967,20 @@ void main() {
 
   testWidgets('Matching bundled notes describe a newer release when older native metadata has no notes', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.49.0', availableBuild: 49);
+      installedVersion: '0.49.0', installedBuild: 49,
+      availableVersion: '0.50.0', availableBuild: 50);
     await _withCard(tester, () async {
-      expect(find.text('Изменения в версии 0.49.0'), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.48.0'), findsOneWidget);
+      expect(find.text('Изменения в версии 0.50.0'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.49.0'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes_missing')), findsNothing);
     });
   });
 
   testWidgets('A resumed update snapshot replaces descriptions and ignores an older delayed reply', (tester) async {
     final oldState = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.49.0', availableBuild: 49,
-      releaseNotes: _notes(changes: ['Старое описание версии 49.']));
+      installedVersion: '0.49.0', installedBuild: 49,
+      availableVersion: '0.50.0', availableBuild: 50,
+      releaseNotes: _notes(changes: ['Старое описание версии 50.']));
     bridge.state = oldState;
     await _withCard(tester, () async {
       final oldRead = Completer<Map<String, Object?>>();
@@ -990,25 +990,25 @@ void main() {
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       bridge.state = _status(phase: 'available', automatic: false, permission: true,
-        installedVersion: '0.48.0', installedBuild: 48,
-        availableVersion: '0.50.0', availableBuild: 50,
-        releaseNotes: _notes(version: '0.50.0', build: 50, changes: ['Актуальное описание версии 50.']));
+        installedVersion: '0.49.0', installedBuild: 49,
+        availableVersion: '0.51.0', availableBuild: 51,
+        releaseNotes: _notes(version: '0.51.0', build: 51, changes: ['Актуальное описание версии 51.']));
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(find.text('Актуальное описание версии 50.'), findsOneWidget);
+      expect(find.text('Актуальное описание версии 51.'), findsOneWidget);
       oldRead.complete(oldState);
       await tester.pumpAndSettle();
-      expect(find.text('Актуальное описание версии 50.'), findsOneWidget);
-      expect(find.text('Старое описание версии 49.'), findsNothing);
-      expect(find.text('Изменения в версии 0.49.0'), findsNothing);
+      expect(find.text('Актуальное описание версии 51.'), findsOneWidget);
+      expect(find.text('Старое описание версии 50.'), findsNothing);
+      expect(find.text('Изменения в версии 0.50.0'), findsNothing);
       expect(bridge.count('checkForUpdates'), 0);
     });
   });
 
   testWidgets('Long notes and expanded history fit a narrow screen with enlarged text', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.49.0', availableBuild: 49,
+      installedVersion: '0.49.0', installedBuild: 49,
+      availableVersion: '0.50.0', availableBuild: 50,
       releaseNotes: _notes(changes: ['x' * 600, ...List.filled(7, 'Длинное описание изменения. ' * 17)]));
     await _withCard(tester, () async {
       expect(find.byKey(const Key('available_release_notes')), findsOneWidget);
@@ -1020,7 +1020,7 @@ void main() {
       await tester.ensureVisible(find.byKey(const Key('app_release_history')));
       await tester.tap(find.text('История обновлений'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const ValueKey('history_release_48')));
+      await tester.ensureVisible(find.byKey(const ValueKey('history_release_49')));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(bridge.count('downloadUpdate'), 0);

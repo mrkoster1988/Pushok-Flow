@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -5,12 +7,18 @@ import '../design/pushok_theme.dart';
 import '../platform/subscriptions.dart';
 import '../platform/wireguard_profiles.dart';
 
+enum _SubscriptionQrSource { camera, image }
+
 /// The caller owns a ProfilePrivacy lease for this route and its closing frame.
 class SubscriptionEditor extends StatefulWidget {
   const SubscriptionEditor({super.key, this.draft,
-    required this.onSave, this.onClose, this.onCompleted});
+    required this.onSave, this.onClose, this.onCompleted,
+    this.onScanQr, this.onImportQrImage, this.onCancelImport});
   final SubscriptionDraft? draft;
   final Future<void> Function(String url, String name) onSave;
+  final Future<String?> Function()? onScanQr;
+  final Future<String?> Function()? onImportQrImage;
+  final Future<void> Function()? onCancelImport;
   /// Inline import keeps the original profile draft in the same protected route.
   final VoidCallback? onClose;
   final VoidCallback? onCompleted;
@@ -28,17 +36,31 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   bool _visible = false;
   bool _saving = false;
   bool _pasting = false;
+  bool _importing = false;
+  bool _importCancelSent = false;
+  bool _clearSelectionAfterUnfocus = false;
+  _SubscriptionQrSource? _importSource;
   bool _closing = false;
   bool _foreground = true;
   int _inputEpoch = 0;
+  int _importEpoch = 0;
   String? _error;
-  bool get _busy => _saving || _pasting || _closing;
+  String? _notice;
+  bool get _busy => _saving || _pasting || _importing || _closing;
+  bool get _canAct {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return _foreground &&
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed) &&
+        ModalRoute.of(context)?.isCurrent != false;
+  }
 
   @override
   void initState() {
     super.initState();
     _url = TextEditingController(text: widget.draft?.url ?? '');
     _name = TextEditingController(text: widget.draft?.name ?? 'Моя подписка');
+    _urlFocus.addListener(_finishInputCleanup);
+    _nameFocus.addListener(_finishInputCleanup);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
@@ -46,8 +68,11 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
 
   @override
   void dispose() {
+    _cancelPendingImport();
     _inputEpoch++;
     WidgetsBinding.instance.removeObserver(this);
+    _urlFocus.removeListener(_finishInputCleanup);
+    _nameFocus.removeListener(_finishInputCleanup);
     _url.dispose();
     _name.dispose();
     _urlFocus.dispose();
@@ -66,24 +91,37 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
         _inputEpoch++;
       }
     });
-    if (!foreground) {
-      _urlFocus.unfocus();
-      _nameFocus.unfocus();
-      for (final controller in [_url, _name]) {
-        controller.value = controller.value.copyWith(
-          selection: const TextSelection.collapsed(offset: -1),
-          composing: TextRange.empty);
-      }
+    if (!foreground) _clearInputSelection();
+  }
+
+  void _clearInputSelection() {
+    _clearSelectionAfterUnfocus = true;
+    _urlFocus.unfocus();
+    _nameFocus.unfocus();
+    _url.clearComposing();
+    _name.clearComposing();
+    _finishInputCleanup();
+  }
+
+  void _finishInputCleanup() {
+    if (!mounted || !_clearSelectionAfterUnfocus ||
+        _urlFocus.hasFocus || _nameFocus.hasFocus) return;
+    _clearSelectionAfterUnfocus = false;
+    // EditableText can repair the selection while an unfocus is still pending.
+    for (final controller in [_url, _name]) {
+      controller.value = controller.value.copyWith(
+        selection: const TextSelection.collapsed(offset: -1),
+        composing: TextRange.empty);
     }
   }
 
   Future<void> _paste() async {
-    if (!mounted || _busy || !_foreground) return;
+    if (!mounted || _busy || !_canAct) return;
     final epoch = _inputEpoch;
-    setState(() { _pasting = true; _error = null; });
+    setState(() { _pasting = true; _error = null; _notice = null; });
     try {
       final value = await Clipboard.getData(Clipboard.kTextPlain);
-      if (!mounted || !_foreground || epoch != _inputEpoch) return;
+      if (!mounted || _closing || !_canAct || epoch != _inputEpoch) return;
       final text = value?.text?.trim();
       if (text == null || text.isEmpty) {
         setState(() => _error = 'В буфере обмена нет ссылки подписки.');
@@ -93,14 +131,127 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
         setState(() => _url.text = text);
       }
     } catch (_) {
-      if (mounted) setState(() => _error = 'Не удалось прочитать буфер обмена.');
+      if (mounted && !_closing && _canAct && epoch == _inputEpoch) {
+        setState(() => _error = 'Не удалось прочитать буфер обмена.');
+      }
     } finally {
       if (mounted) setState(() => _pasting = false);
     }
   }
 
+  void _cancelPendingImport() {
+    if (!_importing || _importCancelSent) return;
+    _importCancelSent = true;
+    _importEpoch++;
+    // Invalidate before the route's closing animation can receive a native reply.
+    unawaited(_cancelImport());
+  }
+
+  Future<void> _cancelImport() async {
+    try {
+      await widget.onCancelImport?.call();
+    } catch (_) {
+      // The local epoch also rejects late results if native cancellation fails.
+    }
+  }
+
+  Future<void> _importQr(_SubscriptionQrSource source) async {
+    final read = source == _SubscriptionQrSource.camera
+        ? widget.onScanQr : widget.onImportQrImage;
+    if (!mounted || _busy || !_canAct || read == null) return;
+    final epoch = ++_importEpoch;
+    _clearInputSelection();
+    setState(() {
+      _importing = true;
+      _importSource = source;
+      _importCancelSent = false;
+      _visible = false;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final value = await read();
+      if (!mounted || _closing || epoch != _importEpoch || value == null) return;
+      final url = value.trim();
+      final uri = url.length <= 4096 ? Uri.tryParse(url) : null;
+      if (uri != null &&
+          const {'t.me', 'telegram.me', 'www.t.me', 'www.telegram.me'}
+              .contains(uri.host.toLowerCase()) &&
+          const {'/proxy', '/socks'}.contains(uri.path)) {
+        setState(() => _error = _qrError('PROFILE_TELEGRAM_LINK', source));
+        return;
+      }
+      if (!SubscriptionDraft.validUrl(url)) {
+        final profile = url.length <= 65536 &&
+            (url.toLowerCase().startsWith('vless://') ||
+             RegExp(r'^\[Interface\]\s*$', multiLine: true).hasMatch(url));
+        setState(() => _error = profile
+            ? 'Это QR-код отдельного подключения. Добавьте его через '
+              '«Серверы → Профили подключения → Добавить профиль». '
+              'Для подписки нужен QR с HTTPS-ссылкой.'
+            : _qrError('SUBSCRIPTION_URL_INVALID', source));
+        return;
+      }
+      // Android can return the QR before onResume. Only fill the masked draft;
+      // importing servers always requires a later, explicit foreground action.
+      _url.value = TextEditingValue(text: url,
+        selection: const TextSelection.collapsed(offset: -1));
+      setState(() {
+        _visible = false;
+        _notice = 'QR-код прочитан. Проверьте название и нажмите «Добавить подписку».';
+      });
+    } on PlatformException catch (error) {
+      if (mounted && !_closing && epoch == _importEpoch) {
+        setState(() => _error = _qrError(error.code, source));
+      }
+    } catch (_) {
+      if (mounted && !_closing && epoch == _importEpoch) {
+        setState(() => _error = _qrError(null, source));
+      }
+    } finally {
+      if (mounted && !_closing && epoch == _importEpoch) {
+        setState(() { _importing = false; _importSource = null; });
+      }
+    }
+  }
+
+  String _qrError(String? code, _SubscriptionQrSource source) => switch (code) {
+    'PROFILE_QR_CAMERA_DENIED' =>
+      'Для сканирования нужен доступ к камере. Можно выбрать фото с QR-кодом.',
+    'PROFILE_QR_UNAVAILABLE' || 'PROFILE_IMPORT_UNAVAILABLE' =>
+      'Импорт QR сейчас недоступен. Вставьте HTTPS-ссылку подписки.',
+    'PROFILE_QR_NOT_FOUND' => source == _SubscriptionQrSource.image
+      ? 'На изображении не найден QR-код. Выберите другое фото.'
+      : 'QR-код не найден. Повторите сканирование или выберите фото.',
+    'PROFILE_QR_MULTIPLE' =>
+      'Нужен один полный QR-код. Части составного кода и несколько кодов одновременно не поддерживаются.',
+    'PROFILE_QR_IMAGE_TOO_LARGE' =>
+      'Изображение слишком большое. Выберите уменьшенную копию или вставьте ссылку подписки.',
+    'PROFILE_IMPORT_BUSY' =>
+      'Импорт QR уже открыт. Завершите его и попробуйте ещё раз.',
+    'PROFILE_IMPORT_SOURCE_BUSY' =>
+      'Источник фото пока занят. Попробуйте сканирование камерой или вставьте ссылку подписки.',
+    'PROFILE_IMPORT_INTERRUPTED' =>
+      'Импорт прерван. Сканируйте QR-код или выберите фото ещё раз.',
+    'PROFILE_IMPORT_TIMEOUT' =>
+      'Источник QR не ответил вовремя. Повторите импорт или вставьте ссылку подписки.',
+    'PROFILE_IMPORT_TOO_LARGE' =>
+      'QR-код содержит слишком много данных. Выберите QR подписки с одной HTTPS-ссылкой.',
+    'SUBSCRIPTION_URL_INVALID' =>
+      'Для подписки нужен QR с полной HTTPS-ссылкой на публичный сервер, без логина и пароля в адресе. Проверьте QR-код в панели.',
+    'PROFILE_TELEGRAM_LINK' =>
+      'Это ссылка прокси Telegram. Для подписки Flow нужен QR-код с HTTPS-ссылкой подписки.',
+    'PROFILE_VMESS_LINK' || 'PROFILE_TROJAN_LINK' || 'PROFILE_SHADOWSOCKS_LINK' ||
+    'UNSUPPORTED_TRANSPORT' || 'UNSUPPORTED_SECURITY' ||
+    'UNSUPPORTED_PROFILE_OPTION' || 'INVALID_VLESS_CONFIG' =>
+      'Это QR-код отдельного подключения. Для подписки нужен QR с HTTPS-ссылкой. Выберите QR подписки в панели.',
+    'PROFILE_IMPORT_INVALID' || 'UNSUPPORTED_PROFILE' =>
+      'В QR-коде нет HTTPS-ссылки подписки. Выберите QR подписки в панели или у провайдера.',
+    _ => 'Не удалось прочитать QR-код. Повторите сканирование, выберите фото или вставьте ссылку подписки.',
+  };
+
   Future<void> _save() async {
-    if (!mounted || _busy || !_foreground) return;
+    if (!mounted || _busy || !_canAct) return;
     final url = _url.text.trim();
     final name = _name.text.trim();
     if (!WireGuardProfiles.isValidName(name)) {
@@ -111,9 +262,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
       setState(() => _error = 'Нужна полная HTTPS-ссылка подписки.');
       return;
     }
-    _urlFocus.unfocus();
-    _nameFocus.unfocus();
-    setState(() { _saving = true; _error = null; _visible = false; });
+    _clearInputSelection();
+    setState(() { _saving = true; _error = null; _notice = null; _visible = false; });
     try {
       await widget.onSave(url, name);
       if (!mounted || _closing) return;
@@ -131,10 +281,12 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   }
 
   void _closeEditor() {
-    if (!mounted || _busy || !_foreground) return;
+    if (!mounted || _saving || _pasting || _closing || !_canAct) return;
     _closing = true;
     _inputEpoch++;
     _visible = false;
+    _cancelPendingImport();
+    _clearInputSelection();
     if (widget.onClose != null) {
       widget.onClose!();
     } else {
@@ -143,9 +295,9 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   }
 
   void _toggleVisibility() {
-    if (!mounted || _busy || !_foreground) return;
+    if (!mounted || _busy || !_canAct) return;
     setState(() => _visible = !_visible);
-    if (!_visible) _urlFocus.unfocus();
+    if (!_visible) _clearInputSelection();
   }
 
   @override
@@ -157,6 +309,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
         if (didPop) {
           _closing = true;
           _inputEpoch++;
+          _visible = false;
+          _cancelPendingImport();
         } else if (widget.onClose != null) {
           _closeEditor();
         }
@@ -173,7 +327,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
                   IconButton(key: const Key('close_subscription_editor'),
                     tooltip: widget.onClose == null ? 'Закрыть' : 'Вернуться к профилю',
-                    onPressed: _busy || !_foreground ? null : _closeEditor,
+                    onPressed: _saving || _pasting || _closing || !_canAct
+                        ? null : _closeEditor,
                     icon: Icon(widget.onClose == null ? Icons.close : Icons.arrow_back)),
                 ]),
                 const SizedBox(height: 8),
@@ -181,33 +336,60 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                   style: TextStyle(color: PushokPalette.muted)),
                 const SizedBox(height: 16),
                 TextField(key: const Key('subscription_name'), controller: _name,
-                  focusNode: _nameFocus, enabled: !_busy, maxLines: 1,
+                  focusNode: _nameFocus, enabled: !_busy && _canAct, maxLines: 1,
                   autocorrect: false, enableSuggestions: false,
                   enableIMEPersonalizedLearning: false, autofillHints: null,
-                  onChanged: (_) => setState(() => _error = null),
+                  onChanged: (_) => setState(() { _error = null; _notice = null; }),
                   decoration: const InputDecoration(labelText: 'Название подписки')),
                 const SizedBox(height: 16),
                 TextField(key: const Key('subscription_url'), controller: _url,
-                  focusNode: _urlFocus, enabled: !_busy, maxLines: 1,
+                  focusNode: _urlFocus, enabled: !_busy && _canAct, maxLines: 1,
                   readOnly: !_visible, obscureText: !_visible,
                   enableInteractiveSelection: _visible, keyboardType: TextInputType.url,
                   autocorrect: false, enableSuggestions: false,
                   enableIMEPersonalizedLearning: false, autofillHints: null,
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
-                  onChanged: (_) => setState(() => _error = null),
+                  onChanged: (_) => setState(() { _error = null; _notice = null; }),
                   decoration: InputDecoration(labelText: 'HTTPS-ссылка подписки',
-                    helperText: 'Вставьте ссылку или откройте поле значком глаза.',
+                    helperText: widget.onScanQr != null || widget.onImportQrImage != null
+                        ? 'Добавьте QR, вставьте ссылку или откройте поле значком глаза.'
+                        : 'Вставьте ссылку или откройте поле значком глаза.',
                     helperMaxLines: 2,
                     suffixIcon: IconButton(key: const Key('toggle_subscription_url_visibility'),
                       tooltip: _visible ? 'Скрыть ссылку' : 'Показать ссылку',
-                      onPressed: _busy || !_foreground ? null : _toggleVisibility,
+                      onPressed: _busy || !_canAct ? null : _toggleVisibility,
                       icon: Icon(_visible ? Icons.visibility_off_outlined : Icons.visibility_outlined)))),
                 const SizedBox(height: 10),
-                Align(alignment: Alignment.centerRight,
-                  child: OutlinedButton.icon(key: const Key('paste_subscription_url'),
-                    onPressed: _busy || !_foreground ? null : _paste,
-                    icon: const Icon(Icons.content_paste_outlined), label: const Text('Вставить'))),
+                Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 8,
+                  children: [
+                    if (widget.onScanQr != null) OutlinedButton.icon(
+                      key: const Key('scan_subscription_qr'),
+                      onPressed: _busy || !_canAct ? null
+                          : () => _importQr(_SubscriptionQrSource.camera),
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Сканировать QR')),
+                    if (widget.onImportQrImage != null) OutlinedButton.icon(
+                      key: const Key('import_subscription_qr_image'),
+                      onPressed: _busy || !_canAct ? null
+                          : () => _importQr(_SubscriptionQrSource.image),
+                      icon: const Icon(Icons.image_outlined),
+                      label: const Text('QR из фото')),
+                    OutlinedButton.icon(key: const Key('paste_subscription_url'),
+                      onPressed: _busy || !_canAct ? null : _paste,
+                      icon: const Icon(Icons.content_paste_outlined),
+                      label: const Text('Вставить')),
+                  ]),
+                if (_importing) ...[
+                  const SizedBox(height: 12),
+                  Row(key: const Key('subscription_qr_progress'), children: [
+                    const SizedBox(width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(_importSource == _SubscriptionQrSource.camera
+                        ? 'Сканируем QR-код…' : 'Читаем QR из фото…')),
+                  ]),
+                ],
                 if (host != null) ...[
                   const SizedBox(height: 10),
                   Text('Источник серверов: $host', key: const Key('subscription_source_host'),
@@ -219,9 +401,15 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                     key: const Key('subscription_editor_error'),
                     style: const TextStyle(color: PushokPalette.orange))),
                 ],
+                if (_notice != null) ...[
+                  const SizedBox(height: 12),
+                  Semantics(liveRegion: true, child: Text(_notice!,
+                    key: const Key('subscription_editor_notice'),
+                    style: const TextStyle(color: PushokPalette.mint))),
+                ],
                 const SizedBox(height: 16),
                 FilledButton.icon(key: const Key('save_subscription'),
-                  onPressed: _busy || !_foreground ? null : _save,
+                  onPressed: _busy || !_canAct ? null : _save,
                   icon: _saving ? const SizedBox(width: 18, height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.add_link),
                   label: Text(_saving ? 'Загружаем серверы…' : 'Добавить подписку')),

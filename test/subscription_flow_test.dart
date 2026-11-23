@@ -169,6 +169,61 @@ Future<void> _pump(WidgetTester tester, _Bridge bridge) async {
 
 void main() {
   for (final source in [
+    ('camera', 'scan_subscription_qr', 'scanWireGuardProfileQr'),
+    ('photo', 'import_subscription_qr_image', 'importWireGuardProfileQrImage'),
+  ]) {
+    testWidgets('Direct ${source.$1} subscription import uses the protected subscription form and explicit confirmation',
+        (tester) async {
+      final bridge = _Bridge()..pending = null;
+      await _pump(tester, bridge);
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+      await tester.pumpAndSettle();
+      final add = find.byKey(const Key('add_subscription'));
+      await tester.ensureVisible(add);
+      await tester.tap(add);
+      await tester.pumpAndSettle();
+      expect(find.byType(SubscriptionEditor), findsOneWidget);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(bridge.leases, isNotEmpty);
+      expect(bridge.calls.where((call) => call == 'privacy:acquire').length, 1);
+      final scan = find.byKey(Key(source.$2));
+      expect(scan, findsOneWidget);
+      await tester.ensureVisible(scan);
+      await tester.tap(scan);
+      await tester.pumpAndSettle();
+      expect(bridge.calls.where((call) => call == source.$3).length, 1);
+      expect(bridge.calls, isNot(contains('importSubscription')));
+      expect(bridge.calls, isNot(contains('loadWireGuardProfile')));
+      expect(bridge.calls, isNot(contains('privacy:release')));
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      final url = tester.widget<TextField>(find.byKey(const Key('subscription_url')));
+      expect(url.controller!.text, _privateUrl);
+      expect(url.obscureText, isTrue);
+      expect(url.readOnly, isTrue);
+      expect(url.enableInteractiveSelection, isFalse);
+      expect(find.byWidgetPredicate((widget) => widget is Text &&
+        (widget.data ?? widget.textSpan?.toPlainText() ?? '').contains('PRIVATE_TOKEN')),
+        findsNothing);
+      final name = find.byKey(const Key('subscription_name'));
+      await tester.ensureVisible(name);
+      await tester.enterText(name, 'Магазин');
+      final save = find.byKey(const Key('save_subscription'));
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(bridge.calls.where((call) => call == 'importSubscription').length, 1);
+      expect(bridge.calls.where((call) => call == 'privacy:release').length, 1);
+      expect(bridge.leases, isEmpty);
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(find.byKey(const ValueKey('active_wireguard_profile_$_manualId')), findsOneWidget);
+      expect(bridge.calls, isNot(contains('saveWireGuardProfile')));
+      expect(bridge.calls, isNot(contains('connectWireGuard')));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  for (final source in [
     ('camera', 'scan_wireguard_profile_qr'),
     ('photo', 'import_wireguard_profile_qr_image'),
   ]) {
