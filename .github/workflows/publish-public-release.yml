@@ -1,6 +1,10 @@
 name: Publish verified Pushok Flow update
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'release-staging/v0.58.0.json'
   workflow_dispatch:
     inputs:
       release_version:
@@ -24,7 +28,7 @@ jobs:
       actions: read
       contents: write
     env:
-      RELEASE_VERSION: ${{ inputs.release_version }}
+      RELEASE_VERSION: ${{ github.event_name == 'push' && '0.58.0' || inputs.release_version }}
       RELEASE_CERTIFICATE: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
     steps:
       - uses: actions/checkout@v4
