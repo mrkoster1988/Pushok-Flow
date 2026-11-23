@@ -87,8 +87,13 @@ class V08Tests(unittest.TestCase):
 
     def test_version_in_ui(self):
         self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.(?:[89]|[1-9][0-9])\.0\+(?:[89]|[1-9][0-9])')
-        version = (ROOT / 'pubspec.yaml').read_text().split('version: ', 1)[1].splitlines()[0].split('+')[0]
-        self.assertIn(f"version: '{version}'", (ROOT / 'lib/main.dart').read_text())
+        version, build = (ROOT / 'pubspec.yaml').read_text().split('version: ', 1)[1].splitlines()[0].split('+')
+        constants = (ROOT / 'lib/models/app_version.dart').read_text()
+        self.assertIn(f"const appVersionName = '{version}';", constants)
+        self.assertIn(f'const appVersionCode = {build};', constants)
+        main = (ROOT / 'lib/main.dart').read_text()
+        self.assertIn("import 'models/app_version.dart';", main)
+        self.assertIn('version: appVersionName,', main)
         information = (ROOT / 'lib/ui/app_information_sheet.dart').read_text()
         self.assertIn("Text('Версия $version'", information)
         self.assertIn('applicationVersion: version', information)
