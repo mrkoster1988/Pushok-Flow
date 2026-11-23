@@ -1,13 +1,18 @@
 package shop.pushok.flow
 
 import android.net.ConnectivityManager
+import android.net.IpPrefix
+import android.net.LinkAddress
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.RouteInfo
 import android.os.Build
 import android.os.Handler
 import android.os.ParcelFileDescriptor
+import java.net.InetAddress
+import java.util.Collections
 
 /**
  * Observes physical networks even when the app's default network is its VPN.
@@ -23,12 +28,39 @@ internal class XrayNetworkMonitor(
     data class Snapshot(
         val network: Network,
         val candidate: XrayNetworkPolicy.Candidate,
-        val links: LinkProperties,
+        val links: LinkSnapshot,
     )
+
+    /** Only public getters; LinkProperties has no public copy constructor. */
+    data class LinkSnapshot(
+        val interfaceName: String?,
+        val linkAddresses: List<LinkAddress>,
+        val dnsServers: List<InetAddress>,
+        val domains: String?,
+        val routes: List<RouteInfo>,
+        val privateDnsActive: Boolean,
+        val privateDnsServerName: String?,
+        val mtu: Int?,
+        val nat64Prefix: IpPrefix?,
+    ) {
+        companion object {
+            fun capture(value: LinkProperties): LinkSnapshot = LinkSnapshot(
+                interfaceName = value.interfaceName,
+                linkAddresses = Collections.unmodifiableList(ArrayList(value.linkAddresses)),
+                dnsServers = Collections.unmodifiableList(ArrayList(value.dnsServers)),
+                domains = value.domains,
+                routes = Collections.unmodifiableList(ArrayList(value.routes)),
+                privateDnsActive = Build.VERSION.SDK_INT >= 28 && value.isPrivateDnsActive,
+                privateDnsServerName = if (Build.VERSION.SDK_INT >= 28) value.privateDnsServerName else null,
+                mtu = if (Build.VERSION.SDK_INT >= 29) value.mtu else null,
+                nat64Prefix = if (Build.VERSION.SDK_INT >= 30) value.nat64Prefix else null,
+            )
+        }
+    }
 
     private data class Entry(
         var capabilities: NetworkCapabilities? = null,
-        var links: LinkProperties? = null,
+        var links: LinkSnapshot? = null,
         var capabilitiesFromCallback: Boolean = false,
         var linksFromCallback: Boolean = false,
     )
@@ -36,7 +68,7 @@ internal class XrayNetworkMonitor(
         var available: Boolean? = null,
         var fresh: Boolean = false,
         var capabilities: NetworkCapabilities? = null,
-        var links: LinkProperties? = null,
+        var links: LinkSnapshot? = null,
     )
 
     private val lock = Any()
@@ -67,7 +99,7 @@ internal class XrayNetworkMonitor(
             it
         }
         override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) = enqueue(network) {
-            if (it.available != false) it.links = LinkProperties(properties)
+            if (it.available != false) it.links = LinkSnapshot.capture(properties)
             it
         }
         override fun onLost(network: Network) = enqueue(network) { Update(available = false) }
@@ -88,7 +120,7 @@ internal class XrayNetworkMonitor(
             for (network in manager.allNetworks) {
                 val capabilities = manager.getNetworkCapabilities(network) ?: continue
                 val links = manager.getLinkProperties(network) ?: continue
-                entries[network] = Entry(NetworkCapabilities(capabilities), LinkProperties(links))
+                entries[network] = Entry(NetworkCapabilities(capabilities), LinkSnapshot.capture(links))
             }
             mergePending()
             refreshAvailable()
@@ -177,7 +209,7 @@ internal class XrayNetworkMonitor(
                 // Callback metadata is ordered. Synchronous getter snapshots
                 // may lag behind it and must never erase that newer knowledge.
                 if (!entry.capabilitiesFromCallback) entry.capabilities = capabilities?.let(::NetworkCapabilities)
-                if (!entry.linksFromCallback) entry.links = links?.let(::LinkProperties)
+                if (!entry.linksFromCallback) entry.links = links?.let { LinkSnapshot.capture(it) }
             }
         }
     }

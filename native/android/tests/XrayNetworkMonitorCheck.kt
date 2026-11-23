@@ -1,13 +1,17 @@
 package shop.pushok.flow
 
 import android.net.ConnectivityManager
+import android.net.IpPrefix
 import android.net.LinkAddress
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.RouteInfo
+import android.os.Build
 import android.os.Handler
 import android.os.ParcelFileDescriptor
 import java.net.InetAddress
+import java.net.Inet6Address
 
 private fun caps(validated: Boolean = true, unmetered: Boolean = false) = NetworkCapabilities()
     .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -15,9 +19,9 @@ private fun caps(validated: Boolean = true, unmetered: Boolean = false) = Networ
         if (validated) addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
         if (unmetered) addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
-private fun links(name: String, dns: String = "192.0.2.53") = LinkProperties().apply {
+private fun links(name: String, dns: String = "192.0.2.53") = LinkProperties.fixture().apply {
     interfaceName = name
-    linkAddresses += LinkAddress(InetAddress.getByName("192.0.2.7"))
+    linkAddresses += LinkAddress(InetAddress.getByName("192.0.2.7"), 24)
     dnsServers += InetAddress.getByName(dns)
 }
 
@@ -163,7 +167,7 @@ fun main() {
     val staleMonitor = XrayNetworkMonitor(staleManager, staleHandler, {}, { staleReplies += it })
     staleMonitor.start()
     staleManager.capabilities[mobile] = caps().removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    staleManager.links[mobile] = LinkProperties()
+    staleManager.links[mobile] = LinkProperties.fixture()
     staleManager.callback!!.onAvailable(mobile)
     staleManager.callback!!.onCapabilitiesChanged(mobile, caps())
     staleManager.callback!!.onLinkPropertiesChanged(mobile, links("rmnet0"))
@@ -188,5 +192,85 @@ fun main() {
     check(ParcelFileDescriptor.duplicates.last().closed)
     check(!XrayNetworkSockets.bind(wifi, -1) { error("must not protect invalid FD") })
     check(!XrayNetworkSockets.bind(wifi, Int.MAX_VALUE.toLong() + 1) { error("must not truncate FD") })
+    linkSnapshotChecks()
     println("Xray actual Android monitor: API24 inventory, coalescing, handover, stale callbacks and FD binding checks passed")
+}
+
+private fun linkSnapshotChecks() {
+    val scopedDns = Inet6Address.getByAddress(null, InetAddress.getByName("fe80::53").address, 7)
+    fun metadata() = links("wlan0").apply {
+        dnsServers += scopedDns
+        domains = "example.test"
+        routes += RouteInfo.fixture("192.0.2.0/24 via wlan0")
+        privateDnsActiveValue = true
+        privateDnsServerNameValue = "dns.example.test"
+        mtuValue = 1400
+        nat64PrefixValue = IpPrefix.fixture("64:ff9b::/96")
+    }
+    val previousApi = Build.VERSION.SDK_INT
+    try {
+        for (api in listOf(24, 28, 29, 30)) {
+            Build.VERSION.SDK_INT = api
+            val handler = Handler()
+            val manager = ConnectivityManager()
+            val network = Network(api.toLong())
+            val original = metadata()
+            manager.capabilities[network] = caps()
+            manager.links[network] = original
+            val deliveries = mutableListOf<XrayNetworkMonitor.Snapshot?>()
+            val monitor = XrayNetworkMonitor(manager, handler, {}, { deliveries += it })
+            monitor.start()
+            val captured = deliveries.single()!!.links
+            // Getter guards in the stub fail if production accesses a newer API.
+            check(captured.privateDnsActive == (api >= 28))
+            check(captured.privateDnsServerName == if (api >= 28) "dns.example.test" else null)
+            check(captured.mtu == if (api >= 29) 1400 else null)
+            check(captured.nat64Prefix == if (api >= 30) IpPrefix.fixture("64:ff9b::/96") else null)
+            original.interfaceName = "changed"
+            original.linkAddresses.clear()
+            original.dnsServers.clear()
+            original.routes.clear()
+            original.domains = "changed.test"
+            check(captured.interfaceName == "wlan0")
+            check(captured.linkAddresses.single().prefixLength == 24)
+            check(captured.dnsServers.size == 2 && (captured.dnsServers.last() as Inet6Address).scopeId == 7)
+            check(captured.routes == listOf(RouteInfo.fixture("192.0.2.0/24 via wlan0")))
+            check(captured.domains == "example.test")
+            try {
+                (captured.dnsServers as MutableList<*>).clear()
+                error("Snapshot DNS list must be immutable")
+            } catch (_: UnsupportedOperationException) {}
+
+            val mutations = mutableListOf<(LinkProperties) -> Unit>(
+                { it.dnsServers += InetAddress.getByName("198.51.100.53") },
+                { it.domains = "other.test" },
+                { it.routes += RouteInfo.fixture("0.0.0.0/0 via 192.0.2.1") },
+                { it.linkAddresses[0] = LinkAddress(InetAddress.getByName("192.0.2.7"), 25) },
+            )
+            if (api >= 28) {
+                mutations += { it.privateDnsActiveValue = false }
+                mutations += { it.privateDnsServerNameValue = "other-dns.example.test" }
+            }
+            if (api >= 29) mutations += { it.mtuValue = 1420 }
+            if (api >= 30) mutations += { it.nat64PrefixValue = IpPrefix.fixture("2001:db8:64::/96") }
+            for (mutate in mutations) {
+                // Establish an identical baseline before changing exactly one
+                // field. Resetting the previous mutation must not be mistaken
+                // for evidence that the new field participates in equality.
+                manager.callback!!.onLinkPropertiesChanged(network, metadata())
+                handler.runCurrent()
+                handler.advanceBy(250)
+                val next = metadata().apply(mutate)
+                val count = deliveries.size
+                manager.callback!!.onLinkPropertiesChanged(network, next)
+                next.linkAddresses.clear() // callback captures before queueing
+                next.dnsServers.clear()
+                next.routes.clear()
+                handler.runCurrent()
+                handler.advanceBy(250)
+                check(deliveries.size == count + 1 && deliveries.last()?.network === network)
+            }
+            monitor.stop()
+        }
+    } finally { Build.VERSION.SDK_INT = previousApi }
 }

@@ -2,6 +2,7 @@ package android.net
 
 import java.io.FileDescriptor
 import java.net.InetAddress
+import android.os.Build
 
 class Network(val networkHandle: Long) {
     val bound = mutableListOf<FileDescriptor>()
@@ -27,19 +28,34 @@ class NetworkCapabilities() {
     }
 }
 
-data class LinkAddress(val address: InetAddress)
-class LinkProperties() {
+data class LinkAddress(val address: InetAddress, val prefixLength: Int)
+class RouteInfo private constructor(private val value: String) {
+    override fun equals(other: Any?): Boolean = other is RouteInfo && value == other.value
+    override fun hashCode(): Int = value.hashCode()
+    companion object { fun fixture(value: String) = RouteInfo(value) }
+}
+class IpPrefix private constructor(private val value: String) {
+    override fun equals(other: Any?): Boolean = other is IpPrefix && value == other.value
+    override fun hashCode(): Int = value.hashCode()
+    companion object { fun fixture(value: String) = IpPrefix(value) }
+}
+// API24 exposes no public LinkProperties constructor. Only tests create fixtures;
+// production copy/no-arg constructor calls must fail this compilation gate.
+class LinkProperties private constructor() {
     var interfaceName: String? = null
     val linkAddresses = mutableListOf<LinkAddress>()
     val dnsServers = mutableListOf<InetAddress>()
-    constructor(other: LinkProperties) : this() {
-        interfaceName = other.interfaceName
-        linkAddresses += other.linkAddresses
-        dnsServers += other.dnsServers
-    }
-    override fun equals(other: Any?): Boolean = other is LinkProperties && interfaceName == other.interfaceName &&
-        linkAddresses == other.linkAddresses && dnsServers == other.dnsServers
-    override fun hashCode(): Int = listOf(interfaceName, linkAddresses, dnsServers).hashCode()
+    var domains: String? = null
+    val routes = mutableListOf<RouteInfo>()
+    var privateDnsActiveValue = false
+    var privateDnsServerNameValue: String? = null
+    var mtuValue = 0
+    var nat64PrefixValue: IpPrefix? = null
+    val isPrivateDnsActive: Boolean get() { check(Build.VERSION.SDK_INT >= 28); return privateDnsActiveValue }
+    val privateDnsServerName: String? get() { check(Build.VERSION.SDK_INT >= 28); return privateDnsServerNameValue }
+    val mtu: Int get() { check(Build.VERSION.SDK_INT >= 29); return mtuValue }
+    val nat64Prefix: IpPrefix? get() { check(Build.VERSION.SDK_INT >= 30); return nat64PrefixValue }
+    companion object { fun fixture() = LinkProperties() }
 }
 
 class NetworkRequest(val capabilities: Set<Int>) {
