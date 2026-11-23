@@ -40,7 +40,7 @@ class SubscriptionStatus {
   static const _refreshErrorCodes = {
     'SUBSCRIPTION_URL_INVALID', 'SUBSCRIPTION_INVALID', 'SUBSCRIPTION_TOO_LARGE',
     'SUBSCRIPTION_EMPTY', 'SUBSCRIPTION_UNSUPPORTED',
-    'SUBSCRIPTION_NETWORK_ERROR', 'SUBSCRIPTION_AUTH_REQUIRED',
+    'SUBSCRIPTION_NETWORK_ERROR', 'SUBSCRIPTION_TLS_ERROR', 'SUBSCRIPTION_AUTH_REQUIRED',
   };
   static final _id = RegExp(
       r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
@@ -223,6 +223,8 @@ String subscriptionErrorMessage(Object error) {
       'Состояние подключения неизвестно. Обновите диагностику и повторите действие.',
     'SUBSCRIPTION_NETWORK_ERROR' || 'SUBSCRIPTION_TIMEOUT' || 'SUBSCRIPTION_DOWNLOAD_FAILED' =>
       'Не удалось загрузить подписку. Сохранённые серверы остаются на устройстве.',
+    'SUBSCRIPTION_TLS_ERROR' =>
+      'Не удалось проверить защищённое соединение с сервером подписки. Уточните у поставщика HTTPS-адрес и сертификат.',
     'SUBSCRIPTION_HTTP_ERROR' || 'SUBSCRIPTION_ACCESS_DENIED' ||
     'SUBSCRIPTION_AUTH_REQUIRED' || 'SUBSCRIPTION_EXPIRED' =>
       'Сервис не предоставил список серверов. Проверьте подписку в магазине.',

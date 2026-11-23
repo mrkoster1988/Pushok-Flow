@@ -5,6 +5,7 @@ import android.os.Handler
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.net.InetAddress
 import java.net.URL
 import java.security.cert.Certificate
@@ -13,6 +14,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLPeerUnverifiedException
 
 /** The production bridge, downloader, feed parser and catalog; only Android/I/O are fixtures. */
 private class Reply : MethodChannel.Result {
@@ -156,6 +158,9 @@ private fun providerFailuresAreBoundedAndPreserveProfiles() {
         "SUBSCRIPTION_EMPTY" to ResponseSpec(body = ""),
         "SUBSCRIPTION_UNSUPPORTED" to ResponseSpec(body = "{\"unsupported\":true}"),
         "SUBSCRIPTION_NETWORK_ERROR" to ResponseSpec(status = 503),
+        "SUBSCRIPTION_TLS_ERROR" to ResponseSpec(onStatus = {
+            throw IOException("private-token transport", SSLPeerUnverifiedException("private-token certificate"))
+        }),
         "SUBSCRIPTION_AUTH_REQUIRED" to ResponseSpec(status = 403),
     )
     for ((code, response) in cases) Fixture().use { f ->
@@ -165,6 +170,32 @@ private fun providerFailuresAreBoundedAndPreserveProfiles() {
         check(f.errors(status) == mapOf(f.ids[0] to code))
         check(f.profiles(f.ids[0]) == listOf(config(1)))
         check(f.profiles(f.ids[1]) == listOf(config(102)))
+    }
+    Fixture().use { f ->
+        f.responses[1] = ResponseSpec(onStatus = {
+            throw SSLPeerUnverifiedException("private-token certificate")
+        })
+        val result = f.invoke("refreshSubscription", mapOf("id" to f.ids[0]))
+        check(result.code == "SUBSCRIPTION_TLS_ERROR")
+        check(f.errors() == mapOf(f.ids[0] to "SUBSCRIPTION_TLS_ERROR"))
+        check(f.store.writes == f.originalWrites)
+        check(f.profiles(f.ids[0]) == listOf(config(1)) && f.profiles(f.ids[1]) == listOf(config(2)))
+        // A failed new import cannot create a subscription or replace either saved list.
+        f.responses[3] = ResponseSpec(onStatus = {
+            throw SSLPeerUnverifiedException("private-token certificate")
+        })
+        val imported = f.invoke("importSubscription", mapOf(
+            "name" to "New provider", "url" to "https://provider3.example/sub/private-token-3"))
+        check(imported.code == "SUBSCRIPTION_TLS_ERROR")
+        check(f.store.subscriptionRecords().map { it.id } == f.ids)
+        check(f.store.writes == f.originalWrites)
+        check(f.errors() == mapOf(f.ids[0] to "SUBSCRIPTION_TLS_ERROR"))
+        check(f.profiles(f.ids[0]) == listOf(config(1)) && f.profiles(f.ids[1]) == listOf(config(2)))
+        // After the provider is corrected, a normal verified refresh clears only its error.
+        f.responses[1] = ResponseSpec(body = config(111))
+        check(f.errors(f.invoke("refreshSubscription", mapOf("id" to f.ids[0])).status()).isEmpty())
+        check(f.profiles(f.ids[0]) == listOf(config(111)) && f.profiles(f.ids[1]) == listOf(config(2)))
+        check(f.opened == listOf(1, 3, 1) && f.store.writes == f.originalWrites + 1)
     }
     Fixture(5).use { f ->
         for (number in 1..5) f.responses[number] = ResponseSpec(status = 503)

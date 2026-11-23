@@ -113,6 +113,34 @@ void main() {
       const ValueKey('refresh_subscription_$_id'))).onPressed, isNull);
   });
 
+  testWidgets('TLS provider failure shows a certificate hint and preserves healthy servers',
+      (tester) async {
+    final refreshed = <String>[];
+    final status = SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true,
+      'subscriptions': [
+        {'id': _id, 'name': 'Магазин', 'host': 'example.invalid',
+          'profileCount': 2, 'updatedAt': 1795377600000},
+        {'id': _otherId, 'name': 'Другой магазин', 'host': 'other.invalid',
+          'profileCount': 4, 'updatedAt': 1795464000000},
+      ],
+      'refreshErrors': {_id: 'SUBSCRIPTION_TLS_ERROR'},
+    });
+    await _pump(tester, SubscriptionsCard(status: status, mutationsEnabled: true,
+      onRefresh: (entry) => refreshed.add(entry.id)));
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_id')), findsOneWidget);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_otherId')), findsNothing);
+    expect(find.textContaining('защищённое соединение'), findsOneWidget);
+    expect(find.textContaining('HTTPS-адрес'), findsOneWidget);
+    expect(find.textContaining('сертификат'), findsOneWidget);
+    expect(find.text('example.invalid · Серверов: 2'), findsOneWidget);
+    expect(find.text('other.invalid · Серверов: 4'), findsOneWidget);
+    expect(find.textContaining('SUBSCRIPTION_TLS_ERROR'), findsNothing);
+    await _tap(tester, 'refresh_subscription_$_id');
+    expect(refreshed, [_id]);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('A received URL stays masked and only explicit save imports', (tester) async {
     var saves = 0;
     await _pump(tester, SubscriptionEditor(draft: const SubscriptionDraft(url: _url),
@@ -130,6 +158,44 @@ void main() {
     expect(tester.widget<TextField>(field).controller!.text, _url);
     expect(find.textContaining('Сохранённые серверы'), findsOneWidget);
     expect(find.textContaining('PRIVATE_FAILURE'), findsNothing);
+  });
+
+  testWidgets('TLS import failure keeps the masked draft and allows an explicit retry',
+      (tester) async {
+    var saves = 0;
+    var completions = 0;
+    await _pump(tester, StatefulBuilder(builder: (context, update) => completions > 0
+      ? const Text('Подписка добавлена')
+      : SubscriptionEditor(draft: const SubscriptionDraft(url: _url),
+          onCompleted: () => update(() => completions++),
+          onSave: (url, name) async {
+            expect(url, _url);
+            saves++;
+            if (saves == 1) {
+              throw PlatformException(code: 'SUBSCRIPTION_TLS_ERROR',
+                message: 'PRIVATE_CERTIFICATE', details: _url);
+            }
+          })));
+    final field = find.byKey(const Key('subscription_url'));
+    expect(saves, 0);
+    await _tap(tester, 'save_subscription');
+    expect(saves, 1);
+    expect(completions, 0);
+    expect(tester.widget<TextField>(field).controller!.text, _url);
+    expect(tester.widget<TextField>(field).obscureText, isTrue);
+    expect(find.textContaining('защищённое соединение'), findsOneWidget);
+    expect(find.textContaining('HTTPS-адрес'), findsOneWidget);
+    expect(find.textContaining('сертификат'), findsOneWidget);
+    expect(find.textContaining('PRIVATE_CERTIFICATE'), findsNothing);
+    expect(tester.widget<Text>(find.byKey(const Key('subscription_editor_error')))
+      .data, isNot(contains('PRIVATE_TOKEN')));
+    expect(tester.widget<FilledButton>(find.byKey(const Key('save_subscription')))
+      .onPressed, isNotNull);
+    await _tap(tester, 'save_subscription');
+    expect(saves, 2);
+    expect(completions, 1);
+    expect(find.text('Подписка добавлена'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Revealed link hides again when app loses focus', (tester) async {

@@ -3,8 +3,10 @@ package shop.pushok.flow
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.DecodeHintType
 import com.google.zxing.EncodeHintType
+import com.google.zxing.LuminanceSource
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.ResultMetadataType
+import com.google.zxing.ResultPointCallback
 import com.google.zxing.common.BitArray
 import com.google.zxing.common.BitMatrix
 import com.google.zxing.oned.Code128Writer
@@ -69,7 +71,7 @@ private fun frame(
 private fun decoder(): Decoder = ProfileQrCameraDecoder.createFactory()
     .createDecoder(emptyMap<DecodeHintType, Any>())
 
-private fun reads(label: String, expected: String, source: PlanarYUVLuminanceSource,
+private fun reads(label: String, expected: String, source: LuminanceSource,
     target: Decoder = decoder()) {
     // MIXED_SCAN alternates polarity. It must resolve either colour in two frames.
     val first = target.decode(source)
@@ -79,6 +81,185 @@ private fun reads(label: String, expected: String, source: PlanarYUVLuminanceSou
     }
     check(ProfileQrCameraDecoder.readPayload(result) == expected) {
         "Complete camera result rejected: $label"
+    }
+}
+
+private fun finderSelectionCameraChecks() {
+    // A reserved documentation IP and invented token. Fractional screen scaling
+    // makes the single-QR finder choose an interior candidate; the multi-reader
+    // still finds exactly one complete symbol after checking the other candidates.
+    val subscription = "https://198.51.100.150:2096/sub/548e034ab52285f5"
+    val symbol = Encoder.encode(subscription, ErrorCorrectionLevel.L, mapOf(
+        EncodeHintType.CHARACTER_SET to "UTF-8", EncodeHintType.QR_MASK_PATTERN to 5,
+    )).matrix
+    check(symbol.width == 29 && symbol.height == 29)
+    val side = 360
+    val quiet = 3
+    for (inverted in listOf(false, true)) {
+        val data = ByteArray(side * side) { offset ->
+            val x = (offset % side) * (symbol.width + quiet * 2) / side - quiet
+            val y = (offset / side) * (symbol.height + quiet * 2) / side - quiet
+            val black = x in 0 until symbol.width && y in 0 until symbol.height &&
+                symbol[x, y].toInt() == 1
+            if (black != inverted) 128.toByte() else 179.toByte()
+        }
+        data[0] = 110.toByte()
+        data[1] = 194.toByte()
+        val unchanged = data.copyOf()
+        val source = PlanarYUVLuminanceSource(data, side, side, 0, 0, side, side, false)
+        reads("fractionally scaled finder candidates, inverted=$inverted", subscription, source)
+        check(data.contentEquals(unchanged))
+        val pixels = IntArray(data.size) { index ->
+            val value = data[index].toInt() and 255
+            -0x1000000 or (value shl 16) or (value shl 8) or value
+        }
+        check(ProfileQrDecoder.decodePixels(side, side, pixels) == subscription)
+    }
+}
+
+private fun lowContrastCameraChecks() {
+    // Same image size and grey distribution as a reported screenshot, with an
+    // invented subscription: main levels 128/179 and edge extremes 110/194.
+    // Never commit a user's QR pixels or bearer subscription URL.
+    val subscription = "https://example.invalid:2096/sub/synthetic-token"
+    val symbol = qr(subscription, 360)
+    for (inverted in listOf(false, true)) {
+        val data = ByteArray(360 * 360) { offset ->
+            if (symbol[offset % 360, offset / 360] != inverted) 128.toByte() else 179.toByte()
+        }
+        data[0] = 110.toByte()
+        data[1] = 194.toByte()
+        val unchanged = data.copyOf()
+        val source = PlanarYUVLuminanceSource(data, 360, 360, 0, 0, 360, 360, false)
+        reads("360px grey subscription, inverted=$inverted", subscription, source)
+        check(data.contentEquals(unchanged)) { "Camera changed the borrowed frame" }
+        val pixels = IntArray(data.size) { index ->
+            val value = data[index].toInt() and 255
+            -0x1000000 or (value shl 16) or (value shl 8) or value
+        }
+        check(ProfileQrDecoder.decodePixels(360, 360, pixels) == subscription)
+    }
+}
+
+/** A cropped provider whose rows are borrowed, not owned by the decoder. */
+private class BorrowedRows(
+    source: LuminanceSource,
+    private val interruptedAt: Int? = null,
+    private val brokenAt: Int? = null,
+) : LuminanceSource(source.width, source.height) {
+    private val borrowed = Array(height) { source.getRow(it, null) }
+    private val snapshots = borrowed.map { it.copyOf() }
+    private val ownedBuffers = mutableSetOf<ByteArray>()
+    var reads = 0
+        private set
+
+    override fun getMatrix(): ByteArray = error("Camera must copy bounded crop rows")
+
+    override fun getRow(y: Int, row: ByteArray?): ByteArray {
+        reads++
+        check(row != null && row.size == width)
+        ownedBuffers += row
+        // Some sources ignore the provided scratch row. It must still be erased,
+        // while the array actually returned below remains owned by this provider.
+        row.fill(17)
+        if (y == brokenAt) error("Synthetic unavailable camera row")
+        if (y == interruptedAt) Thread.currentThread().interrupt()
+        return borrowed[y]
+    }
+
+    fun assertUnchangedAndErased() {
+        check(borrowed.indices.all { borrowed[it].contentEquals(snapshots[it]) }) {
+            "Camera modified a borrowed luminance row"
+        }
+        check(ownedBuffers.all { row -> row.all { it == 0.toByte() } }) {
+            "Camera retained its owned row buffer"
+        }
+    }
+}
+
+private fun boundedCameraFrameChecks() {
+    // PlanarYUVLuminanceSource has a 720px source stride, 40px left crop and
+    // 160px top crop. Result coordinates and crop contents must remain unchanged.
+    val cropped = frame(qr(vless, 360), dark = 128, light = 179)
+    val before = cropped.matrix.copyOf()
+    val source = BorrowedRows(cropped)
+    reads("cropped, strided, borrowed grey rows", vless, source)
+    check(source.reads in 640..1280)
+    source.assertUnchangedAndErased()
+    check(cropped.matrix.contentEquals(before))
+
+    // Never request a huge matrix/row before checking dimensions and pixel count.
+    for ((width, height) in listOf(4097 to 1, 1 to 4097, 2049 to 2049,
+        Int.MAX_VALUE to Int.MAX_VALUE)) {
+        val oversized = object : LuminanceSource(width, height) {
+            override fun getMatrix(): ByteArray = error("Read oversized matrix")
+            override fun getRow(y: Int, row: ByteArray?): ByteArray = error("Read oversized row")
+        }
+        check(decoder().decode(oversized) == null)
+    }
+
+    val target = decoder()
+    val cancelledBeforeRead = BorrowedRows(cropped)
+    try {
+        Thread.currentThread().interrupt()
+        check(target.decode(cancelledBeforeRead) == null)
+        check(Thread.currentThread().isInterrupted)
+        check(cancelledBeforeRead.reads == 0)
+    } finally { Thread.interrupted() }
+    cancelledBeforeRead.assertUnchangedAndErased()
+
+    val cancelledDuringRead = BorrowedRows(cropped, interruptedAt = 17)
+    try {
+        check(target.decode(cancelledDuringRead) == null)
+        check(Thread.currentThread().isInterrupted)
+        check(cancelledDuringRead.reads == 18)
+    } finally { Thread.interrupted() }
+    cancelledDuringRead.assertUnchangedAndErased()
+
+    val broken = BorrowedRows(cropped, brokenAt = 8)
+    check(target.decode(broken) == null)
+    broken.assertUnchangedAndErased()
+    reads("after interrupted/unavailable frames", vless, cropped, target)
+
+    // The framework's result-point callback must survive factory construction;
+    // caller hints cannot expand this scanner to non-QR barcode formats.
+    var callbackPoints = 0
+    val callbackTarget = ProfileQrCameraDecoder.createFactory().createDecoder(mapOf(
+        DecodeHintType.NEED_RESULT_POINT_CALLBACK to ResultPointCallback { callbackPoints++ },
+        DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.CODE_128),
+    ))
+    reads("preserved result-point callback", vless, cropped, callbackTarget)
+    check(callbackPoints >= 3)
+    val barcode = frame(Code128Writer().encode("123456789012", BarcodeFormat.CODE_128, 560, 160),
+        dark = 128, light = 179)
+    repeat(4) { check(callbackTarget.decode(barcode) == null) }
+}
+
+private fun multipleCameraSymbolsChecks() {
+    val firstPayload = "https://example.invalid/sub/synthetic-first"
+    val side = 360
+    val gap = 60
+    val width = side * 2 + gap
+    for (secondPayload in listOf(firstPayload, "https://example.invalid/sub/synthetic-second")) {
+        val first = qr(firstPayload, side)
+        val second = qr(secondPayload, side)
+        for (inverted in listOf(false, true)) {
+            val data = ByteArray(width * side) { if (inverted) 128.toByte() else 179.toByte() }
+            for ((left, symbol) in listOf(0 to first, side + gap to second)) {
+                for (y in 0 until side) for (x in 0 until side) {
+                    data[y * width + left + x] =
+                        if (symbol[x, y] != inverted) 128.toByte() else 179.toByte()
+                }
+            }
+            val unchanged = data.copyOf()
+            val source = PlanarYUVLuminanceSource(data, width, side, 0, 0, width, side, false)
+            val target = decoder()
+            // Two symbols in the inspected polarity are ambiguous even if their
+            // text is equal. This is not a cross-polarity scene guarantee.
+            repeat(4) { check(target.decode(source) == null) { "Camera chose one of several QRs" } }
+            check(data.contentEquals(unchanged))
+            reads("after ambiguous camera frame", vless, frame(qr(vless)), target)
+        }
     }
 }
 
@@ -170,13 +351,17 @@ private fun structuredAppendCameraPhotoParity() {
     val expected = mapOf("errorCode" to "PROFILE_QR_MULTIPLE")
     for ((index, total) in listOf(0 to 2, 1 to 2, 0 to 1)) {
         val symbol = structuredAppendSymbol(partialUrl, index, total)
-        for (inverted in listOf(false, true)) {
+        for (inverted in listOf(false, true)) for ((dark, light) in listOf(0 to 255, 128 to 179)) {
             val target = decoder()
-            val source = frame(symbol, inverted = inverted)
+            val source = frame(symbol, inverted = inverted, dark = dark, light = light)
             val result = target.decode(source) ?: target.decode(source)
                 ?: error("Real structured-append fixture was not decoded")
-            check(result.resultMetadata.containsKey(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE))
-            check(result.resultMetadata.containsKey(ResultMetadataType.STRUCTURED_APPEND_PARITY))
+            // The multi-reader may merge structured append into a result with no
+            // finder points. Either real upstream representation must be rejected.
+            val metadata = result.resultMetadata
+            check((metadata?.containsKey(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE) == true &&
+                metadata.containsKey(ResultMetadataType.STRUCTURED_APPEND_PARITY)) ||
+                result.resultPoints.isEmpty())
             check(result.text == partialUrl)
             // This reproduces the old boundary: validating text alone accepts a
             // partial token URL. Production must inspect the real result first.
@@ -194,6 +379,10 @@ private fun structuredAppendCameraPhotoParity() {
 }
 
 fun main() {
+    finderSelectionCameraChecks()
+    lowContrastCameraChecks()
+    boundedCameraFrameChecks()
+    multipleCameraSymbolsChecks()
     val ordinary = frame(qr(vless))
     val inverted = frame(qr(vless), inverted = true)
     val previous = DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE))

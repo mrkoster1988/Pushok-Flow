@@ -4,8 +4,12 @@ import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.net.URI
 import java.net.URL
+import java.security.cert.CertificateException
+import java.security.cert.CertPathValidatorException
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
 
 /** HTTPS only, bounded bytes/time, explicit redirects and constant diagnostics. */
 class SubscriptionDownloader internal constructor(
@@ -51,14 +55,28 @@ class SubscriptionDownloader internal constructor(
             })
         } catch (failure: SubscriptionFailure) {
             throw failure
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             // The raw IOException may contain the complete URL and access token.
             ensureActive()
-            throw SubscriptionFailure("SUBSCRIPTION_NETWORK_ERROR")
+            throw SubscriptionFailure(if (isTlsFailure(failure)) "SUBSCRIPTION_TLS_ERROR"
+                else "SUBSCRIPTION_NETWORK_ERROR")
         } finally {
             call.cancel()
             activeCall.compareAndSet(call, null)
         }
+    }
+
+    private fun isTlsFailure(failure: Exception): Boolean {
+        // Android transports may wrap certificate/peer failures in IOException.
+        // Inspect types only, never exception text, and bound even a cyclic chain.
+        var next: Throwable? = failure
+        repeat(16) {
+            val current = next ?: return false
+            if (current is SSLHandshakeException || current is SSLPeerUnverifiedException ||
+                current is CertificateException || current is CertPathValidatorException) return true
+            next = current.cause
+        }
+        return false
     }
 
     private fun fetchRemote(rawUrl: String, call: BoundedNetworkCall<Response>): Response {

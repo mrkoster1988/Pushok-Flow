@@ -1,17 +1,24 @@
 package shop.pushok.flow
 
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.io.InputStream
 import java.net.InetAddress
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URL
 import java.net.URLEncoder
 import java.security.cert.Certificate
+import java.security.cert.CertificateException
+import java.security.cert.CertPathValidatorException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
 
 private open class TestConnection(
     url: URL,
@@ -39,6 +46,7 @@ private fun expectCode(code: String, run: () -> Unit) {
     try { run(); error("Expected $code") }
     catch (failure: SubscriptionFailure) {
         check(failure.code == code) { "Expected $code, got ${failure.code}" }
+        check(failure.message == null && failure.cause == null)
         check(!failure.toString().contains("secret"))
     }
 }
@@ -279,6 +287,92 @@ private fun checkInterruptedWaiterAndLateAbort() {
     check(abortThread.get() !== task.thread && abortThread.get()?.name?.contains("-abort-") == true)
 }
 
+private fun checkSubscriptionTlsErrorsAreSafe() {
+    val source = "https://subscription.example.org:2096/sub/secret-token"
+    val tlsFailures: List<() -> Exception> = listOf(
+        { SSLPeerUnverifiedException("secret-token hostname did not match") },
+        { SSLHandshakeException("secret-token handshake failed") },
+        { IOException("secret-token wrapper", SSLPeerUnverifiedException("secret-token peer")) },
+        { IOException("secret-token wrapper", SSLHandshakeException("secret-token handshake")) },
+        { IOException("secret-token wrapper", CertificateException("secret-token certificate")) },
+        { IOException("secret-token wrapper", CertPathValidatorException("secret-token certificate path")) },
+    )
+    for (stage in listOf("open", "headers", "body")) for (failure in tlsFailures) {
+        val requestedSchemes = mutableListOf<String>()
+        val connection = object : TestConnection(URL(source)) {
+            override fun getResponseCode(): Int {
+                if (stage == "headers") throw failure()
+                return super.getResponseCode()
+            }
+            override fun getInputStream(): InputStream {
+                if (stage == "body") throw failure()
+                return super.getInputStream()
+            }
+        }
+        val client = SubscriptionDownloader(
+            resolve = { arrayOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8))) },
+            open = {
+                requestedSchemes.add(it.protocol)
+                if (stage == "open") throw failure()
+                connection
+            },
+        )
+        expectCode("SUBSCRIPTION_TLS_ERROR") { client.fetch(source) }
+        check(requestedSchemes == listOf("https")) { "TLS failure must not retry or downgrade transport" }
+        check(stage == "open" || connection.closed)
+    }
+    val first = IOException("secret-token cycle one")
+    val second = IOException("secret-token cycle two", first)
+    first.initCause(second)
+    for (failure in listOf(
+        IOException("secret-token SSLHandshakeException certificate text is not a TLS type"),
+        UnknownHostException("secret-token DNS"),
+        SocketTimeoutException("secret-token timeout"),
+        IOException("secret-token wrapper", SocketTimeoutException("secret-token timeout")),
+        first,
+    )) {
+        val client = SubscriptionDownloader(
+            resolve = { arrayOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8))) },
+            open = { throw failure },
+        )
+        expectCode("SUBSCRIPTION_NETWORK_ERROR") { client.fetch(source) }
+    }
+}
+
+private fun checkLateTlsFailureDoesNotOverrideStop() {
+    for (cancel in listOf(false, true)) {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val ticks = AtomicLong()
+        val source = "https://subscription.example.org/sub/secret-token"
+        val pool = BoundedNetworkPool("subscription-tls-stop", afterCompletion = { finished.countDown() })
+        val client = SubscriptionDownloader(
+            resolve = { arrayOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8))) },
+            open = { target -> object : TestConnection(target) {
+                override fun getResponseCode(): Int {
+                    blockedPlatformCall(entered, release)
+                    throw SSLPeerUnverifiedException("secret-token late hostname failure")
+                }
+            } },
+            elapsedMs = ticks::get,
+            network = pool,
+        )
+        val result = AsyncResult { client.fetch(source) }
+        try {
+            await(entered, "TLS fixture did not reach its blocked handshake")
+            if (cancel) client.cancel() else ticks.set(40_001L)
+            val error = result.outcome().exceptionOrNull()
+            val expected = if (cancel) "SUBSCRIPTION_INTERRUPTED" else "SUBSCRIPTION_NETWORK_ERROR"
+            check(error is SubscriptionFailure && error.code == expected)
+            check(release.count == 1L && finished.count == 1L)
+        } finally {
+            release.countDown()
+            await(finished, "Late TLS failure did not release the worker")
+        }
+    }
+}
+
 private fun checkPushokExternalLinks() {
     val destinations = mapOf(
         PushokExternalLinks.Destination.ACCOUNT to listOf(
@@ -411,6 +505,8 @@ fun main() {
     checkBoundedPoolCapacityAndDiscard()
     checkPoolCompletionHandoff()
     checkInterruptedWaiterAndLateAbort()
+    checkSubscriptionTlsErrorsAreSafe()
+    checkLateTlsFailureDoesNotOverrideStop()
 
     val sixHours = SubscriptionRefreshPolicy.SUCCESS_INTERVAL_MS
     val hour = SubscriptionRefreshPolicy.RETRY_INTERVAL_MS

@@ -71,6 +71,26 @@ void main() {
     }
   });
 
+  test('TLS failures remain provider-scoped with safe actionable diagnostics', () {
+    final status = SubscriptionStatus.fromPlatform({
+      ..._status(),
+      'subscriptions': [_entry(), {..._entry(), 'id': _otherId, 'profileCount': 3}],
+      'refreshErrors': {_id: 'SUBSCRIPTION_TLS_ERROR'},
+    });
+    expect(status.refreshErrors, {_id: 'SUBSCRIPTION_TLS_ERROR'});
+    expect(status.errorCode, isNull);
+    expect(status.subscriptions.last.profileCount, 3);
+    final message = subscriptionErrorMessage(PlatformException(
+      code: 'SUBSCRIPTION_TLS_ERROR', message: 'PRIVATE_CERTIFICATE',
+      details: 'https://example.invalid/PRIVATE_TOKEN'));
+    expect(message, contains('защищённое соединение'));
+    expect(message, contains('HTTPS-адрес'));
+    expect(message, contains('сертификат'));
+    expect(message, contains('поставщика'));
+    expect(message, isNot(contains('PRIVATE_')));
+    expect(message, isNot(contains('example.invalid')));
+  });
+
   test('Status rejects leaked URLs, contradictory entries and invalid dates', () {
     for (final raw in <Object?>[
       null,

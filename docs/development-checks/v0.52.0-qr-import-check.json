@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-11-23T09:14:21.256460+00:00",
+  "version": "0.52.0",
+  "baselineCommit": "ff42d7895a0b64cd0ca7c15e4ef8b5a09941da5d",
+  "imageReplay": {
+    "input": "user-supplied image retained privately",
+    "width": 360,
+    "height": 360,
+    "grayRange": [
+      110,
+      194
+    ],
+    "dominantGrayLevels": [
+      128,
+      179
+    ],
+    "loading": "Java ImageIO -> original ARGB pixels; Android BitmapFactory not executed",
+    "comparison": {
+      "v0.51Decoder": {
+        "classifier": "typed subscription; exact URL preserved",
+        "photo": "passed; exact payload match",
+        "cameraAttempts": 4,
+        "cameraSuccesses": 0
+      },
+      "contrastOnly": {
+        "classifier": "typed subscription; exact URL preserved",
+        "photo": "passed; exact payload match",
+        "cameraAttempts": 4,
+        "cameraSuccesses": 0
+      },
+      "finalMultiReader": {
+        "classifier": "typed subscription; exact URL preserved",
+        "photo": "passed; exact payload match",
+        "cameraAttempts": 4,
+        "cameraSuccesses": 2,
+        "expectedAlternatingPolarity": true
+      }
+    },
+    "alternatingPolarityNote": "One polarity is inspected per frame; 2/4 means both normal-polarity attempts decoded the normal image. This is not a live-camera success rate.",
+    "imagePayloadAndHashesPublished": false,
+    "observationsRecordedAtUtc": "2026-11-23T09:13:04.947940+00:00"
+  },
+  "syntheticRegression": {
+    "status": "passed",
+    "sourceSha256": {
+      "native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrCameraDecoder.kt": "fa4b9000a74ef3751f85a6182f9293d54675da890c92c5b3c52e3009806e4d0b",
+      "native/android/tests/ProfileQrCameraCheck.kt": "14de3686080c9f0c0a0fc6a92cba1ea7ea65c940be55a8e98a0d5ba3537251b3"
+    },
+    "startedAtUtc": "2026-11-23T09:12:26.179102+00:00",
+    "finishedAtUtc": "2026-11-23T09:12:28.112111+00:00",
+    "beforeContrastOnlyExitCode": 1,
+    "finalExitCode": 0,
+    "beforeFailure": "Camera decoder failed: fractionally scaled finder candidates, inverted=false",
+    "finalSuccess": "Profile QR camera checks passed",
+    "logSha256": {
+      "camera-finder-before.log": "3af24aeb82e472e1b7c2467e1495b70856554721802ce598417a834c7330e08e",
+      "camera-final.log": "0b0869187f67c1094b60af05603270485d442fbe4b4fbdceb984dbff95189f97"
+    },
+    "scope": "Synthetic low contrast and finder-selection fixtures, polarities, crop/stride, input ownership, bounds, interruption, QR-only and structured append checks."
+  },
+  "subscriptionNetwork": {
+    "originTlsStatus": "not_verified",
+    "originFeedStatus": "not_verified",
+    "reason": "Direct access unavailable; normal workspace route supplied an intermediary certificate. Its identity mismatch cannot diagnose the origin server.",
+    "certificateVerificationBypassedForSubscription": false
+  },
+  "physicalDeviceAcceptance": "not_performed",
+  "androidBitmapFactoryExecuted": false
+}

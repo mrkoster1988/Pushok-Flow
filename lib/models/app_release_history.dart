@@ -62,6 +62,10 @@ bool _isPlainReleaseText(String text) {
 /// Bundled descriptions stay readable offline. Keep the five most recent
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
+  AppReleaseNotes(versionName: '0.52.0', versionCode: 52, changes: [
+    'Улучшено распознавание серых и малоконтрастных QR-кодов камерой.',
+    'Ошибка защищённого соединения при загрузке подписки показана отдельно с подсказкой проверить HTTPS-адрес и сертификат у провайдера.',
+  ]),
   AppReleaseNotes(versionName: '0.51.0', versionCode: 51, changes: [
     'Выбранный сервер подписки больше не сбрасывается при перестановке параметров VLESS-ссылки или изменении регистра адреса.',
     'Некорректное обновление с повторяющимися подключениями не заменяет сохранённые серверы.',
@@ -84,11 +88,6 @@ const bundledAppReleaseHistory = <AppReleaseNotes>[
     'Отмена входа и выход из аккаунта доступны во время ожидания сервера; запоздавший ответ не возвращает отменённый вход.',
     'Камера распознаёт неполные и составные QR-коды и сообщает, что нужен один полный код.',
     'Импорт из зависшего источника файла завершается по тайм-ауту; сканирование камерой остаётся доступным. Исправлена проверка ссылок внутри QR-кодов.',
-  ]),
-  AppReleaseNotes(versionName: '0.47.0', versionCode: 47, changes: [
-    'VLESS использует выбранную сеть Android при переходе между Wi-Fi и мобильным интернетом.',
-    'При потере сети отображается ожидание; подключение можно остановить.',
-    'Улучшена обработка смены сети на Android 7 и с Private DNS.',
   ]),
 ];
 
