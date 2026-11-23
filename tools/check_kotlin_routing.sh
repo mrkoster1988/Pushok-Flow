@@ -36,6 +36,14 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
   native/android/tests/FlowAccountCheck.kt -include-runtime -d "$out/account-tests.jar"
 java -jar "$out/account-tests.jar"
+
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountClient.kt \
+  native/android/tests/account_transport_stubs/*.kt \
+  native/android/tests/FlowAccountTransportCheck.kt -include-runtime -d "$out/account-transport-tests.jar"
+java -jar "$out/account-transport-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileProtectionPolicy.kt \
   native/android/tests/ProfileProtectionPolicyCheck.kt -include-runtime -d "$out/profile-protection-tests.jar"
 java -jar "$out/profile-protection-tests.jar"
@@ -117,6 +125,7 @@ kotlinc "${subscription_core[@]}" \
 java -jar "$out/profile-catalog-tests.jar"
 kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionDownloader.kt \
   native/android/tests/SubscriptionFeedCheck.kt \
   native/android/tests/SubscriptionCatalogCheck.kt \
@@ -143,6 +152,10 @@ java -jar "$out/route-recommendations-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayLifecycle.kt \
   native/android/tests/XrayLifecycleCheck.kt -include-runtime -d "$out/xray-lifecycle-tests.jar"
 java -jar "$out/xray-lifecycle-tests.jar"
+
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/XrayBootstrapDns.kt \
+  native/android/tests/XrayBootstrapDnsCheck.kt -include-runtime -d "$out/xray-bootstrap-dns-tests.jar"
+java -jar "$out/xray-bootstrap-dns-tests.jar"
 
 json_core="$out/json-core.jar"
 if [[ -n "${FLOW_JSON_CORE_JAR:-}" ]]; then

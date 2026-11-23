@@ -468,7 +468,7 @@ class BootstrapScriptTests(unittest.TestCase):
 
         self.native_names = (
             "MainActivity.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
-            "XrayConfig.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
+            "XrayConfig.kt", "XrayBootstrapDns.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",
             "UpdateAutomationPolicy.kt",
@@ -477,7 +477,7 @@ class BootstrapScriptTests(unittest.TestCase):
             "WireGuardProfileImport.kt", "ProfileImportReader.kt", "ProfileImportPayload.kt", "ProfileQrDecoder.kt",
             "ProfileQrCameraDecoder.kt", "ProfileQrImageReader.kt", "ProfileQrSession.kt", "WireGuardQrActivity.kt",
             "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "SubscriptionPolicy.kt", "SubscriptionFeed.kt",
-            "SubscriptionLinks.kt", "SubscriptionDownloader.kt", "ProfileSubscriptions.kt", "RouteSettingsStore.kt", "RouteAppAvailability.kt",
+            "SubscriptionLinks.kt", "BoundedNetworkCall.kt", "SubscriptionDownloader.kt", "ProfileSubscriptions.kt", "RouteSettingsStore.kt", "RouteAppAvailability.kt",
             "RouteRecommendationPolicy.kt", "RouteRecommendationStore.kt", "RecommendationAutomation.kt", "RouteRecommendations.kt",
         )
         native = self.project / "native/android/app/src/main/kotlin/shop/pushok/flow"

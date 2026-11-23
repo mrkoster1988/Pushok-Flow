@@ -84,29 +84,40 @@ class XrayVpnService : VpnService() {
                     }
                 }, remaining)
                 worker.execute {
-                    var error: String? = null
-                    try {
-                        requireCurrent(generation, deadline)
-                        if (!connected) startCore(data, generation, deadline)
-                        requireCurrent(generation, deadline)
-                    } catch (failure: XrayTunnelFailure) {
-                        error = failure.code
-                    } catch (_: PackageManager.NameNotFoundException) {
-                        error = "ROUTES_APPS_UNAVAILABLE"
-                    } catch (_: Throwable) {
-                        error = "XRAY_CONNECT_FAILED"
+                    val completion = try {
+                        lease.runStart(
+                            generation, deadline,
+                            readConnected = { connected },
+                            activate = {
+                                // An unsuccessful teardown still owns native resources.
+                                // Do not overwrite that owner with a queued new START.
+                                XrayRequestLease.knownState(false, nativeActive, false)
+                                startCore(data, generation, deadline)
+                            },
+                            cleanup = { stopCore() },
+                            errorCode = { failure -> when (failure) {
+                                is XrayTunnelFailure -> failure.code
+                                is PackageManager.NameNotFoundException -> "ROUTES_APPS_UNAVAILABLE"
+                                else -> "XRAY_CONNECT_FAILED"
+                            } },
+                        )
                     } finally {
                         data.clear()
-                        if (error != null) { stopping = true; stopCore() }
-                        if (startingId == id) startingId = 0
                     }
-                    val finalError = error
                     main.post {
-                        if (finalError == null && connected && lease.owns(generation)) {
-                            try { showNotification(true) } catch (_: Exception) { terminate() }
-                        }
-                        reply(reply, id, connected, finalError)
-                        if (!connected) finishService()
+                        lease.deliver(
+                            completion,
+                            available = { canDeliver(completion) },
+                            onUp = { try { showNotification(true) } catch (_: Exception) { terminate() } },
+                            reply = { up, error ->
+                                // Keep the startup watchdog armed until delivery. An old
+                                // command (including a reused IPC id) cannot clear a new one.
+                                if (lease.owns(generation) && startingId == id) startingId = 0
+                                reply(reply, id, up, error)
+                            },
+                            onDown = { stopping = true; finishService() },
+                            onExpired = ::terminate,
+                        )
                     }
                 }
             }
@@ -121,18 +132,34 @@ class XrayVpnService : VpnService() {
                     main.post { reply(reply, id, false, if (stopped) null else "XRAY_STOP_FAILED"); finishService() }
                 }
             }
-            XrayIpc.STATUS -> worker.execute {
-                try {
-                    val generation = lease.current()
-                    if (ProcessCore.owner != null && ProcessCore.owner !== this) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
-                    val wasConnected = connected
-                    val wasNativeActive = nativeActive
-                    val up = XrayRequestLease.knownState(wasConnected, wasNativeActive, wasNativeActive && coreState())
-                    if (!lease.owns(generation) && nativeActive) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
-                    if (!up && wasNativeActive && !stopCore()) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
-                    main.post { reply(reply, id, up); if (!up && startingId == 0) finishService() }
-                } catch (_: Throwable) {
-                    main.post { reply(reply, id, false, "XRAY_STATE_UNAVAILABLE") }
+            XrayIpc.STATUS -> {
+                // Capture at receipt: an old queued STATUS must not adopt the
+                // generation of a START that arrives before its worker runs.
+                val generation = lease.current()
+                worker.execute {
+                    var up = false
+                    var error: String? = null
+                    try {
+                        if (!lease.owns(generation)) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
+                        if (ProcessCore.owner != null && ProcessCore.owner !== this) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
+                        val wasConnected = connected
+                        val wasNativeActive = nativeActive
+                        up = XrayRequestLease.knownState(wasConnected, wasNativeActive, wasNativeActive && coreState())
+                        if (!lease.owns(generation)) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
+                        if (!up && wasNativeActive && !stopCore()) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
+                    } catch (_: Throwable) {
+                        up = false
+                        error = "XRAY_STATE_UNAVAILABLE"
+                    }
+                    val completion = XrayRequestLease.Completion(generation, deadline, up, error)
+                    main.post {
+                        lease.deliver(
+                            completion,
+                            available = { canDeliver(completion) },
+                            reply = { active, failure -> reply(reply, id, active, failure) },
+                            onDown = { if (completion.error == null && startingId == 0) finishService() },
+                        )
+                    }
                 }
             }
         }
@@ -143,6 +170,10 @@ class XrayVpnService : VpnService() {
         if (destroyed.get()) throw XrayTunnelFailure("XRAY_TIMEOUT")
         lease.requireCurrent(generation, deadline)
     }
+
+    private fun canDeliver(completion: XrayRequestLease.Completion): Boolean =
+        !destroyed.get() && (!completion.connected ||
+            (!stopping && connected && nativeActive && ProcessCore.owner === this))
 
     private fun startCore(data: Bundle, generation: Long, deadline: Long) {
         if (ProcessCore.owner != null && ProcessCore.owner !== this) throw XrayTunnelFailure("XRAY_SERVICE_UNAVAILABLE")
@@ -204,9 +235,9 @@ class XrayVpnService : VpnService() {
                     capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
                     cm.getLinkProperties(network)?.dnsServers?.firstOrNull()?.hostAddress
                 } else null
-            }?.substringBefore('%')
-            when { server == null -> "1.1.1.1:53"; ':' in server -> "[$server]:53"; else -> "$server:53" }
-        } catch (_: Exception) { "1.1.1.1:53" }
+            }
+            XrayBootstrapDns.endpoint(server)
+        } catch (_: Exception) { XrayBootstrapDns.FALLBACK_ENDPOINT }
     }
 
     private fun invoke(method: String, payload: JSONObject? = null): JSONObject {

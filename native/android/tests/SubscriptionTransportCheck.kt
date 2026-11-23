@@ -1,13 +1,19 @@
 package shop.pushok.flow
 
 import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.URL
 import java.net.URLEncoder
 import java.security.cert.Certificate
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
 
-private class TestConnection(
+private open class TestConnection(
     url: URL,
     private val status: Int = 200,
     private val bytes: ByteArray = "safe-body".toByteArray(),
@@ -20,7 +26,7 @@ private class TestConnection(
     override fun disconnect() { closed = true }
     override fun usingProxy() = false
     override fun getResponseCode() = status
-    override fun getInputStream() = ByteArrayInputStream(bytes)
+    override fun getInputStream(): InputStream = ByteArrayInputStream(bytes)
     override fun getHeaderField(name: String?) = headers.entries.firstOrNull { it.key.equals(name, true) }?.value
     override fun getContentLengthLong() = length
     override fun getContentEncoding() = encoding
@@ -35,6 +41,242 @@ private fun expectCode(code: String, run: () -> Unit) {
         check(failure.code == code) { "Expected $code, got ${failure.code}" }
         check(!failure.toString().contains("secret"))
     }
+}
+
+private fun await(latch: CountDownLatch, message: String) {
+    check(latch.await(3, TimeUnit.SECONDS)) { message }
+}
+
+/** Model a platform call which ignores interrupt and socket timeout. No network is used. */
+private fun blockedPlatformCall(entered: CountDownLatch, release: CountDownLatch) {
+    entered.countDown()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    while (release.count != 0L) {
+        check(System.nanoTime() < deadline) { "Blocked transport test was not released" }
+        try { release.await(100, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) { }
+    }
+}
+
+private class AsyncResult<T>(action: () -> T) {
+    val completed = CountDownLatch(1)
+    private val result = AtomicReference<Result<T>?>()
+    val thread = Thread {
+        try { result.set(runCatching(action)) } finally { completed.countDown() }
+    }.apply { isDaemon = true; start() }
+
+    fun outcome(): Result<T> {
+        await(completed, "Caller remained blocked after cancellation or deadline")
+        return checkNotNull(result.get())
+    }
+}
+
+private fun checkUncooperativeSubscriptionTransport() {
+    // The open hook also represents a second DNS lookup inside URLConnection.
+    for ((stage, cancel) in listOf("dns" to false, "dns" to true, "open" to false,
+        "headers" to false, "read" to false, "disconnect" to true)) {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val workerFinished = CountDownLatch(1)
+        val opens = AtomicInteger()
+        val ticks = AtomicLong()
+        val pool = BoundedNetworkPool("subscription-test-$stage", afterCompletion = { workerFinished.countDown() })
+        val connection = object : TestConnection(URL("https://subscription.example.org/synthetic")) {
+            override fun getResponseCode(): Int {
+                if (stage == "headers") blockedPlatformCall(entered, release)
+                return super.getResponseCode()
+            }
+            override fun getInputStream(): InputStream = if (stage == "read") {
+                object : ByteArrayInputStream("late-body".toByteArray()) {
+                    override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                        blockedPlatformCall(entered, release)
+                        return super.read(bytes, offset, length)
+                    }
+                }
+            } else super.getInputStream()
+            override fun disconnect() {
+                if (stage == "disconnect") blockedPlatformCall(entered, release)
+                super.disconnect()
+            }
+        }
+        val client = SubscriptionDownloader(
+            resolve = {
+                if (stage == "dns") blockedPlatformCall(entered, release)
+                arrayOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)))
+            },
+            open = {
+                opens.incrementAndGet()
+                if (stage == "open") blockedPlatformCall(entered, release)
+                connection
+            },
+            elapsedMs = ticks::get,
+            network = pool,
+        )
+        val task = AsyncResult { client.fetch("https://subscription.example.org/synthetic") }
+        try {
+            await(entered, "$stage stage was not reached")
+            if (cancel) {
+                // In particular, disconnect is allowed to block indefinitely. Neither
+                // this cancellation caller nor the fetch caller may wait for it.
+                val cancellation = AsyncResult { client.cancel() }
+                cancellation.outcome().getOrThrow()
+            } else ticks.set(40_001L)
+            val error = task.outcome().exceptionOrNull()
+            val expected = if (cancel) "SUBSCRIPTION_INTERRUPTED" else "SUBSCRIPTION_NETWORK_ERROR"
+            check(error is SubscriptionFailure && error.code == expected) {
+                "$stage did not return the fixed $expected code before platform release"
+            }
+            check(release.count == 1L && workerFinished.count == 1L)
+            if (stage == "dns") check(opens.get() == 0) { "Cancelled DNS must not reach HTTP" }
+        } finally {
+            release.countDown()
+            await(workerFinished, "$stage worker did not finish after release")
+        }
+        if (stage == "open") check(connection.closed) { "A late-created connection must be closed" }
+    }
+}
+
+private fun checkSubscriptionCancelIsolation() {
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val completed = CountDownLatch(2)
+    val resolutions = AtomicInteger()
+    val opens = AtomicInteger()
+    val pool = BoundedNetworkPool("subscription-isolation", afterCompletion = { completed.countDown() })
+    val client = SubscriptionDownloader(
+        resolve = {
+            if (resolutions.incrementAndGet() == 1) blockedPlatformCall(entered, release)
+            arrayOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)))
+        }, open = { opens.incrementAndGet(); TestConnection(it) }, elapsedMs = { 0L }, network = pool,
+    )
+    val old = AsyncResult { client.fetch("https://subscription.example.org/old-synthetic") }
+    try {
+        await(entered, "Old DNS request did not start")
+        client.cancel()
+        val error = old.outcome().exceptionOrNull()
+        check(error is SubscriptionFailure && error.code == "SUBSCRIPTION_INTERRUPTED")
+        val replacement = client.fetch("https://subscription.example.org/new-synthetic")
+        check(String(replacement.body) == "safe-body" && opens.get() == 1)
+        check(release.count == 1L) { "Replacement depended on the cancelled resolver" }
+    } finally {
+        release.countDown()
+        await(completed, "Old and replacement requests did not finish")
+    }
+    check(opens.get() == 1) { "Old request must not open a connection after cancellation" }
+    client.cancel()
+    check(String(client.fetch("https://subscription.example.org/third-synthetic").body) == "safe-body")
+}
+
+private fun checkBoundedPoolCapacityAndDiscard() {
+    val entered = CountDownLatch(2)
+    val release = CountDownLatch(1)
+    val finished = CountDownLatch(2)
+    val discarded = AtomicInteger()
+    val starts = AtomicInteger()
+    val bodies = List(2) { "synthetic-secret".toByteArray() }
+    val pool = BoundedNetworkPool("bounded-capacity", afterCompletion = { finished.countDown() })
+    val calls = bodies.map { body ->
+        pool.newCall<ByteArray>(Long.MAX_VALUE, { 0L }) {
+            it.fill(0)
+            discarded.incrementAndGet()
+        } to body
+    }
+    val tasks = calls.map { (call, body) -> AsyncResult {
+        call.run { starts.incrementAndGet(); blockedPlatformCall(entered, release); body }
+    } }
+    try {
+        await(entered, "Both fixed workers must be occupied")
+        calls.forEach { it.first.cancel() }
+        tasks.forEach {
+            val error = it.outcome().exceptionOrNull()
+            check(error is BoundedNetworkFailure && error.kind == BoundedNetworkFailure.Kind.CANCELLED)
+        }
+        var extraRan = false
+        val rejected = runCatching {
+            pool.newCall<Unit>(Long.MAX_VALUE, { 0L }).run { extraRan = true }
+        }.exceptionOrNull()
+        check(rejected is BoundedNetworkFailure && rejected.kind == BoundedNetworkFailure.Kind.BUSY)
+        check(starts.get() == 2 && !extraRan) { "Cancellation must not replace stuck workers" }
+        check(discarded.get() == 0) { "Response bytes do not exist until blocked workers return" }
+    } finally {
+        release.countDown()
+        await(finished, "Cancelled workers did not release their real capacity")
+    }
+    check(discarded.get() == 2 && bodies.all { body -> body.all { it == 0.toByte() } }) {
+        "Each late successful response must be discarded and wiped exactly once"
+    }
+    check(pool.newCall<Int>(Long.MAX_VALUE, { 0L }).run { 7 } == 7)
+}
+
+private fun checkPoolCompletionHandoff() {
+    val stuckEntered = CountDownLatch(1)
+    val releaseStuck = CountDownLatch(1)
+    val epilogueEntered = CountDownLatch(1)
+    val releaseEpilogue = CountDownLatch(1)
+    val firstCompletion = AtomicInteger()
+    val pool = BoundedNetworkPool("bounded-handoff", afterCompletion = {
+        if (firstCompletion.incrementAndGet() == 1) blockedPlatformCall(epilogueEntered, releaseEpilogue)
+    })
+    val stuckCall = pool.newCall<Unit>(Long.MAX_VALUE, { 0L })
+    val stuck = AsyncResult { stuckCall.run { blockedPlatformCall(stuckEntered, releaseStuck) } }
+    try {
+        await(stuckEntered, "First worker did not enter its stuck platform operation")
+        stuckCall.cancel()
+        val cancelled = stuck.outcome().exceptionOrNull()
+        check(cancelled is BoundedNetworkFailure && cancelled.kind == BoundedNetworkFailure.Kind.CANCELLED)
+        check(pool.newCall<String>(Long.MAX_VALUE, { 0L }).run { "capabilities" } == "capabilities")
+        await(epilogueEntered, "Completed second worker did not reach the held epilogue")
+
+        val admittedOrFailed = CountDownLatch(1)
+        val guards = AtomicInteger()
+        val secondStarted = CountDownLatch(1)
+        val second = AsyncResult {
+            try {
+                pool.newCall<String>(Long.MAX_VALUE, { 0L }).run(ensureActive = {
+                    // The first guard is before submission; the second is after
+                    // accepted submission, while the only usable worker is held.
+                    if (guards.incrementAndGet() == 2) admittedOrFailed.countDown()
+                }) { secondStarted.countDown(); "device" }
+            } finally { admittedOrFailed.countDown() }
+        }
+        await(admittedOrFailed, "Sequential request neither queued nor returned an error")
+        check(guards.get() >= 2 && second.completed.count == 1L && secondStarted.count == 1L) {
+            "A completed response must admit the next request before its worker leaves the epilogue"
+        }
+        releaseEpilogue.countDown()
+        check(second.outcome().getOrThrow() == "device")
+    } finally {
+        releaseEpilogue.countDown()
+        releaseStuck.countDown()
+    }
+}
+
+private fun checkInterruptedWaiterAndLateAbort() {
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val aborted = CountDownLatch(1)
+    val finished = CountDownLatch(1)
+    val abortThread = AtomicReference<Thread?>()
+    val interruptPreserved = AtomicReference<Boolean?>()
+    val pool = BoundedNetworkPool("bounded-interrupt", afterCompletion = { finished.countDown() })
+    val call = pool.newCall<Unit>(Long.MAX_VALUE, { 0L })
+    val task = AsyncResult {
+        try {
+            call.run { active ->
+                blockedPlatformCall(entered, release)
+                active.setAbort { abortThread.set(Thread.currentThread()); aborted.countDown() }
+            }
+        } finally { interruptPreserved.set(Thread.currentThread().isInterrupted) }
+    }
+    try {
+        await(entered, "Interrupt test did not reach its blocked operation")
+        task.thread.interrupt()
+        val error = task.outcome().exceptionOrNull()
+        check(error is BoundedNetworkFailure && error.kind == BoundedNetworkFailure.Kind.CANCELLED)
+        check(interruptPreserved.get() == true)
+    } finally { release.countDown() }
+    await(finished, "Interrupted operation did not finish after release")
+    await(aborted, "Connection registered after cancellation was not aborted")
+    check(abortThread.get() !== task.thread && abortThread.get()?.name?.contains("-abort-") == true)
 }
 
 private fun checkPushokExternalLinks() {
@@ -143,9 +385,9 @@ fun main() {
     }
     val unavailable = SubscriptionDownloader(resolve = publicDns, open = { TestConnection(it, status = 503) })
     expectCode("SUBSCRIPTION_NETWORK_ERROR") { unavailable.fetch(source) }
-    var ticks = 0L
+    val ticks = AtomicLong()
     val timeout = SubscriptionDownloader(resolve = publicDns, open = { TestConnection(it) },
-        elapsedMs = { ticks.also { ticks += 15_000 } })
+        elapsedMs = { ticks.getAndAdd(15_000L) })
     expectCode("SUBSCRIPTION_NETWORK_ERROR") { timeout.fetch(source) }
     expectCode("SUBSCRIPTION_INTERRUPTED") {
         ordinary.fetch(source) { throw SubscriptionFailure("SUBSCRIPTION_INTERRUPTED") }
@@ -164,6 +406,11 @@ fun main() {
         check(SubscriptionLinks.parse(bad) == null) { "Invalid link was accepted" }
     }
     checkPushokExternalLinks()
+    checkUncooperativeSubscriptionTransport()
+    checkSubscriptionCancelIsolation()
+    checkBoundedPoolCapacityAndDiscard()
+    checkPoolCompletionHandoff()
+    checkInterruptedWaiterAndLateAbort()
 
     val sixHours = SubscriptionRefreshPolicy.SUCCESS_INTERVAL_MS
     val hour = SubscriptionRefreshPolicy.RETRY_INTERVAL_MS
@@ -175,5 +422,5 @@ fun main() {
     check(!SubscriptionRefreshPolicy.due(100, 200, 0))
     check(!SubscriptionRefreshPolicy.due(100, 0, 200))
     check(!SubscriptionRefreshPolicy.due(100, 0, -1))
-    println("Subscription HTTPS, link and refresh policy checks passed")
+    println("Subscription HTTPS, bounded DNS/transport/cancel/handoff, link and refresh policy checks passed")
 }
