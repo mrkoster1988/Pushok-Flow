@@ -32,7 +32,17 @@
 
 ## Проверки и публикация
 
-Публикация v0.55.0 ожидает обязательных проверок и постоянной подписи APK.
+**v0.55.0 опубликована 23.11.2026 в 15:06:13 МСК.** [Скачать универсальный APK](https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.55.0/Pushok-Flow-v0.55.0.apk) · [Страница выпуска](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.55.0) · [Workflow публикации](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45171036791).
+
+Локальный полный прогон и оба CI точного исходного коммита `4f500560eb77bc47ad16e4ecdb2470af73ac519d` подтвердили **269 тестов Python, 459 тестов Flutter и 35 исполняемых наборов Kotlin**. В журнале Kotlin — **36 сообщений об успешных проверках**; один исполняемый набор может сообщать о нескольких группах. Анализатор Flutter не обнаружил замечаний. [Source checks](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45169179436) и [Android candidate](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45169179368) — success; все 19 шагов публикации завершились успешно.
+
+Один универсальный APK для Android 7.0 и новее: **66 986 034 байт**, SHA-256 `983cb47c63b8132c40986d7067a5c5d79a2479f7b4d7aeb314bf700f31aaf9aa`. Постоянная подпись, пакет `shop.pushok.flow`, minSdk 24, три ABI, нативные библиотеки и выравнивание 16 КиБ проверены. Опубликованы APK, его [SHA-256](https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.55.0/Pushok-Flow-v0.55.0.apk.sha256) и [update.json](https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.55.0/update.json) схемы 1.
+
+Независимая проверка с 23.11.2026 в 15:07:09 МСК по 23.11.2026 в 15:07:24 МСК подтвердила **5 из 5** публичных путей: latest API, оба манифеста, полный APK и checksum. Все ответы HTTP 200, манифесты совпали побайтно, APK скачан полностью без авторизации; размер и SHA-256 совпали с подписанным файлом.
+
+Приёмка на физическом Android ещё не выполнена; автоматические проверки и публикация не подтверждают сценарии реального устройства.
+
+[Проверка перед публикацией](release-checks/v0.55.0-prepublication-check.json) · [Доказательства публикации](release-checks/v0.55.0-publication-evidence.json) · [Публичная проверка](release-checks/v0.55.0-public-check.json).
 
 ## Границы проверки
 
