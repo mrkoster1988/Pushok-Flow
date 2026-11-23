@@ -93,6 +93,9 @@ object VlessProfile {
         // Fragments are a label, never native config, a URL to load, or an implicit profile name.
         uri.rawFragment?.let { if (decode(it).any(::unsafeCharacter)) invalid() }
         val fields = parseQuery(uri.rawQuery)
+        // A partial subscription may skip an unsupported capability. Do not let that
+        // early classification hide damaged values of fields whose syntax we know.
+        validateKnownFieldSyntax(fields)
         val transport = when (fields["type"] ?: "tcp") {
             "tcp", "raw" -> "raw"
             "ws" -> "ws"
@@ -124,14 +127,7 @@ object VlessProfile {
         }
         val alpn = fields["alpn"]?.let { value ->
             if (security != "tls") fail("UNSUPPORTED_PROFILE_OPTION")
-            // 3x-ui's QR exporter writes alpn= for an empty configured list.
-            // The official libXray importer treats that as the core's default.
-            if (value.isEmpty()) return@let emptyList()
-            val protocols = value.split(',')
-            if (protocols.size > 8 || protocols.size != protocols.distinct().size ||
-                protocols.any { item -> item.isEmpty() || item.length > 255 ||
-                    item.any { it.code !in 33..126 } }) invalid()
-            Collections.unmodifiableList(protocols.toList())
+            validateAlpn(value)
         } ?: emptyList()
         // The pinned core rewrites other WS lists during its uTLS handshake.
         // Reject incompatible requests rather than pretending their ALPN survives.
@@ -155,13 +151,8 @@ object VlessProfile {
         var spiderX: String? = null
         if (security == "reality") {
             publicKey = validPublicKey(fields["pbk"] ?: invalid())
-            shortId = fields["sid"] ?: ""
-            if (shortId.length > 16 || shortId.length % 2 != 0 ||
-                !shortId.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) invalid()
-            shortId = shortId.lowercase(Locale.ROOT)
-            spiderX = fields["spx"] ?: ""
-            if (spiderX.length > 2048 || (spiderX.isNotEmpty() && !spiderX.startsWith('/')) ||
-                '#' in spiderX || spiderX.any(::unsafeCharacter)) invalid()
+            shortId = validateShortId(fields["sid"] ?: "")
+            spiderX = validateSpiderX(fields["spx"] ?: "")
             // 3x-ui emits this capability hint. The bundled current core supports MLKEM;
             // no security parameter is downgraded or inferred from this optional flag.
             if (fields["support-x25519mlkem768"]?.let { it != "true" } == true) {
@@ -173,6 +164,48 @@ object VlessProfile {
         return Parsed(uuid.lowercase(Locale.ROOT), host, port, security!!, serverName,
             fingerprint, flow, publicKey, shortId, spiderX, alpn, transport,
             wsPath, wsHost, grpcServiceName, grpcAuthority, grpcMultiMode)
+    }
+
+    /** Syntax and known required fields only; unsupported combinations get no invented defaults. */
+    private fun validateKnownFieldSyntax(fields: Map<String, String>) {
+        fields["sni"]?.let(::normalizeHost)
+        fields["alpn"]?.let(::validateAlpn)
+        fields["pbk"]?.let(::validPublicKey)
+        fields["sid"]?.let(::validateShortId)
+        fields["spx"]?.let(::validateSpiderX)
+        fields["path"]?.let(::validateWsPath)
+        fields["host"]?.let(::normalizeAuthority)
+        fields["serviceName"]?.let(::validateGrpcServiceName)
+        fields["authority"]?.let(::normalizeAuthority)
+        val transport = fields["type"] ?: "tcp"
+        if (fields["security"] == "reality" && transport in setOf("tcp", "raw")) {
+            if (fields["pbk"] == null || fields["fp"] == null) invalid()
+        }
+        if (fields["security"] == "tls" && transport == "grpc") {
+            validateGrpcServiceName(fields["serviceName"])
+        }
+    }
+
+    private fun validateAlpn(value: String): List<String> {
+        // 3x-ui's empty configured list leaves protocol selection to the core.
+        if (value.isEmpty()) return emptyList()
+        val protocols = value.split(',')
+        if (protocols.size > 8 || protocols.size != protocols.distinct().size ||
+            protocols.any { item -> item.isEmpty() || item.length > 255 ||
+                item.any { it.code !in 33..126 } }) invalid()
+        return Collections.unmodifiableList(protocols.toList())
+    }
+
+    private fun validateShortId(value: String): String {
+        if (value.length > 16 || value.length % 2 != 0 ||
+            !value.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) invalid()
+        return value.lowercase(Locale.ROOT)
+    }
+
+    private fun validateSpiderX(value: String): String {
+        if (value.length > 2048 || (value.isNotEmpty() && !value.startsWith('/')) ||
+            '#' in value || value.any(::unsafeCharacter)) invalid()
+        return value
     }
 
     private fun parseQuery(query: String?): Map<String, String> {

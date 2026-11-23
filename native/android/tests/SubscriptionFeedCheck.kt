@@ -94,8 +94,99 @@ private fun equivalentLinksAndEffectiveSettings() {
     check(!SubscriptionFeed.identity(ws).toString().contains("Private"))
 }
 
+private fun mixedFeedsKeepSupportedProfilesAndReportSkippedEntries() {
+    val other = LINK.replace("000000000001", "000000000002") + "#Second"
+    val unsupported = listOf("vmess", "trojan", "ss", "ssr", "hysteria", "hysteria2", "hy2", "tuic", "wireguard")
+        .map { "$it://synthetic-unsupported-payload" } + listOf(
+        LINK.replace("type=tcp", "type=xhttp"),
+        LINK.replace("security=tls", "security=none"),
+        LINK + "&unknownOption=preserve-it",
+    )
+    val lines = listOf(unsupported.first(), "$LINK#First") + unsupported.drop(1) + other
+    val text = lines.joinToString("\r\n", prefix = "\uFEFF\n", postfix = "\n")
+    for (body in listOf(text, Base64.getEncoder().encodeToString(text.toByteArray()),
+        Base64.getUrlEncoder().withoutPadding().encodeToString(text.toByteArray()).chunked(40).joinToString("\n"))) {
+        val parsed = SubscriptionFeed.parse(body.toByteArray(), "upload=3;download=4;expire=1800000000")
+        check(parsed.entries.map { it.config } == listOf("$LINK#First", other))
+        check(parsed.entries.map { it.name } == listOf("First", "Second"))
+        check(parsed.skippedProfileCount == unsupported.size)
+        check(parsed.usedBytes == 7L && parsed.expiresAt == 1_800_000_000_000L)
+        check(!parsed.toString().contains("synthetic-unsupported-payload"))
+    }
+    val uppercase = SubscriptionFeed.parse(("TROJAN://synthetic-unsupported-payload\n$LINK").toByteArray())
+    check(uppercase.entries.single().config == LINK && uppercase.skippedProfileCount == 1)
+    check(SubscriptionFeed.parse(LINK.toByteArray()).skippedProfileCount == 0)
+    for (body in listOf(unsupported.joinToString("\n"),
+        Base64.getEncoder().encodeToString(unsupported.joinToString("\n").toByteArray()))) {
+        fails("SUBSCRIPTION_UNSUPPORTED") { SubscriptionFeed.parse(body.toByteArray()) }
+    }
+    // A recognized unsupported protocol is skipped, never repaired, fetched or converted.
+    // Unknown schemes, broken VLESS and malformed URI lines still invalidate the whole response.
+    for (invalid in listOf("not a connection", "https://example.invalid/not-a-profile", "future://payload",
+        "vmess://", "trojan://bad%GG", "ss://payload with spaces", "ss://payload\u0000",
+        "vless://broken", LINK.replace("000000000001", "not-a-uuid"), LINK + "&sni=%FF")) {
+        for (textValue in listOf("$invalid\n$LINK", "$LINK\n$invalid")) {
+            fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse(textValue.toByteArray()) }
+            fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse(Base64.getEncoder().encode(textValue.toByteArray())) }
+        }
+    }
+    for (option in listOf("sni=bad%2Fhost", "alpn=h2,h2", "pbk=invalid", "sid=abc",
+        "spx=invalid", "path=not-a-path", "host=bad%2Fhost", "serviceName=", "authority=bad%2Fhost")) {
+        for (incompatible in listOf(LINK.replace("type=tcp", "type=xhttp"), LINK + "&unknownOption=1")) {
+            val damaged = "$LINK\n$incompatible&$option"
+            fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse(damaged.toByteArray()) }
+            fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse(Base64.getEncoder().encode(damaged.toByteArray())) }
+        }
+    }
+    val publicKey = "B".repeat(42) + "A"
+    for (damaged in listOf(
+        LINK.replace("security=tls", "security=reality") + "&fp=chrome&unknownOption=1",
+        LINK.replace("security=tls", "security=reality") + "&pbk=$publicKey&unknownOption=1",
+        LINK.replace("type=tcp", "type=grpc") + "&unknownOption=1",
+    )) {
+        fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse(("$LINK\n$damaged").toByteArray()) }
+        fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse(Base64.getEncoder().encode(("$LINK\n$damaged").toByteArray())) }
+    }
+    fails("SUBSCRIPTION_INVALID") {
+        SubscriptionFeed.parse(("$LINK\nvmess://synthetic\n$LINK#Duplicate").toByteArray())
+    }
+}
+
+private fun mixedFeedLimitsApplyBeforeFiltering() {
+    val supported = (1..ProfileCatalogStore.MAX_PROFILES).map { number ->
+        LINK.replace("000000000001", number.toString().padStart(12, '0'))
+    }
+    val unsupported = "trojan://synthetic-unsupported-payload"
+    val atLimit = List(SubscriptionPolicy.MAX_FEED_ENTRIES - supported.size) { unsupported } + supported
+    for (body in listOf(atLimit.joinToString("\n").toByteArray(),
+        Base64.getEncoder().encode(atLimit.joinToString("\n").toByteArray()))) {
+        val parsed = SubscriptionFeed.parse(body)
+        check(parsed.entries.map { it.config } == supported)
+        check(parsed.skippedProfileCount == SubscriptionPolicy.MAX_FEED_ENTRIES - supported.size)
+    }
+    val onlyOne = SubscriptionFeed.parse((List(SubscriptionPolicy.MAX_FEED_ENTRIES - 1) { unsupported } + LINK)
+        .joinToString("\n\n").toByteArray())
+    check(onlyOne.entries.size == 1 && onlyOne.skippedProfileCount == SubscriptionPolicy.MAX_FEED_ENTRIES - 1)
+    fails("SUBSCRIPTION_TOO_LARGE") {
+        SubscriptionFeed.parse((List(SubscriptionPolicy.MAX_FEED_ENTRIES) { unsupported } + LINK).joinToString("\n").toByteArray())
+    }
+    fails("SUBSCRIPTION_TOO_LARGE") {
+        SubscriptionFeed.parse(Base64.getEncoder().encode(
+            List(SubscriptionPolicy.MAX_FEED_ENTRIES + 1) { unsupported }.joinToString("\n").toByteArray()))
+    }
+    fails("SUBSCRIPTION_TOO_LARGE") {
+        SubscriptionFeed.parse((listOf(unsupported) + supported + LINK.replace("000000000001", "000000000021"))
+            .joinToString("\n").toByteArray())
+    }
+    fails("SUBSCRIPTION_UNSUPPORTED") {
+        SubscriptionFeed.parse(List(SubscriptionPolicy.MAX_FEED_ENTRIES) { unsupported }.joinToString("\n").toByteArray())
+    }
+}
+
 fun main() {
     equivalentLinksAndEffectiveSettings()
+    mixedFeedsKeepSupportedProfilesAndReportSkippedEntries()
+    mixedFeedLimitsApplyBeforeFiltering()
     val first = "$LINK#%D0%94%D0%BE%D0%BC%20%F0%9F%90%88"
     val second = LINK.replace("000000000001", "000000000002") + "#Office+backup"
     val text = "$first\r\n\n$second\n"
@@ -127,7 +218,7 @@ fun main() {
     fails("SUBSCRIPTION_TOO_LARGE") { SubscriptionFeed.parse(List(21) { "$LINK#$it" }.joinToString("\n").toByteArray()) }
     fails("SUBSCRIPTION_UNSUPPORTED") { SubscriptionFeed.parse("vmess://secret".toByteArray()) }
     fails("SUBSCRIPTION_UNSUPPORTED") { SubscriptionFeed.parse("{\"outbounds\":[]}".toByteArray()) }
-    fails("SUBSCRIPTION_UNSUPPORTED") { SubscriptionFeed.parse("$LINK\nss://secret".toByteArray()) }
+    check(SubscriptionFeed.parse("$LINK\nss://secret".toByteArray()).skippedProfileCount == 1)
     fails("SUBSCRIPTION_UNSUPPORTED") { SubscriptionFeed.parse(LINK.replace("type=tcp", "type=xhttp").toByteArray()) }
     fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse("$LINK\n$LINK#same-server".toByteArray()) }
     fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse(LINK.replace("000000000001", "private-token").toByteArray()) }

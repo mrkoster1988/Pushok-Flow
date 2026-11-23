@@ -148,9 +148,73 @@ private fun legacyAliasesKeepTheSelectedIdAndRemainRefreshable() {
     }
 }
 
+private fun partialFeedsPersistCountsAndFailuresPreserveTheWholeCatalog() {
+    val fixture = SubFixture()
+    val store = fixture.store()
+    store.save("manual-preserved", name = "Личный")
+    val manual = store.metadata()["activeProfileId"] as String
+    val other = store.importSubscription("Резерв", "https://example.com/other", feed(9), 1)
+    val mixed = SubscriptionFeed.parse(("vmess://synthetic\n" + uri(1) + "\n" +
+        uri(2).replace("type=tcp", "type=xhttp")).toByteArray())
+    val own = store.importSubscription("Смешанная", "https://example.com/mixed", mixed, 2)
+    val ownProfile = profiles(store).single { it["subscriptionId"] == own }["id"] as String
+    fun record() = store.subscriptionRecords().single { it.id == own }
+    fun metadata() = (store.subscriptions()["subscriptions"] as List<*>).map { it as Map<*, *> }
+        .single { it["id"] == own }
+    check(record().skippedProfileCount == 2 && metadata()["skippedProfileCount"] == 2)
+    check(metadata()["profileCount"] == 1 && store.load() == "manual-preserved")
+    check(store.subscriptionRecords().single { it.id == other }.skippedProfileCount == 0)
+    check(!store.subscriptions().toString().contains("synthetic") && !store.subscriptions().toString().contains("vless://"))
+    // A recreated store reads the persisted count rather than deriving it from retained servers.
+    check(fixture.store().subscriptionRecords().single { it.id == own }.skippedProfileCount == 2)
+    store.select(ownProfile)
+    store.refreshSubscription(own, "https://example.com/mixed",
+        SubscriptionFeed.parse((uri(1, "Renamed") + "\ntrojan://synthetic").toByteArray()), 3)
+    check(store.metadata()["activeProfileId"] == ownProfile && store.load() == uri(1, "Renamed"))
+    check(record().skippedProfileCount == 1 && metadata()["skippedProfileCount"] == 1)
+    val writes = fixture.storage.writes
+    val disk = fixture.storage.disk.catalog
+    val before = store.subscriptions().toString()
+    val failures = listOf(
+        "SUBSCRIPTION_UNSUPPORTED" to "vmess://synthetic\n" + uri(2).replace("type=tcp", "type=xhttp"),
+        "SUBSCRIPTION_INVALID" to uri(2) + "\nvless://broken",
+        "SUBSCRIPTION_INVALID" to uri(2) + "\n" +
+            uri(3).replace("type=tcp", "type=xhttp&sni=bad%2Fhost"),
+        "SUBSCRIPTION_INVALID" to uri(2) + "\n" +
+            uri(3).replace("security=tls", "security=reality&fp=chrome&unknownOption=1"),
+        "SUBSCRIPTION_INVALID" to uri(2) + "\n" +
+            uri(3).replace("type=tcp", "type=grpc&unknownOption=1"),
+        "SUBSCRIPTION_INVALID" to uri(2) + "\nunknown://not-a-supported-family",
+        "SUBSCRIPTION_INVALID" to uri(2) + "\nnot a profile",
+        "SUBSCRIPTION_TOO_LARGE" to (List(SubscriptionPolicy.MAX_FEED_ENTRIES) { "ss://synthetic" } + uri(2)).joinToString("\n"),
+    )
+    for ((code, text) in failures) {
+        rejectsSubscription(code) {
+            store.refreshSubscription(own, "https://example.com/mixed", SubscriptionFeed.parse(text.toByteArray()), 4)
+        }
+        check(fixture.storage.writes == writes && fixture.storage.disk.catalog == disk)
+        check(store.subscriptions().toString() == before && store.load() == uri(1, "Renamed"))
+        check(store.metadata()["activeProfileId"] == ownProfile && store.load(manual) == "manual-preserved")
+    }
+    // The catalog also rejects inconsistent metadata from a bypassed parser.
+    for (skipped in listOf(-1, SubscriptionPolicy.MAX_FEED_ENTRIES, Int.MAX_VALUE)) {
+        val invalid = SubscriptionFeed.Parsed(listOf(SubscriptionFeed.Entry("One", uri(2))),
+            null, null, null, null, skipped)
+        rejectsSubscription("SUBSCRIPTION_INVALID") {
+            store.refreshSubscription(own, "https://example.com/mixed", invalid, 4)
+        }
+        check(fixture.storage.writes == writes && fixture.storage.disk.catalog == disk)
+    }
+    store.refreshSubscription(own, "https://example.com/mixed", feed(1), 5)
+    check(record().skippedProfileCount == 0 && metadata()["skippedProfileCount"] == 0)
+    check(store.metadata()["activeProfileId"] == ownProfile && store.load(manual) == "manual-preserved")
+    check(store.subscriptionRecords().single { it.id == other }.updatedAt == 1L)
+}
+
 fun main() {
     equivalentSubscriptionLinksKeepSelection()
     legacyAliasesKeepTheSelectedIdAndRemainRefreshable()
+    partialFeedsPersistCountsAndFailuresPreserveTheWholeCatalog()
     val fixture = SubFixture()
     val store = fixture.store()
     store.save("manual-secret", name = "Мой сервер")
@@ -170,6 +234,7 @@ fun main() {
     val meta = (store.subscriptions()["subscriptions"] as List<*>).first() as Map<*, *>
     check(meta["host"] == "example.com" && meta["profileCount"] == 2 && meta["updatedAt"] == 1000L)
     check(meta["expiresAt"] == 1_800_000_000_000L)
+    check(meta["skippedProfileCount"] == 0)
 
     // Only this subscription changes, an unchanged server keeps its ID and active selection.
     val reordered = SubscriptionFeed.parse((uri(2) + "\n" + uri(1, "NewLabel") + "\n" + uri(4)).toByteArray())
@@ -235,7 +300,7 @@ fun main() {
     val workingDisk = safe.storage.disk.catalog
     rejectsSubscription("SUBSCRIPTION_UNSUPPORTED") {
         safeStore.refreshSubscription(safeId, "https://example.com/working",
-            SubscriptionFeed.parse((uri(1) + "\nvmess://bad").toByteArray()), 2)
+            SubscriptionFeed.parse("vmess://synthetic\ntrojan://synthetic".toByteArray()), 2)
     }
     check(safe.storage.disk.catalog == workingDisk && safeStore.load() == uri(1))
     safe.cipher.fail = true

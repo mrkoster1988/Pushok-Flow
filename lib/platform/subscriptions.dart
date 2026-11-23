@@ -10,6 +10,7 @@ class FlowSubscription {
     required this.host,
     required this.profileCount,
     required this.updatedAt,
+    this.skippedProfileCount = 0,
     this.expiresAt,
     this.usedBytes,
     this.totalBytes,
@@ -19,6 +20,8 @@ class FlowSubscription {
   final String name;
   final String host;
   final int profileCount;
+  /// Unsupported entries omitted from the last successfully saved server list.
+  final int skippedProfileCount;
   final DateTime updatedAt;
   final DateTime? expiresAt;
   final int? usedBytes;
@@ -77,7 +80,7 @@ class SubscriptionStatus {
       if (value is! int || value < 0) throw invalid;
       return value;
     }
-    const keys = {'id', 'name', 'host', 'profileCount', 'updatedAt',
+    const keys = {'id', 'name', 'host', 'profileCount', 'skippedProfileCount', 'updatedAt',
       'expiresAt', 'usedBytes', 'totalBytes'};
     for (final entry in entries) {
       if (entry is! Map || entry.keys.any((key) => !keys.contains(key))) throw invalid;
@@ -85,15 +88,19 @@ class SubscriptionStatus {
       final name = entry['name'];
       final host = entry['host'];
       final count = entry['profileCount'];
+      final skippedCount = entry.containsKey('skippedProfileCount')
+          ? entry['skippedProfileCount'] : 0;
       if (id is! String || !_id.hasMatch(id) || !seen.add(id) ||
           name is! String || !WireGuardProfiles.isValidName(name) ||
           host is! String || host.isEmpty || host.length > 253 ||
           RegExp(r'[\s/@?#\u0000-\u001f\u007f]').hasMatch(host) ||
-          count is! int || count < 0 || count > WireGuardProfiles.maxProfiles) {
+          count is! int || count < 0 || count > WireGuardProfiles.maxProfiles ||
+          skippedCount is! int || skippedCount < 0 || skippedCount > 200) {
         throw invalid;
       }
       subscriptions.add(FlowSubscription(id: id, name: name, host: host,
-        profileCount: count, updatedAt: date(entry['updatedAt'], mandatory: true)!,
+        profileCount: count, skippedProfileCount: skippedCount,
+        updatedAt: date(entry['updatedAt'], mandatory: true)!,
         expiresAt: date(entry['expiresAt']), usedBytes: bytes(entry['usedBytes']),
         totalBytes: bytes(entry['totalBytes'])));
     }
@@ -201,7 +208,9 @@ String subscriptionErrorMessage(Object error) {
       'Нужна полная HTTPS-ссылка подписки, полученная в магазине или панели.',
     'SUBSCRIPTION_EMPTY' =>
       'В подписке нет подключений. Уточните срок доступа в магазине.',
-    'SUBSCRIPTION_UNSUPPORTED' || 'UNSUPPORTED_TRANSPORT' ||
+    'SUBSCRIPTION_UNSUPPORTED' =>
+      'В подписке нет поддерживаемых подключений. Нужны ссылки VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS.',
+    'UNSUPPORTED_TRANSPORT' ||
     'UNSUPPORTED_SECURITY' || 'UNSUPPORTED_PROFILE_OPTION' =>
       'Подписка содержит неподдерживаемые подключения. Нужны ссылки VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS.',
     'SUBSCRIPTION_INVALID' || 'INVALID_VLESS_CONFIG' =>

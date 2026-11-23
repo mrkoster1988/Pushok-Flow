@@ -45,7 +45,7 @@ class SecureWireGuardStore {
         val current = cipher.decrypt(storedCiphertext!!)
         val records = current.subscriptions.map {
             if (it.id != id) it else StoredSubscription(it.id, it.name, url, it.updatedAt,
-                it.expiresAt, it.usedBytes, it.totalBytes)
+                it.expiresAt, it.usedBytes, it.totalBytes, it.skippedProfileCount)
         }
         check(storage.replaceCatalog(cipher.encrypt(ProfileCatalog(current.profiles, current.activeProfileId, records))))
     }

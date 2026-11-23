@@ -61,6 +61,12 @@ class SubscriptionsCard extends StatelessWidget {
         'только после нажатия «Добавить подписку». '
         'Аккаунт MTProxy сам по себе не предоставляет серверы для Flow.\n\n'
         'Flow загружает список серверов и сохраняет его на устройстве. '
+        'Из смешанной подписки добавляются совместимые подключения VLESS: '
+        'TCP с TLS или REALITY, WebSocket и gRPC с TLS. '
+        'Записи других протоколов и неподдерживаемых вариантов подключения '
+        'пропускаются; их количество показано в карточке подписки. '
+        'Если ответ повреждён или в нём нет совместимых серверов, '
+        'прежний список сохраняется.\n\n'
         'Автообновление проверяет список при открытии приложения, когда подключение '
         'Flow отключено: не чаще раза в шесть часов после успешной проверки. '
         'Ошибка одного сервиса не мешает проверке остальных подписок. '
@@ -92,6 +98,14 @@ class SubscriptionsCard extends StatelessWidget {
         const SizedBox(height: 8),
         Text('${entry.host} · Серверов: ${entry.profileCount}',
           style: const TextStyle(color: PushokPalette.muted)),
+        if (entry.skippedProfileCount > 0) ...[
+          const SizedBox(height: 8),
+          Semantics(liveRegion: true,
+            child: Text('Несовместимых записей пропущено: ${entry.skippedProfileCount}. '
+                'Доступные серверы добавлены.',
+              key: ValueKey('subscription_skipped_profiles_${entry.id}'),
+              style: const TextStyle(color: PushokPalette.orange))),
+        ],
         const SizedBox(height: 8),
         Text(expiry == null ? 'Сервис не передал срок подписки.'
             : expired ? 'По данным сервиса срок истёк ${_date(expiry)}.'

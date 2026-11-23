@@ -72,7 +72,8 @@ class SecureWireGuardStore(context: Context) {
                 .put("name", it.name).put("url", it.url).put("updatedAt", it.updatedAt)
                 .put("expiresAt", it.expiresAt ?: JSONObject.NULL)
                 .put("usedBytes", it.usedBytes ?: JSONObject.NULL)
-                .put("totalBytes", it.totalBytes ?: JSONObject.NULL)) }
+                .put("totalBytes", it.totalBytes ?: JSONObject.NULL)
+                .put("skippedProfileCount", it.skippedProfileCount)) }
             val json = JSONObject().put("version", 2).put("profiles", profiles).put("subscriptions", subscriptions)
                 .put("activeProfileId", catalog.activeProfileId ?: JSONObject.NULL)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -110,7 +111,8 @@ class SecureWireGuardStore(context: Context) {
                         item.opt("name") as? String ?: error("PROFILE_LOAD_FAILED"),
                         item.opt("url") as? String ?: error("PROFILE_LOAD_FAILED"),
                         nullableLong(item, "updatedAt") ?: error("PROFILE_LOAD_FAILED"),
-                        nullableLong(item, "expiresAt"), nullableLong(item, "usedBytes"), nullableLong(item, "totalBytes"))
+                        nullableLong(item, "expiresAt"), nullableLong(item, "usedBytes"), nullableLong(item, "totalBytes"),
+                        skippedProfileCount(item))
                 }
             }
             return ProfileCatalog(profiles, active as? String, subscriptions)
@@ -130,6 +132,19 @@ class SecureWireGuardStore(context: Context) {
         is Long -> value
         is Int -> value.toLong()
         else -> error("PROFILE_LOAD_FAILED")
+    }
+
+    private fun skippedProfileCount(item: JSONObject): Int {
+        // Existing v2 catalogs predate partial imports. Keep their version, key and AAD;
+        // absence alone means zero. Null/string/fractional/out-of-range values are corrupt.
+        if (!item.has("skippedProfileCount")) return 0
+        val count = when (val value = item.opt("skippedProfileCount")) {
+            is Int -> value.toLong()
+            is Long -> value
+            else -> error("PROFILE_LOAD_FAILED")
+        }
+        require(count in 0..SubscriptionPolicy.MAX_FEED_ENTRIES.toLong()) { "PROFILE_LOAD_FAILED" }
+        return count.toInt()
     }
 
     fun metadata(): Map<String, Any?> = catalogStore.metadata()

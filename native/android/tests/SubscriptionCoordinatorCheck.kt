@@ -342,6 +342,42 @@ private fun cancellationDominatesABlockedProviderFailure() {
     }
 }
 
+private fun mixedImportsAndRefreshesReportSkippedProfilesWithoutPartialFailures() {
+    Fixture().use { f ->
+        f.responses[3] = ResponseSpec(body = "vmess://synthetic\n" + config(3) + "\n" +
+            config(4).replace("type=tcp", "type=xhttp"))
+        val status = f.invoke("importSubscription", mapOf("name" to "Mixed",
+            "url" to "https://provider3.example/sub/private-token-3")).status()
+        val imported = f.store.subscriptionRecords().single { it.id !in f.ids }
+        check(imported.skippedProfileCount == 2 && f.profiles(imported.id) == listOf(config(3)))
+        val metadata = (status["subscriptions"] as List<*>).map { it as Map<*, *> }.single { it["id"] == imported.id }
+        check(metadata["skippedProfileCount"] == 2 && metadata["profileCount"] == 1)
+        check(!status.toString().contains("private-token") && !status.toString().contains("synthetic"))
+        check(f.profiles(f.ids[0]) == listOf(config(1)) && f.profiles(f.ids[1]) == listOf(config(2)))
+        val selected = (f.store.catalogStore.metadata()["profiles"] as List<*>).map { it as Map<*, *> }
+            .single { it["subscriptionId"] == imported.id }["id"] as String
+        f.store.catalogStore.select(selected)
+        val writes = f.store.writes
+        for ((code, body) in listOf(
+            "SUBSCRIPTION_UNSUPPORTED" to "trojan://synthetic\nvmess://synthetic",
+            "SUBSCRIPTION_INVALID" to config(30) + "\nvless://broken",
+            "SUBSCRIPTION_INVALID" to config(30) + "\nnot a profile",
+        )) {
+            f.responses[3] = ResponseSpec(body = body)
+            check(f.invoke("refreshSubscription", mapOf("id" to imported.id)).code == code)
+            check(f.store.writes == writes && f.profiles(imported.id) == listOf(config(3)))
+            check(f.store.catalogStore.metadata()["activeProfileId"] == selected)
+            check(f.store.subscriptionRecords().single { it.id == imported.id }.skippedProfileCount == 2)
+        }
+        f.responses[3] = ResponseSpec(body = config(3))
+        val clean = f.invoke("refreshSubscription", mapOf("id" to imported.id)).status()
+        check(f.store.subscriptionRecords().single { it.id == imported.id }.skippedProfileCount == 0)
+        check((clean["subscriptions"] as List<*>).map { it as Map<*, *> }
+            .single { it["id"] == imported.id }["skippedProfileCount"] == 0)
+        check(f.store.catalogStore.metadata()["activeProfileId"] == selected && f.errors(clean).isEmpty())
+    }
+}
+
 fun main() {
     try {
         partialRefreshContinues()
@@ -350,7 +386,8 @@ fun main() {
         globalFailuresStopTheBatch()
         interruptionBetweenProvidersStopsFurtherTraffic()
         cancellationDominatesABlockedProviderFailure()
-        println("Actual subscription coordinator checks passed: 6 regression groups")
+        mixedImportsAndRefreshesReportSkippedProfilesWithoutPartialFailures()
+        println("Actual subscription coordinator checks passed: 7 regression groups")
     } finally {
         for (name in listOf("network", "reads")) {
             executor(name).shutdownNow()

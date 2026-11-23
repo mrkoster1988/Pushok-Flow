@@ -251,6 +251,26 @@ private fun realityValidation() {
     }
 }
 
+private fun unsupportedCapabilitiesCannotHideMalformedKnownFields() {
+    for (option in listOf("sni=bad%2Fhost", "alpn=h2,h2", "pbk=invalid", "sid=abc",
+        "spx=invalid", "path=not-a-path", "host=bad%2Fhost", "serviceName=", "authority=bad%2Fhost")) {
+        for (prefix in listOf(PREFIX + "security=tls&type=xhttp", PREFIX + "security=tls&unknownOption=1")) {
+            rejected("INVALID_VLESS_CONFIG", "$prefix&$option")
+        }
+    }
+    rejected("INVALID_VLESS_CONFIG", REALITY.replace("pbk=$PUBLIC_KEY", "pbk=invalid") + "&unknownOption=1")
+    for (reality in listOf(REALITY, REALITY.replace("type=tcp", "type=raw"), REALITY.replace("&type=tcp", ""))) {
+        rejected("INVALID_VLESS_CONFIG", reality.replace("&pbk=$PUBLIC_KEY", "") + "&unknownOption=1")
+        rejected("INVALID_VLESS_CONFIG", reality.replace("&fp=chrome", "") + "&unknownOption=1")
+    }
+    rejected("INVALID_VLESS_CONFIG", PREFIX + "security=tls&type=grpc&unknownOption=1")
+    // Valid syntax with an unsupported capability remains unsupported, never silently imported.
+    rejected("UNSUPPORTED_TRANSPORT", PREFIX + "security=tls&type=xhttp&sni=server.example.invalid&alpn=h2")
+    rejected("UNSUPPORTED_PROFILE_OPTION", REALITY + "&unknownOption=1")
+    rejected("UNSUPPORTED_TRANSPORT", PREFIX + "security=reality&type=xhttp")
+    rejected("UNSUPPORTED_SECURITY", PREFIX + "security=reality&type=ws")
+}
+
 private fun formatAndBounds() {
     val wg = "[Interface]\nPrivateKey = synthetic\n[Peer]\nPublicKey = synthetic\n"
     check(ConnectionProfile.kind(wg) == ConnectionProfile.Kind.WIREGUARD)
@@ -277,6 +297,7 @@ fun main() {
     successfulProfiles()
     malformedAndUnsupported()
     realityValidation()
+    unsupportedCapabilitiesCannotHideMalformedKnownFields()
     websocketProfiles()
     grpcProfiles()
     transportCompatibility()

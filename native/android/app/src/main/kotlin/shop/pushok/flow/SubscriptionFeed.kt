@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.util.Collections
+import java.util.Locale
 
 /** A deliberately bounded VLESS subscription; no arbitrary JSON or remote nested imports. */
 object SubscriptionFeed {
@@ -13,35 +14,53 @@ object SubscriptionFeed {
     }
 
     class Parsed internal constructor(entries: List<Entry>, val title: String?,
-        val expiresAt: Long?, val usedBytes: Long?, val totalBytes: Long?) {
+        val expiresAt: Long?, val usedBytes: Long?, val totalBytes: Long?,
+        val skippedProfileCount: Int = 0) {
         val entries: List<Entry> = Collections.unmodifiableList(entries.toList())
         override fun toString() = "SubscriptionFeed.Parsed(<redacted>)"
     }
+
+    private val schemePrefix = Regex("^([A-Za-z][A-Za-z0-9+.-]*)://")
+    // These are recognized client-link families, not nested subscriptions or generic URLs.
+    // Their credentials remain uninterpreted: no decoding, fetching or conversion occurs.
+    private val unsupportedSchemes = setOf("vmess", "trojan", "ss", "ssr", "hysteria",
+        "hysteria2", "hy2", "tuic", "wireguard")
 
     fun parse(body: ByteArray, userInfo: String? = null, profileTitle: String? = null): Parsed {
         if (body.size > SubscriptionPolicy.MAX_BYTES) fail("SUBSCRIPTION_TOO_LARGE")
         var text = strictUtf8(body).removePrefix("\uFEFF").trim()
         if (text.isEmpty()) fail("SUBSCRIPTION_EMPTY")
-        if (!text.startsWith("vless://", true)) {
-            if (Regex("^[A-Za-z][A-Za-z0-9+.-]*://").containsMatchIn(text) ||
-                text.startsWith('[') || text.startsWith('{')) fail("SUBSCRIPTION_UNSUPPORTED")
+        if (!schemePrefix.containsMatchIn(text)) {
+            if (text.startsWith('[') || text.startsWith('{')) fail("SUBSCRIPTION_UNSUPPORTED")
             val decoded = decodeBase64(text)
             text = try { strictUtf8(decoded).removePrefix("\uFEFF").trim() } finally { decoded.fill(0) }
         }
         if (text.isEmpty()) fail("SUBSCRIPTION_EMPTY")
-        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        if (lines.size > ProfileCatalogStore.MAX_PROFILES) fail("SUBSCRIPTION_TOO_LARGE")
-        val entries = lines.mapIndexed { index, line ->
-            if (!line.startsWith("vless://", true)) fail("SUBSCRIPTION_UNSUPPORTED")
+        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
+            .take(SubscriptionPolicy.MAX_FEED_ENTRIES + 1).toList()
+        if (lines.size > SubscriptionPolicy.MAX_FEED_ENTRIES) fail("SUBSCRIPTION_TOO_LARGE")
+        val entries = mutableListOf<Entry>()
+        var skipped = 0
+        for (line in lines) {
+            if (!line.startsWith("vless://", true)) {
+                if (!isUnsupportedClientUri(line)) fail("SUBSCRIPTION_INVALID")
+                skipped++
+                continue
+            }
             try { VlessProfile.parse(line) }
             catch (error: ProfileFormatFailure) {
-                if (error.code.startsWith("UNSUPPORTED_")) fail("SUBSCRIPTION_UNSUPPORTED")
+                if (error.code.startsWith("UNSUPPORTED_")) {
+                    skipped++
+                    continue
+                }
                 fail("SUBSCRIPTION_INVALID")
             }
+            if (entries.size == ProfileCatalogStore.MAX_PROFILES) fail("SUBSCRIPTION_TOO_LARGE")
             val rawName = try { URI(line).rawFragment?.let(::decodeLabel) } catch (_: Exception) { null }
-            Entry(safeName(rawName) ?: "Сервер ${index + 1}", line)
+            entries.add(Entry(safeName(rawName) ?: "Сервер ${entries.size + 1}", line))
         }
-        if (entries.isEmpty()) fail("SUBSCRIPTION_EMPTY")
+        // A response with no usable servers must never replace the existing catalog.
+        if (entries.isEmpty()) fail(if (skipped > 0) "SUBSCRIPTION_UNSUPPORTED" else "SUBSCRIPTION_EMPTY")
         // Different labels or export formatting cannot create another effective connection.
         if (entries.map { identity(it.config) }.distinct().size != entries.size) fail("SUBSCRIPTION_INVALID")
         val info = metadata(userInfo)
@@ -51,7 +70,20 @@ object SubscriptionFeed {
                 val upload = info.getValue("upload"); val download = info.getValue("download")
                 if (upload <= Long.MAX_VALUE - download) upload + download else null
             } else null,
-            info["total"]?.takeIf { it > 0 })
+            info["total"]?.takeIf { it > 0 }, skipped)
+    }
+
+    private fun isUnsupportedClientUri(line: String): Boolean {
+        val scheme = schemePrefix.find(line)?.groupValues?.get(1)?.lowercase(Locale.ROOT)
+            ?: return false
+        if (scheme !in unsupportedSchemes) return false
+        if (line.length > ProfileCatalogStore.MAX_CONFIG_LENGTH || line.any {
+                it.isWhitespace() || Character.isISOControl(it) ||
+                    it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069'
+            }) fail("SUBSCRIPTION_INVALID")
+        val uri = try { URI(line) } catch (_: Exception) { fail("SUBSCRIPTION_INVALID") }
+        if (uri.isOpaque || uri.rawAuthority.isNullOrEmpty()) fail("SUBSCRIPTION_INVALID")
+        return true
     }
 
     /**

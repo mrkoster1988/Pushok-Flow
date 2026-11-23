@@ -11,14 +11,17 @@ object KeyProperties {
 }
 
 class KeyGenParameterSpec(val alias: String, val purposes: Int, val blockModes: List<String>,
-    val paddings: List<String>, val keySize: Int) : AlgorithmParameterSpec {
+    val paddings: List<String>, val keySize: Int,
+    val randomizedEncryptionRequired: Boolean = true) : AlgorithmParameterSpec {
     class Builder(private val alias: String, private val purposes: Int) {
         private var blockModes = emptyList<String>()
         private var paddings = emptyList<String>()
         private var keySize = 0
+        private var randomizedEncryptionRequired = true
         fun setBlockModes(vararg modes: String) = apply { blockModes = modes.toList() }
         fun setEncryptionPaddings(vararg values: String) = apply { paddings = values.toList() }
         fun setKeySize(size: Int) = apply { keySize = size }
-        fun build() = KeyGenParameterSpec(alias, purposes, blockModes, paddings, keySize)
+        fun setRandomizedEncryptionRequired(value: Boolean) = apply { randomizedEncryptionRequired = value }
+        fun build() = KeyGenParameterSpec(alias, purposes, blockModes, paddings, keySize, randomizedEncryptionRequired)
     }
 }

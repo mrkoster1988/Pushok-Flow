@@ -239,6 +239,11 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt
   native/android/tests/account_store_stubs/*.kt native/android/tests/FlowAccountStoreCheck.kt \
   -classpath "$json_core" -include-runtime -d "$out/account-store-tests.jar"
 java -cp "$out/account-store-tests.jar:$android_json" shop.pushok.flow.FlowAccountStoreCheckKt
+kotlinc "${subscription_core[@]}" \
+  native/android/app/src/main/kotlin/shop/pushok/flow/SecureWireGuardStore.kt \
+  native/android/tests/account_store_stubs/*.kt native/android/tests/SecureWireGuardStoreCheck.kt \
+  -classpath "$json_core" -include-runtime -d "$out/profile-store-tests.jar"
+java -cp "$out/profile-store-tests.jar:$android_json" shop.pushok.flow.SecureWireGuardStoreCheckKt
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/UpdateAutomationPolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/UpdateCoordinator.kt \

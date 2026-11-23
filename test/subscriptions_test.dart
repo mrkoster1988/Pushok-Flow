@@ -21,6 +21,7 @@ void main() {
     final status = SubscriptionStatus.fromPlatform(source);
     expect(status.subscriptions.single.expiresAt, isNull);
     expect(status.subscriptions.single.host, 'example.invalid');
+    expect(status.subscriptions.single.skippedProfileCount, 0);
     expect(status.busy, isFalse);
     expect(status.errorCode, isNull);
     expect(status.refreshErrors, isEmpty);
@@ -28,6 +29,56 @@ void main() {
     expect(() => status.subscriptions.clear(), throwsUnsupportedError);
     (source['subscriptions']! as List).clear();
     expect(status.subscriptions.length, 1);
+  });
+
+  test('Skipped connection counts preserve legacy metadata and valid bounds', () {
+    final legacy = SubscriptionStatus.fromPlatform(_status());
+    expect(legacy.subscriptions.single.skippedProfileCount, 0);
+    final manual = FlowSubscription(id: _id, name: 'Моя подписка',
+      host: 'example.invalid', profileCount: 2,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(1795377600000));
+    expect(manual.skippedProfileCount, 0);
+    for (final count in [0, 1, 199, 200]) {
+      final status = SubscriptionStatus.fromPlatform({
+        ..._status(),
+        'subscriptions': [{..._entry(), 'skippedProfileCount': count}],
+      });
+      expect(status.subscriptions.single.skippedProfileCount, count);
+      expect(status.subscriptions.single.profileCount, 2);
+      expect(status.errorCode, isNull);
+      expect(status.refreshErrors, isEmpty);
+    }
+  });
+
+  test('Skipped connection metadata rejects invalid counts and private entry details', () {
+    final invalidEntries = <Map<String, Object?>>[
+      for (final count in <Object?>[-1, 201, 1000000, 1.0, '1', true, null,
+        'https://example.invalid/PRIVATE_TOKEN',
+        {'count': 1, 'url': 'PRIVATE_TOKEN'}, <Object?>[]])
+        {..._entry(), 'skippedProfileCount': count},
+      {..._entry(), 'skippedProfileCount': 1, 'skippedProfiles': ['PRIVATE_TOKEN']},
+      {..._entry(), 'skippedProfileCount': 1, 'skippedUrls': ['PRIVATE_TOKEN']},
+    ];
+    for (final entry in invalidEntries) {
+      try {
+        SubscriptionStatus.fromPlatform({..._status(), 'subscriptions': [entry]});
+        fail('Invalid skipped connection metadata was accepted');
+      } on FormatException catch (error) {
+        expect(error.source, isNull);
+        expect(error.toString(), isNot(contains('PRIVATE_TOKEN')));
+      }
+    }
+  });
+
+  test('Unsupported feed error explains that no compatible servers were found', () {
+    final message = subscriptionErrorMessage(PlatformException(
+      code: 'SUBSCRIPTION_UNSUPPORTED',
+      message: 'https://example.invalid/PRIVATE_TOKEN', details: 'PRIVATE_CONFIG'));
+    expect(message, startsWith('В подписке нет поддерживаемых подключений.'));
+    expect(message, contains('VLESS'));
+    expect(message, contains('TLS'));
+    expect(message, isNot(contains('PRIVATE_')));
+    expect(message, isNot(contains('example.invalid')));
   });
 
   test('Provider failures stay scoped to existing subscriptions and immutable', () {

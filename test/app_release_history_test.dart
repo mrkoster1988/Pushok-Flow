@@ -74,7 +74,7 @@ void main() {
   });
 
   test('Bundled history contains the five recent Android versions with exact lookup', () {
-    expect(bundledAppReleaseHistory.map((notes) => notes.versionCode), [53, 52, 51, 50, 49]);
+    expect(bundledAppReleaseHistory.map((notes) => notes.versionCode), [54, 53, 52, 51, 50]);
     for (final notes in bundledAppReleaseHistory) {
       expect(bundledAppRelease(notes.versionName, notes.versionCode), same(notes));
       expect(bundledAppRelease(notes.versionName, notes.versionCode + 1), isNull);

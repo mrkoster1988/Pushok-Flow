@@ -9,18 +9,22 @@ import 'package:pushok_flow/ui/subscriptions_card.dart';
 const _id = '10000000-0000-4000-8000-000000000001';
 const _otherId = '10000000-0000-4000-8000-000000000002';
 const _url = 'https://example.invalid/sub/PRIVATE_TOKEN';
-SubscriptionStatus _status({int? expiresAt, bool busy = false}) =>
+SubscriptionStatus _status({int? expiresAt, bool busy = false, int? skippedProfileCount}) =>
     SubscriptionStatus.fromPlatform({
       'automaticUpdatesEnabled': true, 'busy': busy,
       'subscriptions': [{
         'id': _id, 'name': 'Магазин', 'host': 'example.invalid',
         'profileCount': 2, 'updatedAt': 1795377600000,
+        if (skippedProfileCount != null) 'skippedProfileCount': skippedProfileCount,
         'expiresAt': expiresAt, 'usedBytes': null, 'totalBytes': null,
       }],
     });
 
-Future<void> _pump(WidgetTester tester, Widget child) async {
+Future<void> _pump(WidgetTester tester, Widget child, {double textScale = 1}) async {
   await tester.pumpWidget(MaterialApp(theme: buildPushokTheme(),
+    builder: (context, content) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+      child: content!),
     home: Scaffold(body: SingleChildScrollView(child: child))));
   await tester.pump();
 }
@@ -52,6 +56,82 @@ void main() {
     expect(find.textContaining('По данным сервиса срок истёк'), findsOneWidget);
     await _tap(tester, 'refresh_subscription_$_id');
     expect(refreshes, 1);
+  });
+
+  testWidgets('Mixed subscription shows its skipped count without marking saved servers as failed',
+      (tester) async {
+    var refreshes = 0;
+    final status = SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true,
+      'subscriptions': [
+        {'id': _id, 'name': 'Магазин', 'host': 'example.invalid',
+          'profileCount': 2, 'skippedProfileCount': 3, 'updatedAt': 1795377600000},
+        {'id': _otherId, 'name': 'Другой магазин', 'host': 'other.invalid',
+          'profileCount': 4, 'updatedAt': 1795464000000},
+      ],
+    });
+    await _pump(tester, SubscriptionsCard(status: status, mutationsEnabled: true,
+      onRefresh: (_) => refreshes++));
+    final warning = find.byKey(const ValueKey('subscription_skipped_profiles_$_id'));
+    expect(warning, findsOneWidget);
+    expect(tester.widget<Text>(warning).data,
+      'Несовместимых записей пропущено: 3. Доступные серверы добавлены.');
+    expect(tester.widget<Text>(warning).style!.color, PushokPalette.orange);
+    expect(find.byKey(const ValueKey('subscription_skipped_profiles_$_otherId')), findsNothing);
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
+    expect(find.text('example.invalid · Серверов: 2'), findsOneWidget);
+    expect(find.text('other.invalid · Серверов: 4'), findsOneWidget);
+    expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
+    await _tap(tester, 'refresh_subscription_$_id');
+    expect(refreshes, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Legacy and fully compatible subscriptions have no skipped-entry warning',
+      (tester) async {
+    for (final skipped in <int?>[null, 0]) {
+      await _pump(tester, SubscriptionsCard(status: _status(skippedProfileCount: skipped)));
+      expect(find.byKey(const ValueKey('subscription_skipped_profiles_$_id')), findsNothing);
+      expect(find.textContaining('Несовместимых записей'), findsNothing);
+      expect(find.text('example.invalid · Серверов: 2'), findsOneWidget);
+    }
+  });
+
+  testWidgets('Mixed-feed guidance explains compatibility and preserving previous servers',
+      (tester) async {
+    await _pump(tester, SubscriptionsCard(status: _status()));
+    await _tap(tester, 'subscriptions_info');
+    expect(find.textContaining('Из смешанной подписки добавляются совместимые подключения VLESS'),
+      findsOneWidget);
+    expect(find.textContaining('Записи других протоколов и неподдерживаемых вариантов подключения'),
+      findsOneWidget);
+    expect(find.textContaining('Если ответ повреждён или в нём нет совместимых серверов, прежний список сохраняется.'),
+      findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Skipped count remains readable on a narrow phone with large text',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final status = SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true,
+      'subscriptions': [{
+        'id': _id, 'name': 'Подписка с длинным названием для проверки крупного текста',
+        'host': 'very-long-subscription-provider-address.example.invalid',
+        'profileCount': 2, 'skippedProfileCount': 200, 'updatedAt': 1795377600000,
+      }],
+    });
+    await _pump(tester, SubscriptionsCard(status: status), textScale: 2);
+    final warning = find.byKey(const ValueKey('subscription_skipped_profiles_$_id'));
+    await tester.ensureVisible(warning);
+    await tester.pumpAndSettle();
+    expect(warning, findsOneWidget);
+    expect(tester.widget<Text>(warning).data, contains('пропущено: 200'));
+    expect(tester.getSize(warning).width, lessThanOrEqualTo(360));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Native busy and connected states block changes but keep account access', (tester) async {

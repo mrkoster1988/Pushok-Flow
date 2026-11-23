@@ -8,7 +8,8 @@ class StoredWireGuardProfile(val id: String, val name: String, val config: Strin
 
 class StoredSubscription(val id: String, val name: String, val url: String,
     val updatedAt: Long, val expiresAt: Long? = null,
-    val usedBytes: Long? = null, val totalBytes: Long? = null) {
+    val usedBytes: Long? = null, val totalBytes: Long? = null,
+    val skippedProfileCount: Int = 0) {
     override fun toString() = "StoredSubscription(<redacted>)"
 }
 
@@ -92,6 +93,9 @@ class ProfileCatalogStore(
                     sub.updatedAt !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS ||
                     sub.expiresAt?.let { it !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS } == true || sub.usedBytes?.let { it < 0 } == true ||
                     sub.totalBytes?.let { it <= 0 } == true ||
+                    sub.skippedProfileCount !in 0..SubscriptionPolicy.MAX_FEED_ENTRIES ||
+                    sub.skippedProfileCount + catalog.profiles.count { it.subscriptionId == sub.id } >
+                        SubscriptionPolicy.MAX_FEED_ENTRIES ||
                     catalog.profiles.none { it.subscriptionId == sub.id }) {
                     throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
                 }
@@ -223,7 +227,8 @@ class ProfileCatalogStore(
             mapOf("id" to sub.id, "name" to sub.name, "host" to SubscriptionPolicy.host(sub.url),
                 "profileCount" to catalog.profiles.count { it.subscriptionId == sub.id },
                 "updatedAt" to sub.updatedAt, "expiresAt" to sub.expiresAt,
-                "usedBytes" to sub.usedBytes, "totalBytes" to sub.totalBytes)
+                "usedBytes" to sub.usedBytes, "totalBytes" to sub.totalBytes,
+                "skippedProfileCount" to sub.skippedProfileCount)
         })
     }
 
@@ -248,7 +253,7 @@ class ProfileCatalogStore(
             val id = newId()
             val entries = feed.entries.map { StoredWireGuardProfile(newId(), it.name, it.config, id) }
             val sub = StoredSubscription(id, normalizedName, normalizedUrl, now,
-                feed.expiresAt, feed.usedBytes, feed.totalBytes)
+                feed.expiresAt, feed.usedBytes, feed.totalBytes, feed.skippedProfileCount)
             persist(ProfileCatalog(catalog.profiles + entries, catalog.activeProfileId ?: entries.first().id,
                 catalog.subscriptions + sub))
             id
@@ -287,7 +292,7 @@ class ProfileCatalogStore(
             val active = catalog.activeProfileId?.takeIf { activeId -> profiles.any { it.id == activeId } }
                 ?: replacements.first().id
             val refreshed = StoredSubscription(id, sub.name, sub.url, now,
-                feed.expiresAt, feed.usedBytes, feed.totalBytes)
+                feed.expiresAt, feed.usedBytes, feed.totalBytes, feed.skippedProfileCount)
             persist(ProfileCatalog(profiles, active, catalog.subscriptions.map { if (it.id == id) refreshed else it }))
         }
 
@@ -304,6 +309,10 @@ class ProfileCatalogStore(
         if (now !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS) throw SubscriptionFailure("SUBSCRIPTION_INVALID")
         if (feed.entries.isEmpty()) throw SubscriptionFailure("SUBSCRIPTION_EMPTY")
         if (feed.entries.size > MAX_PROFILES) throw SubscriptionFailure("SUBSCRIPTION_TOO_LARGE")
+        if (feed.skippedProfileCount !in 0..SubscriptionPolicy.MAX_FEED_ENTRIES ||
+            feed.skippedProfileCount + feed.entries.size > SubscriptionPolicy.MAX_FEED_ENTRIES) {
+            throw SubscriptionFailure("SUBSCRIPTION_INVALID")
+        }
         feed.entries.forEach {
             normalizedName(it.name)
             try { VlessProfile.parse(it.config) }

@@ -23,6 +23,8 @@ class SubscriptionFailure(code: String) : Exception() {
 /** URL validation is pure; the downloader must separately reject private DNS resolutions. */
 object SubscriptionPolicy {
     const val MAX_BYTES = 512 * 1024
+    // Bound the original feed independently from the retained profile limit.
+    const val MAX_FEED_ENTRIES = 200
     const val MAX_URL_LENGTH = 4096
     const val MAX_SUBSCRIPTIONS = 5
     // Keep provider dates representable by every client/platform (through year 9999).

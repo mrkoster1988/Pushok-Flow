@@ -1265,7 +1265,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.53.0',
+            version: '0.54.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -1290,6 +1290,30 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
   }
 
+  void _selectTab(int value) {
+    final enteringRoutes = value == 1 && value != tab;
+    if (value != tab) {
+      _recommendationEpoch++;
+      _recommendationPoll?.cancel();
+    }
+    setState(() {
+      if (value != tab) {
+        _recommendationsLoading = false;
+        _recommendationsRefreshing = false;
+        _recommendationsSavingAutoUpdate = false;
+      }
+      tab = value;
+    });
+    if (value == 1) {
+      unawaited(_refreshRoutes());
+      unawaited(_readRecommendations(checkAutomatically: enteringRoutes));
+    }
+    if (value == 2) {
+      unawaited(_refreshProfileStatus().then((_) =>
+        _readSubscriptions(checkAutomatically: true)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1311,29 +1335,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         backgroundColor: PushokFlowApp.bg,
         indicatorColor: PushokFlowApp.panel,
         selectedIndex: tab,
-        onDestinationSelected: (v) {
-          final enteringRoutes = v == 1 && v != tab;
-          if (v != tab) {
-            _recommendationEpoch++;
-            _recommendationPoll?.cancel();
-          }
-          setState(() {
-            if (v != tab) {
-              _recommendationsLoading = false;
-              _recommendationsRefreshing = false;
-              _recommendationsSavingAutoUpdate = false;
-            }
-            tab = v;
-          });
-          if (v == 1) {
-            unawaited(_refreshRoutes());
-            unawaited(_readRecommendations(checkAutomatically: enteringRoutes));
-          }
-          if (v == 2) {
-            unawaited(_refreshProfileStatus().then((_) =>
-              _readSubscriptions(checkAutomatically: true)));
-          }
-        },
+        onDestinationSelected: _selectTab,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Главная'),
@@ -1394,7 +1396,54 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       color: connecting || _nativeBusy || _recovering ? PushokPalette.glowCyan
           : _diagnosticsStale ? PushokPalette.muted
           : _ownsTunnel ? PushokPalette.mint : PushokPalette.orange)),
+    if (_isAndroid) ...[
+      const SizedBox(height: 8),
+      _homeSelectedServer(),
+    ],
   ]));
+
+  Widget _homeSelectedServer() {
+    // This is the saved selection, not proof of the tunnel's remote endpoint.
+    // A cached catalog must not look current while a read/change is pending,
+    // after leaving the app, or when the authoritative status could not be read.
+    final selectionCurrent = _foreground && !_statusRefreshing && !_profileBusy &&
+        !_profileEditorOpen && !_diagnosticsStale && _profilesError == null && _profiles != null;
+    final selected = selectionCurrent ? _profiles!.activeProfile : null;
+    final unavailable = _profilesError != null && !_statusRefreshing;
+    final stateLabel = selectionCurrent ? 'Добавить сервер'
+        : unavailable ? 'Проверить выбор сервера' : 'Выбор сервера уточняется';
+    return TextButton(
+      key: const Key('home_selected_server'),
+      onPressed: _foreground && !_informationOpen && !_profileEditorOpen &&
+          !_routeConfirmationOpen ? () => _selectTab(2) : null,
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        foregroundColor: PushokPalette.teal,
+      ),
+      child: Row(children: [
+        Icon(selectionCurrent && selected == null ? Icons.add_circle_outline : Icons.dns_outlined,
+          size: 20),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (selected != null) ...[
+            const Text('Выбранный сервер', style: TextStyle(
+              color: PushokPalette.muted, fontSize: 12)),
+            Text(selected.name, key: const Key('home_selected_server_name'),
+              maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            if (selected.isManaged)
+              Text('Подписка: ${selected.subscriptionName}',
+                key: const Key('home_selected_subscription'), maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+          ] else Text(stateLabel, key: const Key('home_server_selection_state'),
+            style: const TextStyle(fontSize: 14)),
+        ])),
+        const SizedBox(width: 8),
+        const Icon(Icons.chevron_right, size: 20),
+      ]),
+    );
+  }
 
   Widget routes() => AppRoutesView(
     apps: installed,

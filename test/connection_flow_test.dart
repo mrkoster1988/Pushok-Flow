@@ -58,7 +58,11 @@ class _AndroidBridge {
   }
   Map<String, Object?> get catalog => {
     'profiles': [for (final entry in profiles.entries)
-      {'id': entry.key, 'name': entry.value['name']}],
+      {'id': entry.key, 'name': entry.value['name'],
+        if (entry.value['subscriptionId'] != null) ...{
+          'subscriptionId': entry.value['subscriptionId'],
+          'subscriptionName': entry.value['subscriptionName'],
+        }}],
     'activeProfileId': activeProfileId,
   };
   Completer<Object?>? catalogGate;
@@ -302,6 +306,214 @@ void main() {
         .setMockMethodCallHandler(privacyChannel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(subscriptionsChannel, null);
+  });
+
+  testWidgets('Home identifies the selected manual server and opens Servers without changing it', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_firstProfileId]!['name'] = 'Мой основной сервер';
+    bridge.profiles[_secondProfileId] = {
+      'name': 'Другой сервер подписки', 'config': _vlessProfile,
+      'subscriptionId': '33333333-3333-4333-8333-333333333333',
+      'subscriptionName': 'Новая подписка',
+    };
+    await _withApp(tester, () async {
+      expect(find.text('Выбранный сервер'), findsOneWidget);
+      expect(find.text('Мой основной сервер'), findsOneWidget);
+      expect(find.text('Другой сервер подписки'), findsNothing);
+      expect(find.byKey(const Key('home_selected_subscription')), findsNothing);
+      expect(find.textContaining('Подключено к'), findsNothing);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      final reads = bridge.named('listWireGuardProfiles').length;
+      await tester.tap(find.byKey(const Key('home_selected_server')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(bridge.named('listWireGuardProfiles').length, greaterThan(reads));
+      expect(bridge.activeProfileId, _firstProfileId);
+      expect(bridge.named('selectWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+    });
+  });
+
+  testWidgets('Home shows the selected managed server with its subscription name', (tester) async {
+    bridge.savedProfile = _vlessProfile;
+    bridge.profiles[_firstProfileId] = {
+      'name': 'Сервер из подписки', 'config': _vlessProfile,
+      'subscriptionId': '33333333-3333-4333-8333-333333333333',
+      'subscriptionName': 'Моя подписка',
+    };
+    bridge.connected = true;
+    bridge.statusProtocol = 'vless';
+    await _withApp(tester, () async {
+      expect(find.text('Выбранный сервер'), findsOneWidget);
+      expect(find.text('Сервер из подписки'), findsOneWidget);
+      expect(find.text('Подписка: Моя подписка'), findsOneWidget);
+      expect(find.textContaining('Подключено к'), findsNothing,
+        reason: 'The saved selection must not imply a confirmed remote endpoint.');
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('Home offers Add server only for a confirmed empty catalog', (tester) async {
+    final pending = Completer<Object?>();
+    bridge.catalogGate = pending;
+    await _withApp(tester, () async {
+      expect(find.text('Выбор сервера уточняется'), findsOneWidget);
+      expect(find.text('Добавить сервер'), findsNothing);
+      expect(find.byKey(const Key('home_selected_server_name')), findsNothing);
+      bridge.catalogGate = null;
+      pending.complete(bridge.catalog);
+      await tester.pumpAndSettle();
+      expect(find.text('Добавить сервер'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('home_selected_server')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(bridge.named('saveWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('Home hides the old selection until a resumed catalog is confirmed', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_secondProfileId] = {'name': 'Новый выбор', 'config': _profile};
+    await _withApp(tester, () async {
+      expect(find.text('Мой профиль'), findsOneWidget);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      expect(find.byKey(const Key('home_selected_server_name')), findsNothing);
+      expect(tester.widget<TextButton>(find.byKey(const Key('home_selected_server'))).onPressed, isNull);
+      final pending = Completer<Object?>();
+      bridge.catalogGate = pending;
+      bridge.activeProfileId = _secondProfileId;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(find.text('Мой профиль'), findsNothing);
+      expect(find.text('Новый выбор'), findsNothing);
+      expect(find.text('Выбор сервера уточняется'), findsOneWidget);
+      bridge.catalogGate = null;
+      pending.complete(bridge.catalog);
+      await tester.pumpAndSettle();
+      expect(find.text('Новый выбор'), findsOneWidget);
+      expect(find.text('Мой профиль'), findsNothing);
+      expect(bridge.named('selectWireGuardProfile'), isEmpty);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('Home does not present a cached name after profile read failure', (tester) async {
+    bridge.savedProfile = _profile;
+    await _withApp(tester, () async {
+      expect(find.text('Мой профиль'), findsOneWidget);
+      bridge.failProfileExists = true;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('Мой профиль'), findsNothing);
+      expect(find.byKey(const Key('home_selected_server_name')), findsNothing);
+      expect(find.text('Добавить сервер'), findsNothing);
+      expect(find.text('Проверить выбор сервера'), findsOneWidget);
+      expect(find.textContaining('PRIVATE_CATALOG_DETAILS'), findsNothing);
+      await tester.tap(find.byKey(const Key('home_selected_server')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(bridge.named('selectWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('Home hides a subscription selection during deletion and until the new catalog arrives', (tester) async {
+    const subscriptionId = '33333333-3333-4333-8333-333333333333';
+    bridge.savedProfile = _profile;
+    bridge.profiles[_firstProfileId] = {
+      'name': 'Удаляемый сервер', 'config': _profile,
+      'subscriptionId': subscriptionId, 'subscriptionName': 'Удаляемая подписка',
+    };
+    bridge.profiles[_secondProfileId] = {'name': 'Оставшийся сервер', 'config': _profile};
+    var subscriptions = <String, Object?>{
+      'automaticUpdatesEnabled': false,
+      'subscriptions': [{
+        'id': subscriptionId, 'name': 'Удаляемая подписка', 'host': 'example.invalid',
+        'profileCount': 1, 'updatedAt': 1795377600000,
+      }],
+    };
+    final deletion = Completer<Object?>();
+    var deletions = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(subscriptionsChannel, (call) async {
+      switch (call.method) {
+        case 'status': return subscriptions;
+        case 'takePendingLink': return null;
+        case 'deleteSubscription':
+          expect(call.arguments, {'id': subscriptionId});
+          deletions++;
+          return deletion.future;
+        default: throw MissingPluginException(call.method);
+      }
+    });
+    await _withApp(tester, () async {
+      expect(find.text('Удаляемый сервер'), findsOneWidget);
+      await _openServers(tester);
+      final delete = find.byKey(const ValueKey('delete_subscription_$subscriptionId'));
+      await tester.ensureVisible(delete);
+      await tester.tap(delete);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_delete_subscription')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(deletions, 1);
+      await tester.tap(find.descendant(
+        of: find.byType(NavigationBar), matching: find.text('Главная')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('home_selected_server_name')), findsNothing,
+        reason: 'The shared profile-mutation guard must hide the previous selection.');
+      expect(find.text('Удаляемый сервер'), findsNothing);
+      expect(find.text('Выбор сервера уточняется'), findsOneWidget);
+
+      final catalog = Completer<Object?>();
+      bridge.catalogGate = catalog;
+      bridge.profiles.remove(_firstProfileId);
+      bridge.activeProfileId = _secondProfileId;
+      subscriptions = {'automaticUpdatesEnabled': false, 'subscriptions': <Object?>[]};
+      deletion.complete(subscriptions);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('home_selected_server_name')), findsNothing,
+        reason: 'Mutation completion alone does not confirm the new catalog.');
+      expect(find.text('Удаляемый сервер'), findsNothing);
+      expect(find.text('Оставшийся сервер'), findsNothing);
+
+      bridge.catalogGate = null;
+      catalog.complete(bridge.catalog);
+      await tester.pumpAndSettle();
+      expect(find.text('Оставшийся сервер'), findsOneWidget);
+      expect(find.byKey(const Key('home_selected_subscription')), findsNothing);
+      expect(bridge.named('selectWireGuardProfile'), isEmpty);
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      expect(bridge.named('disconnectWireGuard'), isEmpty);
+    });
+  });
+
+  testWidgets('Home keeps long managed names within a narrow screen', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_firstProfileId] = {
+      'name': 'Основной сервер с длинным названием для проверки размещения',
+      'config': _profile,
+      'subscriptionId': '33333333-3333-4333-8333-333333333333',
+      'subscriptionName': 'Подписка с длинным названием для проверки размещения',
+    };
+    await _withApp(tester, () async {
+      await tester.ensureVisible(find.byKey(const Key('home_selected_server')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('home_selected_server_name')), findsOneWidget);
+      expect(find.byKey(const Key('home_selected_subscription')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }, size: const Size(320, 640));
   });
 
   testWidgets('Unavailable exclusion failure offers route repair without dropping saved apps', (tester) async {
