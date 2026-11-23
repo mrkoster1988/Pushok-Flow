@@ -26,6 +26,8 @@ class _Bridge {
   int secondUpdatedAt = 1795377600000;
   String? subscriptionErrorCode;
   String? manualRefreshFailureCode;
+  bool rememberManualRefreshFailure = true;
+  Object? importFailure;
   final refreshErrors = <String, String>{};
   final refreshedIds = <String>[];
   Object? subscriptionStatusError;
@@ -100,6 +102,7 @@ class _Bridge {
       case 'importSubscription':
         expect(leases, isNotEmpty);
         expect(call.arguments, {'url': _privateUrl, 'name': 'Магазин'});
+        if (importFailure != null) throw importFailure!;
         imported = true;
         return subscriptions;
       case 'refreshDue':
@@ -116,9 +119,12 @@ class _Bridge {
         refreshedIds.add(id);
         final failure = manualRefreshFailureCode;
         if (failure != null) {
-          refreshErrors[id] = failure;
-          subscriptionErrorCode = failure;
-          throw PlatformException(code: failure, message: 'PRIVATE_PROVIDER_DETAILS');
+          if (rememberManualRefreshFailure) {
+            refreshErrors[id] = failure;
+            subscriptionErrorCode = failure;
+          }
+          throw PlatformException(code: failure, message: 'PRIVATE_PROVIDER_DETAILS',
+            details: {'url': _privateUrl, 'configuration': _manualConfig});
         }
         refreshErrors.remove(id);
         subscriptionErrorCode = null;
@@ -143,7 +149,7 @@ class _Bridge {
   }
 }
 
-Future<void> _pump(WidgetTester tester, _Bridge bridge) async {
+Future<void> _pump(WidgetTester tester, _Bridge bridge, {List<String>? copied}) async {
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   const routes = MethodChannel('shop.pushok.flow/app_routes');
@@ -157,17 +163,285 @@ Future<void> _pump(WidgetTester tester, _Bridge bridge) async {
     'state': 'signed_out', 'busy': false, 'errorCode': null, 'pending': null,
     'profile': null, 'refreshedAt': null, 'sessionExpiresAt': null, 'stale': false,
   });
+  if (copied != null) {
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied.add((call.arguments as Map)['text'] as String);
+      }
+      return null;
+    });
+  }
   addTearDown(() {
     messenger.setMockMethodCallHandler(routes, null);
     messenger.setMockMethodCallHandler(subscriptions, null);
     messenger.setMockMethodCallHandler(privacy, null);
     messenger.setMockMethodCallHandler(account, null);
+    if (copied != null) messenger.setMockMethodCallHandler(SystemChannels.platform, null);
   });
   await tester.pumpWidget(const PushokFlowApp(isAndroid: true, animationsEnabled: false));
   await tester.pumpAndSettle();
 }
 
 void main() {
+  Future<void> openServers(WidgetTester tester) async {
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> copyReport(WidgetTester tester, String key) async {
+    final button = find.byKey(ValueKey(key));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+  }
+
+  void expectPrivateFieldsAbsent(String report) {
+    for (final secret in [_privateUrl, 'PRIVATE_TOKEN', 'PRIVATE_PROVIDER_DETAILS',
+      'UI_ONLY', 'example.invalid', 'other.invalid', 'Магазин', 'Другой магазин',
+      _subscriptionId, _otherSubscriptionId, _managedId]) {
+      expect(report, isNot(contains(secret)));
+    }
+  }
+
+  testWidgets('External-link failure exports its origin without the protected draft', (tester) async {
+    final copied = <String>[];
+    final bridge = _Bridge()..importFailure = PlatformException(
+      code: 'SUBSCRIPTION_AUTH_REQUIRED', message: _privateUrl, details: _manualConfig);
+    await _pump(tester, bridge, copied: copied);
+    final save = find.byKey(const Key('save_subscription'));
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(find.byType(SubscriptionEditor), findsOneWidget);
+    expect(copied, isEmpty);
+    await copyReport(tester, 'copy_subscription_error');
+    expect(copied.single, contains('Действие: Добавление подписки'));
+    expect(copied.single, contains('Источник: Внешняя ссылка'));
+    expect(copied.single, contains('Код: SUBSCRIPTION_AUTH_REQUIRED'));
+    expect(copied.single, contains('Версия: 0.55.0 (сборка 55)'));
+    expectPrivateFieldsAbsent(copied.single);
+    expect(bridge.imported, isFalse);
+    expect(bridge.leases, isNotEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Manual refresh report stays correctly scoped after status reread and clears on success', (tester) async {
+    final copied = <String>[];
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..automaticUpdatesEnabled = false
+      ..manualRefreshFailureCode = 'SUBSCRIPTION_TLS_ERROR';
+    await _pump(tester, bridge, copied: copied);
+    await openServers(tester);
+    final retry = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(copied, isEmpty);
+    await copyReport(tester, 'copy_subscription_refresh_error_$_subscriptionId');
+    expect(copied.single, contains('Действие: Обновление серверов вручную'));
+    expect(copied.single, contains('Источник: Сохранённая подписка'));
+    expect(copied.single, contains('Код: SUBSCRIPTION_TLS_ERROR'));
+    expectPrivateFieldsAbsent(copied.single);
+    bridge.manualRefreshFailureCode = null;
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('copy_subscription_refresh_error_$_subscriptionId')), findsNothing);
+    expect(find.byKey(const Key('copy_subscriptions_error')), findsNothing);
+    expect(copied, hasLength(1));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('New automatic provider failures keep their origin when another provider is retried', (tester) async {
+    final copied = <String>[];
+    final reply = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..secondImported = true
+      ..refreshReply = reply;
+    await _pump(tester, bridge, copied: copied);
+    bridge.refreshErrors.addAll({
+      _subscriptionId: 'SUBSCRIPTION_NETWORK_ERROR',
+      _otherSubscriptionId: 'SUBSCRIPTION_AUTH_REQUIRED',
+    });
+    bridge.subscriptionsBusy = false;
+    reply.complete(bridge.subscriptions);
+    await tester.pumpAndSettle();
+    await openServers(tester);
+    await copyReport(tester, 'copy_subscription_refresh_error_$_otherSubscriptionId');
+    expect(copied.single, contains('Действие: Автоматическое обновление серверов'));
+    expectPrivateFieldsAbsent(copied.single);
+    final retry = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    await copyReport(tester, 'copy_subscription_refresh_error_$_otherSubscriptionId');
+    expect(copied, hasLength(2));
+    expect(copied.last, copied.first);
+    expect(find.byKey(const ValueKey('copy_subscription_refresh_error_$_subscriptionId')), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Restored errors do not claim an automatic download that was not observed', (tester) async {
+    final copied = <String>[];
+    final bridge = _Bridge()..pending = null..imported = true;
+    bridge.refreshErrors[_subscriptionId] = 'SUBSCRIPTION_NETWORK_ERROR';
+    await _pump(tester, bridge, copied: copied);
+    await openServers(tester);
+    expect(bridge.calls, contains('refreshDue'));
+    await copyReport(tester, 'copy_subscription_refresh_error_$_subscriptionId');
+    expect(copied.single, contains('Действие: Обновление серверов\n'));
+    expect(copied.single, isNot(contains('Автоматическое')));
+    expect(copied.single, isNot(contains('вручную')));
+    expectPrivateFieldsAbsent(copied.single);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('A blocked manual retry does not relabel an older automatic provider failure', (tester) async {
+    final copied = <String>[];
+    final reply = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..refreshReply = reply;
+    await _pump(tester, bridge, copied: copied);
+    bridge.refreshErrors[_subscriptionId] = 'SUBSCRIPTION_NETWORK_ERROR';
+    bridge.subscriptionErrorCode = 'SUBSCRIPTION_NETWORK_ERROR';
+    bridge.subscriptionsBusy = false;
+    reply.complete(bridge.subscriptions);
+    await tester.pumpAndSettle();
+    await openServers(tester);
+    await copyReport(tester, 'copy_subscription_refresh_error_$_subscriptionId');
+    expect(copied.single, contains('Действие: Автоматическое обновление серверов'));
+    bridge.manualRefreshFailureCode = 'VPN_BUSY';
+    bridge.rememberManualRefreshFailure = false;
+    final retry = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    await copyReport(tester, 'copy_subscriptions_error');
+    expect(copied.last, contains('Код: VPN_BUSY'));
+    expect(copied.last, contains('Действие: Обновление серверов вручную'));
+    await copyReport(tester, 'copy_subscription_refresh_error_$_subscriptionId');
+    expect(copied.last, copied.first);
+    expectPrivateFieldsAbsent(copied.last);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Successful automatic-update OFF does not report an interrupted refresh as a settings failure',
+      (tester) async {
+    final copied = <String>[];
+    final reply = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..refreshReply = reply;
+    await _pump(tester, bridge, copied: copied);
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pump(); // The in-flight refresh intentionally keeps its progress indicator active.
+    bridge.subscriptionErrorCode = 'SUBSCRIPTION_INTERRUPTED';
+    final automatic = find.byKey(const Key('automatic_subscription_updates'));
+    await tester.ensureVisible(automatic);
+    await tester.tap(automatic);
+    await tester.pump();
+    bridge.subscriptionsBusy = false;
+    reply.complete(bridge.subscriptions);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+    await copyReport(tester, 'copy_subscriptions_error');
+    expect(copied.single, contains('Код: SUBSCRIPTION_INTERRUPTED'));
+    expect(copied.single, contains('Действие: Чтение подписок'));
+    expect(copied.single, isNot(contains('Действие: Настройка автообновления')));
+    expectPrivateFieldsAbsent(copied.single);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('An actual action failure remains copyable when native status does not retain it', (tester) async {
+    final copied = <String>[];
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..automaticUpdatesEnabled = false
+      ..manualRefreshFailureCode = 'SUBSCRIPTION_NETWORK_ERROR'
+      ..rememberManualRefreshFailure = false;
+    await _pump(tester, bridge, copied: copied);
+    await openServers(tester);
+    final retry = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(bridge.subscriptionErrorCode, isNull);
+    expect(bridge.refreshErrors, isEmpty);
+    await copyReport(tester, 'copy_subscriptions_error');
+    expect(copied.single, contains('Действие: Обновление серверов вручную'));
+    expect(copied.single, contains('Код: SUBSCRIPTION_NETWORK_ERROR'));
+    expectPrivateFieldsAbsent(copied.single);
+    bridge.manualRefreshFailureCode = null;
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('copy_subscriptions_error')), findsNothing);
+    expect(copied, hasLength(1));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('An older refresh cleanup cannot erase a newer automatic-update preference failure', (tester) async {
+    final copied = <String>[];
+    final refresh = Completer<Object?>();
+    final setting = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..refreshReply = refresh
+      ..automaticUpdatesReply = setting;
+    await _pump(tester, bridge, copied: copied);
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pump();
+    final automatic = find.byKey(const Key('automatic_subscription_updates'));
+    await tester.ensureVisible(automatic);
+    await tester.tap(automatic);
+    await tester.pump();
+    bridge.automaticUpdatesEnabled = true;
+    setting.completeError(PlatformException(code: 'SUBSCRIPTION_STORE_FAILED',
+      message: _privateUrl, details: _manualConfig));
+    await tester.pump();
+    bridge.subscriptionsBusy = false;
+    refresh.complete(bridge.subscriptions);
+    await tester.pumpAndSettle();
+    await copyReport(tester, 'copy_subscriptions_error');
+    expect(copied.single, contains('Код: SUBSCRIPTION_STORE_FAILED'));
+    expect(copied.single, contains('Действие: Настройка автообновления'));
+    expectPrivateFieldsAbsent(copied.single);
+    bridge.automaticUpdatesReply = null;
+    await tester.ensureVisible(automatic);
+    await tester.tap(automatic);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(automatic).value, isFalse);
+    expect(find.byKey(const Key('copy_subscriptions_error')), findsNothing);
+    expect(copied, hasLength(1));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Unknown global native failures copy only the safe generic code', (tester) async {
+    final copied = <String>[];
+    final bridge = _Bridge()
+      ..pending = null
+      ..subscriptionStatusError = PlatformException(code: 'PRIVATE_PROVIDER_TOKEN',
+        message: _privateUrl, details: _manualConfig);
+    await _pump(tester, bridge, copied: copied);
+    await openServers(tester);
+    await copyReport(tester, 'copy_subscriptions_error');
+    expect(copied.single, contains('Действие: Чтение подписок'));
+    expect(copied.single, contains('Код: SUBSCRIPTION_UNAVAILABLE'));
+    expect(copied.single, isNot(contains('PRIVATE_PROVIDER_TOKEN')));
+    expectPrivateFieldsAbsent(copied.single);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final source in [
     ('camera', 'scan_subscription_qr', 'scanWireGuardProfileQr'),
     ('photo', 'import_subscription_qr_image', 'importWireGuardProfileQrImage'),

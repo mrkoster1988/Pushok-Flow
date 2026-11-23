@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pushok_flow/models/app_release_history.dart';
+import 'package:pushok_flow/models/app_version.dart';
 import 'package:pushok_flow/platform/app_updates.dart';
 
 Map<String, Object?> _notes({String version = '0.49.0', int build = 49,
@@ -17,6 +20,13 @@ Map<Object?, Object?> _status(Object? notes, {bool newer = true}) => {
 };
 
 void main() {
+  test('Bundled diagnostics identity matches the actual Android release version', () {
+    final spec = File('pubspec.yaml').readAsStringSync();
+    final version = RegExp(r'^version:\s*(\S+)\s*$', multiLine: true).firstMatch(spec);
+    expect(version?.group(1), '$appVersionName+$appVersionCode');
+    expect(bundledAppReleaseHistory.first.matches(appVersionName, appVersionCode), isTrue);
+  });
+
   test('Optional descriptions match the exact target version and build', () {
     final available = UpdateStatus.fromMap(_status(_notes(publishedOn: '2026-11-23')));
     expect(available.releaseNotes!.versionName, '0.49.0');
@@ -74,7 +84,7 @@ void main() {
   });
 
   test('Bundled history contains the five recent Android versions with exact lookup', () {
-    expect(bundledAppReleaseHistory.map((notes) => notes.versionCode), [54, 53, 52, 51, 50]);
+    expect(bundledAppReleaseHistory.map((notes) => notes.versionCode), [55, 54, 53, 52, 51]);
     for (final notes in bundledAppReleaseHistory) {
       expect(bundledAppRelease(notes.versionName, notes.versionCode), same(notes));
       expect(bundledAppRelease(notes.versionName, notes.versionCode + 1), isNull);

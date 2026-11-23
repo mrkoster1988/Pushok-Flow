@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/design/pushok_theme.dart';
+import 'package:pushok_flow/platform/subscription_diagnostics.dart';
 import 'package:pushok_flow/platform/subscriptions.dart';
 import 'package:pushok_flow/ui/subscription_editor.dart';
 import 'package:pushok_flow/ui/subscriptions_card.dart';
@@ -19,6 +22,22 @@ SubscriptionStatus _status({int? expiresAt, bool busy = false, int? skippedProfi
         'expiresAt': expiresAt, 'usedBytes': null, 'totalBytes': null,
       }],
     });
+
+SubscriptionStatus _failureStatus({String code = 'SUBSCRIPTION_NETWORK_ERROR'}) =>
+    SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true,
+      'subscriptions': [{
+        'id': _id, 'name': 'PRIVATE_PROVIDER_NAME', 'host': 'example.invalid',
+        'profileCount': 2, 'updatedAt': 1795377600000,
+      }],
+      'refreshErrors': {_id: code},
+    });
+
+void _clipboard(Future<Object?> Function(MethodCall call) handler) {
+  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(SystemChannels.platform, handler);
+  addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+}
 
 Future<void> _pump(WidgetTester tester, Widget child, {double textScale = 1}) async {
   await tester.pumpWidget(MaterialApp(theme: buildPushokTheme(),
@@ -45,6 +64,207 @@ void main() {
     expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
     expect(find.text('Кабинет MTProxy'), findsOneWidget);
     expect(find.text('Управлять подпиской'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Subscription diagnostics appear only with their current error', (tester) async {
+    final diagnostic = SubscriptionDiagnostic.fromCode('SUBSCRIPTION_NETWORK_ERROR',
+      operation: SubscriptionDiagnosticOperation.manualRefresh,
+      source: SubscriptionDiagnosticSource.savedSubscription);
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    await _pump(tester, SubscriptionsCard(status: _status(), errorDiagnostic: diagnostic,
+      refreshDiagnostics: {_id: diagnostic}));
+    expect(find.text('Скопировать ошибку'), findsNothing);
+    await _pump(tester, SubscriptionsCard(status: _status(), error: 'Безопасная ошибка.'));
+    expect(find.byKey(const Key('copy_subscriptions_error')), findsNothing);
+    expect(writes, isEmpty);
+  });
+
+  testWidgets('Each failed subscription copies its own provided operation without provider details',
+      (tester) async {
+    final manual = SubscriptionDiagnostic.fromCode('SUBSCRIPTION_TLS_ERROR',
+      operation: SubscriptionDiagnosticOperation.manualRefresh,
+      source: SubscriptionDiagnosticSource.savedSubscription);
+    final automatic = SubscriptionDiagnostic.fromCode('SUBSCRIPTION_AUTH_REQUIRED',
+      operation: SubscriptionDiagnosticOperation.automaticRefresh,
+      source: SubscriptionDiagnosticSource.savedSubscription);
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    final status = SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true,
+      'subscriptions': [
+        {'id': _id, 'name': 'PRIVATE_FIRST_NAME', 'host': 'first.invalid',
+          'profileCount': 2, 'updatedAt': 1795377600000},
+        {'id': _otherId, 'name': 'PRIVATE_SECOND_NAME', 'host': 'second.invalid',
+          'profileCount': 3, 'updatedAt': 1795377600000},
+      ],
+      'refreshErrors': {_id: manual.code, _otherId: automatic.code},
+    });
+    // Copying an error is read-only and remains possible while connection changes are blocked.
+    await _pump(tester, SubscriptionsCard(status: status, mutationsEnabled: false,
+      refreshDiagnostics: {_id: manual, _otherId: automatic}));
+    expect(writes, isEmpty);
+    await _tap(tester, 'copy_subscription_refresh_error_$_id');
+    await _tap(tester, 'copy_subscription_refresh_error_$_otherId');
+    expect(writes, [manual.clipboardText, automatic.clipboardText]);
+    for (final report in writes) {
+      for (final value in ['PRIVATE_', '.invalid', _id, _otherId]) {
+        expect(report, isNot(contains(value)));
+      }
+    }
+    expect(find.text('Отчёт скопирован.'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Restored or mismatched refresh diagnostics use the current code and generic operation',
+      (tester) async {
+    final stale = SubscriptionDiagnostic.fromCode('SUBSCRIPTION_AUTH_REQUIRED',
+      operation: SubscriptionDiagnosticOperation.automaticRefresh,
+      source: SubscriptionDiagnosticSource.savedSubscription);
+    final expected = SubscriptionDiagnostic.fromCode('SUBSCRIPTION_NETWORK_ERROR',
+      operation: SubscriptionDiagnosticOperation.refreshServers,
+      source: SubscriptionDiagnosticSource.savedSubscription);
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    for (final diagnostics in [<String, SubscriptionDiagnostic>{}, {_id: stale}]) {
+      await _pump(tester, SubscriptionsCard(status: _failureStatus(), refreshDiagnostics: diagnostics));
+      await _tap(tester, 'copy_subscription_refresh_error_$_id');
+      expect(writes.last, expected.clipboardText);
+    }
+  });
+
+  testWidgets('An aggregate error exports only its supplied safe diagnostic', (tester) async {
+    final diagnostic = SubscriptionDiagnostic.fromError(
+      PlatformException(code: 'PRIVATE_UNKNOWN_CODE', message: _url, details: 'PRIVATE_DETAILS'),
+      operation: SubscriptionDiagnosticOperation.readStatus,
+      source: SubscriptionDiagnosticSource.savedSubscription);
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    await _pump(tester, SubscriptionsCard(error: 'Не удалось прочитать подписки.',
+      errorDiagnostic: diagnostic));
+    expect(writes, isEmpty);
+    await _tap(tester, 'copy_subscriptions_error');
+    expect(writes.single, diagnostic.clipboardText);
+    expect(writes.single, isNot(contains('PRIVATE_')));
+    expect(writes.single, isNot(contains('example.invalid')));
+    expect(find.byKey(const Key('subscriptions_error_copy_notice')), findsOneWidget);
+  });
+
+  testWidgets('Live subscription guards reject queued copy actions before the next rebuild',
+      (tester) async {
+    final diagnostic = SubscriptionDiagnostic.fromCode('SUBSCRIPTION_NETWORK_ERROR',
+      operation: SubscriptionDiagnosticOperation.manualRefresh,
+      source: SubscriptionDiagnosticSource.savedSubscription);
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    var current = true;
+    await _pump(tester, SubscriptionsCard(status: _failureStatus(),
+      error: 'Не удалось обновить подписку.', errorDiagnostic: diagnostic,
+      refreshDiagnostics: {_id: diagnostic},
+      isCurrentErrorDiagnostic: (value) => current && identical(value, diagnostic),
+      isCurrentRefreshDiagnostic: (id, value) => current && id == _id && identical(value, diagnostic)));
+    final globalCopy = tester.widget<TextButton>(find.byKey(
+      const Key('copy_subscriptions_error'))).onPressed!;
+    final providerCopy = tester.widget<TextButton>(find.byKey(
+      const ValueKey('copy_subscription_refresh_error_$_id'))).onPressed!;
+    // A parent starts a new operation synchronously, before Flutter rebuilds this card.
+    current = false;
+    globalCopy();
+    providerCopy();
+    await tester.pump();
+    expect(writes, isEmpty);
+    expect(find.text('Отчёт скопирован.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Refreshing removes stale copy feedback and late clipboard completion cannot restore it',
+      (tester) async {
+    final pendingCopy = Completer<void>();
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') {
+        writes.add((call.arguments as Map)['text'] as String);
+        await pendingCopy.future;
+      }
+      return null;
+    });
+    late StateSetter update;
+    var status = _failureStatus();
+    var busy = false;
+    await _pump(tester, StatefulBuilder(builder: (context, state) {
+      update = state;
+      return SubscriptionsCard(status: status, busy: busy);
+    }));
+    final copyKey = const ValueKey('copy_subscription_refresh_error_$_id');
+    final oldCopy = tester.widget<TextButton>(find.byKey(copyKey)).onPressed!;
+    await tester.ensureVisible(find.byKey(copyKey));
+    await tester.tap(find.byKey(copyKey));
+    await tester.pump();
+    expect(writes.length, 1);
+    update(() => busy = true);
+    await tester.pump();
+    expect(tester.widget<TextButton>(find.byKey(copyKey)).onPressed, isNull);
+    oldCopy();
+    expect(writes.length, 1);
+    update(() { busy = false; status = _status(); });
+    await tester.pump();
+    pendingCopy.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(copyKey), findsNothing);
+    expect(find.text('Отчёт скопирован.'), findsNothing);
+    update(() => status = _failureStatus());
+    await tester.pumpAndSettle();
+    oldCopy();
+    expect(writes.length, 1);
+    expect(tester.widget<TextButton>(find.byKey(copyKey)).onPressed, isNotNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A covered subscription card cannot copy from a queued action', (tester) async {
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    await _pump(tester, SubscriptionsCard(status: _failureStatus()));
+    final oldCopy = tester.widget<TextButton>(find.byKey(
+      const ValueKey('copy_subscription_refresh_error_$_id'))).onPressed!;
+    await _tap(tester, 'subscriptions_info');
+    oldCopy();
+    await tester.pump();
+    expect(writes, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Subscription error copy fits a narrow screen with large text', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final writes = <String>[];
+    _clipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    await _pump(tester, SubscriptionsCard(status: _failureStatus()), textScale: 2);
+    await _tap(tester, 'copy_subscription_refresh_error_$_id');
+    expect(writes.length, 1);
     expect(tester.takeException(), isNull);
   });
 

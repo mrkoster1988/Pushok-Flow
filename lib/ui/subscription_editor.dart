@@ -4,17 +4,21 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../platform/subscription_diagnostics.dart';
 import '../platform/subscriptions.dart';
 import '../platform/wireguard_profiles.dart';
+import 'subscription_diagnostic_copy.dart';
 
 enum _SubscriptionQrSource { camera, image }
 
 /// The caller owns a ProfilePrivacy lease for this route and its closing frame.
 class SubscriptionEditor extends StatefulWidget {
   const SubscriptionEditor({super.key, this.draft,
+    this.initialSource = SubscriptionDiagnosticSource.manualInput,
     required this.onSave, this.onClose, this.onCompleted,
     this.onScanQr, this.onImportQrImage, this.onCancelImport});
   final SubscriptionDraft? draft;
+  final SubscriptionDiagnosticSource initialSource;
   final Future<void> Function(String url, String name) onSave;
   final Future<String?> Function()? onScanQr;
   final Future<String?> Function()? onImportQrImage;
@@ -46,6 +50,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   int _importEpoch = 0;
   String? _error;
   String? _notice;
+  SubscriptionDiagnostic? _diagnostic;
+  late SubscriptionDiagnosticSource _inputSource;
   bool get _busy => _saving || _pasting || _importing || _closing;
   bool get _canAct {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
@@ -59,6 +65,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     super.initState();
     _url = TextEditingController(text: widget.draft?.url ?? '');
     _name = TextEditingController(text: widget.draft?.name ?? 'Моя подписка');
+    _inputSource = widget.initialSource;
     _urlFocus.addListener(_finishInputCleanup);
     _nameFocus.addListener(_finishInputCleanup);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
@@ -115,24 +122,43 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     }
   }
 
+  void _clearFeedback() {
+    _error = null;
+    _notice = null;
+    _diagnostic = null;
+  }
+
+  void _setFailure(String? code, String message, {SubscriptionDiagnosticSource? source}) {
+    setState(() {
+      _error = message;
+      _notice = null;
+      _diagnostic = SubscriptionDiagnostic.fromCode(code,
+        operation: SubscriptionDiagnosticOperation.addSubscription,
+        source: source ?? _inputSource);
+    });
+  }
+
   Future<void> _paste() async {
     if (!mounted || _busy || !_canAct) return;
     final epoch = _inputEpoch;
-    setState(() { _pasting = true; _error = null; _notice = null; });
+    setState(() { _pasting = true; _clearFeedback(); });
     try {
       final value = await Clipboard.getData(Clipboard.kTextPlain);
       if (!mounted || _closing || !_canAct || epoch != _inputEpoch) return;
       final text = value?.text?.trim();
       if (text == null || text.isEmpty) {
-        setState(() => _error = 'В буфере обмена нет ссылки подписки.');
+        _setFailure('SUBSCRIPTION_CLIPBOARD_EMPTY', 'В буфере обмена нет ссылки подписки.',
+          source: SubscriptionDiagnosticSource.clipboard);
       } else if (!SubscriptionDraft.validUrl(text)) {
-        setState(() => _error = 'Скопируйте полную HTTPS-ссылку подписки.');
+        _setFailure('SUBSCRIPTION_URL_INVALID', 'Скопируйте полную HTTPS-ссылку подписки.',
+          source: SubscriptionDiagnosticSource.clipboard);
       } else {
-        setState(() => _url.text = text);
+        setState(() { _url.text = text; _inputSource = SubscriptionDiagnosticSource.clipboard; });
       }
     } catch (_) {
       if (mounted && !_closing && _canAct && epoch == _inputEpoch) {
-        setState(() => _error = 'Не удалось прочитать буфер обмена.');
+        _setFailure('SUBSCRIPTION_CLIPBOARD_UNAVAILABLE', 'Не удалось прочитать буфер обмена.',
+          source: SubscriptionDiagnosticSource.clipboard);
       }
     } finally {
       if (mounted) setState(() => _pasting = false);
@@ -156,6 +182,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   }
 
   Future<void> _importQr(_SubscriptionQrSource source) async {
+    final diagnosticSource = source == _SubscriptionQrSource.camera
+        ? SubscriptionDiagnosticSource.cameraQr : SubscriptionDiagnosticSource.imageQr;
     final read = source == _SubscriptionQrSource.camera
         ? widget.onScanQr : widget.onImportQrImage;
     if (!mounted || _busy || !_canAct || read == null) return;
@@ -166,8 +194,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
       _importSource = source;
       _importCancelSent = false;
       _visible = false;
-      _error = null;
-      _notice = null;
+      _clearFeedback();
     });
     try {
       final value = await read();
@@ -178,18 +205,19 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
           const {'t.me', 'telegram.me', 'www.t.me', 'www.telegram.me'}
               .contains(uri.host.toLowerCase()) &&
           const {'/proxy', '/socks'}.contains(uri.path)) {
-        setState(() => _error = _qrError('PROFILE_TELEGRAM_LINK', source));
+        _setFailure('PROFILE_TELEGRAM_LINK', _qrError('PROFILE_TELEGRAM_LINK', source),
+          source: diagnosticSource);
         return;
       }
       if (!SubscriptionDraft.validUrl(url)) {
         final profile = url.length <= 65536 &&
             (url.toLowerCase().startsWith('vless://') ||
              RegExp(r'^\[Interface\]\s*$', multiLine: true).hasMatch(url));
-        setState(() => _error = profile
+        _setFailure(profile ? 'UNSUPPORTED_PROFILE' : 'SUBSCRIPTION_URL_INVALID', profile
             ? 'Это QR-код отдельного подключения. Добавьте его через '
               '«Серверы → Профили подключения → Добавить профиль». '
               'Для подписки нужен QR с HTTPS-ссылкой.'
-            : _qrError('SUBSCRIPTION_URL_INVALID', source));
+            : _qrError('SUBSCRIPTION_URL_INVALID', source), source: diagnosticSource);
         return;
       }
       // Android can return the QR before onResume. Only fill the masked draft;
@@ -198,15 +226,16 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
         selection: const TextSelection.collapsed(offset: -1));
       setState(() {
         _visible = false;
+        _inputSource = diagnosticSource;
         _notice = 'QR-код прочитан. Проверьте название и нажмите «Добавить подписку».';
       });
     } on PlatformException catch (error) {
       if (mounted && !_closing && epoch == _importEpoch) {
-        setState(() => _error = _qrError(error.code, source));
+        _setFailure(error.code, _qrError(error.code, source), source: diagnosticSource);
       }
     } catch (_) {
       if (mounted && !_closing && epoch == _importEpoch) {
-        setState(() => _error = _qrError(null, source));
+        _setFailure(null, _qrError(null, source), source: diagnosticSource);
       }
     } finally {
       if (mounted && !_closing && epoch == _importEpoch) {
@@ -255,15 +284,15 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     final url = _url.text.trim();
     final name = _name.text.trim();
     if (!WireGuardProfiles.isValidName(name)) {
-      setState(() => _error = 'Укажите название: от 1 до 64 символов.');
+      _setFailure('PROFILE_NAME_INVALID', 'Укажите название: от 1 до 64 символов.');
       return;
     }
     if (!SubscriptionDraft.validUrl(url)) {
-      setState(() => _error = 'Нужна полная HTTPS-ссылка подписки.');
+      _setFailure('SUBSCRIPTION_URL_INVALID', 'Нужна полная HTTPS-ссылка подписки.');
       return;
     }
     _clearInputSelection();
-    setState(() { _saving = true; _error = null; _notice = null; _visible = false; });
+    setState(() { _saving = true; _clearFeedback(); _visible = false; });
     try {
       await widget.onSave(url, name);
       if (!mounted || _closing) return;
@@ -273,10 +302,11 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
         Navigator.of(context).pop<bool>(true);
       }
     } catch (error) {
-      if (mounted) setState(() {
+      if (mounted && !_closing) {
         _saving = false;
-        _error = subscriptionErrorMessage(error);
-      });
+        _setFailure(error is PlatformException ? error.code : null,
+          subscriptionErrorMessage(error));
+      }
     }
   }
 
@@ -302,6 +332,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
 
   @override
   Widget build(BuildContext context) {
+    final diagnostic = _diagnostic;
     final host = SubscriptionDraft.validUrl(_url.text.trim())
         ? Uri.parse(_url.text.trim()).host : null;
     return PopScope<Object?>(canPop: !_saving && !_closing && widget.onClose == null,
@@ -339,7 +370,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                   focusNode: _nameFocus, enabled: !_busy && _canAct, maxLines: 1,
                   autocorrect: false, enableSuggestions: false,
                   enableIMEPersonalizedLearning: false, autofillHints: null,
-                  onChanged: (_) => setState(() { _error = null; _notice = null; }),
+                  onChanged: (_) => setState(_clearFeedback),
                   decoration: const InputDecoration(labelText: 'Название подписки')),
                 const SizedBox(height: 16),
                 TextField(key: const Key('subscription_url'), controller: _url,
@@ -350,7 +381,10 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                   enableIMEPersonalizedLearning: false, autofillHints: null,
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
-                  onChanged: (_) => setState(() { _error = null; _notice = null; }),
+                  onChanged: (_) => setState(() {
+                    _clearFeedback();
+                    _inputSource = SubscriptionDiagnosticSource.manualInput;
+                  }),
                   decoration: InputDecoration(labelText: 'HTTPS-ссылка подписки',
                     helperText: widget.onScanQr != null || widget.onImportQrImage != null
                         ? 'Добавьте QR, вставьте ссылку или откройте поле значком глаза.'
@@ -400,6 +434,14 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                   Semantics(liveRegion: true, child: Text(_error!,
                     key: const Key('subscription_editor_error'),
                     style: const TextStyle(color: PushokPalette.orange))),
+                  if (diagnostic != null) SubscriptionDiagnosticCopy(
+                    key: const Key('subscription_editor_diagnostic'),
+                    diagnostic: diagnostic,
+                    buttonKey: const Key('copy_subscription_error'),
+                    noticeKey: const Key('subscription_error_copy_notice'),
+                    enabled: !_busy && _canAct,
+                    isCurrentError: () => mounted && !_busy && _canAct &&
+                        identical(_diagnostic, diagnostic)),
                 ],
                 if (_notice != null) ...[
                   const SizedBox(height: 12),

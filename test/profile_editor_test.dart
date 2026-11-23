@@ -125,6 +125,68 @@ void main() {
   const subscriptionBack = Key('close_subscription_editor');
 
   for (final source in [
+    ('file', _import, 'Файл'), ('camera', _scanQr, 'Камера QR'),
+    ('photo', _qrImage, 'QR из фото'), ('clipboard', _paste, 'Буфер обмена'),
+    ('manual', _save, 'Ввод вручную'),
+  ]) {
+    testWidgets('Inline ${source.$1} subscription failure keeps provenance and clears on return',
+        (tester) async {
+      final writes = <String>[];
+      _captureClipboardWrites(writes, pasteText: subscriptionUrl);
+      var failSave = true;
+      var profilesSaved = 0;
+      var subscriptionsSaved = 0;
+      await _openEditor(tester,
+        initialConfig: source.$1 == 'manual' ? subscriptionUrl : _config,
+        initialName: 'PRIVATE_PROFILE_NAME',
+        onImport: () async => subscriptionUrl,
+        onScanQr: () async => subscriptionUrl,
+        onImportQrImage: () async => subscriptionUrl,
+        onSaveSubscription: (_, _) async {
+          if (failSave) throw PlatformException(code: 'SUBSCRIPTION_TLS_ERROR',
+            message: subscriptionUrl, details: 'PRIVATE_NATIVE_DETAILS');
+          subscriptionsSaved++;
+        },
+        onSave: (_, _) async { profilesSaved++; });
+      await _tapEditorKey(tester, source.$2);
+      await tester.pumpAndSettle();
+      await _tapEditorKey(tester, offerSubscription);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('copy_subscription_error')), findsNothing);
+      await _tapEditorKey(tester, subscriptionSave);
+      await tester.pumpAndSettle();
+      expect(writes, isEmpty);
+      final oldCopy = tester.widget<TextButton>(find.byKey(
+        const Key('copy_subscription_error'))).onPressed!;
+      await _tapEditorKey(tester, const Key('copy_subscription_error'));
+      await tester.pumpAndSettle();
+      expect(writes.single, contains('Источник: ${source.$3}'));
+      expect(writes.single, contains('Код: SUBSCRIPTION_TLS_ERROR'));
+      expect(writes.single, isNot(contains('PRIVATE')));
+      expect(writes.single, isNot(contains('example.invalid')));
+      expect(writes.single, isNot(contains('ui-test-key')));
+      await _tapEditorKey(tester, subscriptionBack);
+      await tester.pumpAndSettle();
+      oldCopy();
+      expect(writes.length, 1);
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      await _tapEditorKey(tester, offerSubscription);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('copy_subscription_error')), findsNothing);
+      expect(find.byKey(const Key('subscription_error_copy_notice')), findsNothing);
+      failSave = false;
+      await _tapEditorKey(tester, subscriptionSave);
+      await tester.pumpAndSettle();
+      oldCopy();
+      expect(writes.length, 1);
+      expect(subscriptionsSaved, 1);
+      expect(profilesSaved, 0);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final source in [
     ('file', _import), ('camera', _scanQr), ('photo', _qrImage), ('clipboard', _paste),
   ]) {
     testWidgets('HTTPS ${source.$1} offers a masked subscription without replacing the profile',

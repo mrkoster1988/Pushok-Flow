@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/design/pushok_theme.dart';
+import 'package:pushok_flow/platform/subscription_diagnostics.dart';
 import 'package:pushok_flow/platform/subscriptions.dart';
 import 'package:pushok_flow/ui/subscription_editor.dart';
 
@@ -27,6 +28,8 @@ const _close = Key('close_subscription_editor');
 const _reveal = Key('toggle_subscription_url_visibility');
 const _error = Key('subscription_editor_error');
 const _notice = Key('subscription_editor_notice');
+const _copyError = Key('copy_subscription_error');
+const _copyNotice = Key('subscription_error_copy_notice');
 
 void _resume(WidgetTester tester) {
   if (tester.binding.lifecycleState == AppLifecycleState.paused) {
@@ -47,6 +50,7 @@ Future<void> _open(
   Future<void> Function()? onCancelImport,
   ValueChanged<bool?>? onResult,
   double textScale = 1,
+  SubscriptionDiagnosticSource initialSource = SubscriptionDiagnosticSource.manualInput,
 }) async {
   _resume(tester);
   await tester.pumpWidget(MaterialApp(
@@ -61,7 +65,7 @@ Future<void> _open(
           context: context, isScrollControlled: true, useSafeArea: true,
           isDismissible: false, enableDrag: false,
           builder: (_) => SubscriptionEditor(
-            draft: draft, onSave: onSave, onScanQr: onScanQr,
+            draft: draft, initialSource: initialSource, onSave: onSave, onScanQr: onScanQr,
             onImportQrImage: onImportQrImage, onCancelImport: onCancelImport,
           ),
         );
@@ -496,6 +500,264 @@ void main() {
     expect(saves, 0);
     await _tap(tester, _close);
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final source in [(_camera, 'Камера QR'), (_photo, 'QR из фото')]) {
+    testWidgets('Subscription ${source.$2} failure copies only fixed diagnostics after a tap',
+        (tester) async {
+      final writes = <String>[];
+      _mockClipboard((call) async {
+        if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      Future<String?> failRead() async => throw PlatformException(code: 'PROFILE_QR_NOT_FOUND',
+        message: 'PRIVATE_EXCEPTION $_qrUrl', details: {'name': _draftName, 'config': _vless});
+      await _open(tester, onSave: (_, _) async {}, onScanQr: failRead, onImportQrImage: failRead);
+      expect(find.byKey(_copyError), findsNothing);
+      await _tap(tester, source.$1);
+      await tester.pumpAndSettle();
+      expect(writes, isEmpty);
+      expect(find.byKey(_copyError), findsOneWidget);
+      await _tap(tester, _copyError);
+      await tester.pumpAndSettle();
+      expect(writes.single, startsWith('Pushok Flow — ошибка подписки\nВерсия: '));
+      expect(writes.single, contains('Источник: ${source.$2}'));
+      expect(writes.single, contains('Код: PROFILE_QR_NOT_FOUND'));
+      for (final value in [_oldUrl, _qrUrl, _draftName, 'PRIVATE_EXCEPTION', '198.51.100.', 'vless://']) {
+        expect(writes.single, isNot(contains(value)));
+      }
+      expect(find.text('Отчёт скопирован.'), findsOneWidget);
+      _expectMaskedDraft(tester, _oldUrl);
+    });
+  }
+
+  for (final source in [
+    ('manual', 'Ввод вручную'), ('external', 'Внешняя ссылка'),
+    ('camera', 'Камера QR'), ('photo', 'QR из фото'),
+    ('clipboard', 'Буфер обмена'), ('edited', 'Ввод вручную'),
+  ]) {
+    testWidgets('Subscription load failure preserves ${source.$1} input provenance',
+        (tester) async {
+      final writes = <String>[];
+      _mockClipboard((call) async {
+        if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+        if (call.method == 'Clipboard.getData') return {'text': _qrUrl};
+        return null;
+      });
+      await _open(tester,
+        initialSource: source.$1 == 'external'
+            ? SubscriptionDiagnosticSource.externalLink : SubscriptionDiagnosticSource.manualInput,
+        onScanQr: () async => _qrUrl, onImportQrImage: () async => _qrUrl,
+        onSave: (_, _) async => throw PlatformException(code: 'SUBSCRIPTION_TLS_ERROR',
+          message: 'PRIVATE_LOAD $_oldUrl', details: _draftName));
+      if (source.$1 == 'camera' || source.$1 == 'edited') await _tap(tester, _camera);
+      if (source.$1 == 'photo') await _tap(tester, _photo);
+      if (source.$1 == 'clipboard') await _tap(tester, _paste);
+      await tester.pumpAndSettle();
+      if (source.$1 == 'edited') {
+        await _tap(tester, _reveal);
+        await tester.enterText(find.byKey(_url), _newerUrl);
+      }
+      // Renaming does not change where the URL came from.
+      await tester.enterText(find.byKey(_name), 'PRIVATE_RENAMED');
+      await _tap(tester, _save);
+      await tester.pumpAndSettle();
+      expect(writes, isEmpty);
+      await _tap(tester, _copyError);
+      await tester.pumpAndSettle();
+      expect(writes.single, contains('Источник: ${source.$2}'));
+      expect(writes.single, contains('Код: SUBSCRIPTION_TLS_ERROR'));
+      for (final value in ['PRIVATE_', '198.51.100.', 'https://', _draftName]) {
+        expect(writes.single, isNot(contains(value)));
+      }
+      expect(_field(tester, _url).obscureText, isTrue);
+    });
+  }
+
+  for (final failedRead in [false, true]) {
+    testWidgets('Clipboard ${failedRead ? 'failure' : 'empty value'} has a safe subscription diagnostic',
+        (tester) async {
+      final writes = <String>[];
+      _mockClipboard((call) async {
+        if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+        if (call.method == 'Clipboard.getData') {
+          if (failedRead) throw PlatformException(code: 'PRIVATE_CLIPBOARD_CODE', message: _qrUrl);
+          return {'text': '   '};
+        }
+        return null;
+      });
+      var saves = 0;
+      await _open(tester, onSave: (_, _) async { saves++; });
+      await _tap(tester, _paste);
+      await tester.pumpAndSettle();
+      expect(writes, isEmpty);
+      await _tap(tester, _copyError);
+      await tester.pumpAndSettle();
+      expect(writes.single, contains('Источник: Буфер обмена'));
+      expect(writes.single, contains(failedRead
+          ? 'Код: SUBSCRIPTION_CLIPBOARD_UNAVAILABLE' : 'Код: SUBSCRIPTION_CLIPBOARD_EMPTY'));
+      expect(writes.single, isNot(contains('PRIVATE_')));
+      expect(writes.single, isNot(contains('198.51.100.')));
+      _expectMaskedDraft(tester, _oldUrl);
+      expect(saves, 0);
+    });
+  }
+
+  testWidgets('Unknown subscription errors never copy native code messages or details',
+      (tester) async {
+    final writes = <String>[];
+    var attempts = 0;
+    _mockClipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    await _open(tester, onSave: (_, _) async {
+      if (attempts++ == 0) throw PlatformException(code: 'PRIVATE_CODE',
+        message: _oldUrl, details: _draftName);
+      throw StateError('PRIVATE_ERROR $_newerUrl');
+    });
+    for (var attempt = 0; attempt < 2; attempt++) {
+      await _tap(tester, _save);
+      await tester.pumpAndSettle();
+      await _tap(tester, _copyError);
+      await tester.pumpAndSettle();
+      for (final value in ['PRIVATE_', 'https://', _draftName]) {
+        expect(writes.last, isNot(contains(value)));
+      }
+      expect(writes.last, contains('Код: '));
+    }
+    expect(writes.length, 2);
+  });
+
+  testWidgets('Editing retry and successful QR import invalidate old copy callbacks',
+      (tester) async {
+    final writes = <String>[];
+    _mockClipboard((call) async {
+      if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    var failSave = true;
+    final pendingQr = Completer<String?>();
+    await _open(tester, onScanQr: () => pendingQr.future,
+      onSave: (_, _) async {
+        if (failSave) throw PlatformException(code: 'SUBSCRIPTION_NETWORK_ERROR');
+      });
+    await _tap(tester, _save);
+    await tester.pumpAndSettle();
+    final firstCopy = tester.widget<TextButton>(find.byKey(_copyError)).onPressed!;
+    await tester.enterText(find.byKey(_name), 'Новое имя');
+    firstCopy();
+    await tester.pumpAndSettle();
+    expect(writes, isEmpty);
+    expect(find.byKey(_copyError), findsNothing);
+    await _tap(tester, _save);
+    await tester.pumpAndSettle();
+    final secondCopy = tester.widget<TextButton>(find.byKey(_copyError)).onPressed!;
+    await _tap(tester, _camera);
+    secondCopy();
+    await tester.pump();
+    expect(find.byKey(_copyError), findsNothing);
+    expect(writes, isEmpty);
+    pendingQr.complete(_qrUrl);
+    await tester.pumpAndSettle();
+    secondCopy();
+    expect(writes, isEmpty);
+    expect(find.byKey(_copyError), findsNothing);
+    failSave = false;
+    await _tap(tester, _save);
+    await tester.pumpAndSettle();
+    firstCopy();
+    secondCopy();
+    expect(writes, isEmpty);
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Failed copying keeps the subscription error and supports an explicit retry',
+      (tester) async {
+    var copyFails = true;
+    final writes = <String>[];
+    _mockClipboard((call) async {
+      if (call.method == 'Clipboard.setData') {
+        writes.add((call.arguments as Map)['text'] as String);
+        if (copyFails) throw PlatformException(code: 'PRIVATE_CLIPBOARD', message: _qrUrl);
+      }
+      return null;
+    });
+    await _open(tester, onSave: (_, _) async => throw PlatformException(code: 'SUBSCRIPTION_TLS_ERROR'));
+    await _tap(tester, _save);
+    await tester.pumpAndSettle();
+    await _tap(tester, _copyError);
+    await tester.pumpAndSettle();
+    expect(find.text('Не удалось скопировать отчёт. Попробуйте ещё раз.'), findsOneWidget);
+    expect(find.byKey(_error), findsOneWidget);
+    expect(tester.widget<TextButton>(find.byKey(_copyError)).onPressed, isNotNull);
+    expect(find.textContaining('PRIVATE_CLIPBOARD'), findsNothing);
+    _expectMaskedDraft(tester, _oldUrl);
+    copyFails = false;
+    await _tap(tester, _copyError);
+    await tester.pumpAndSettle();
+    expect(writes.length, 2);
+    expect(writes.first, writes.last);
+    expect(find.text('Отчёт скопирован.'), findsOneWidget);
+  });
+
+  testWidgets('Subscription diagnostic copy requires a fresh foreground action', (tester) async {
+    final writes = <String>[];
+    final pendingCopy = Completer<void>();
+    _mockClipboard((call) async {
+      if (call.method == 'Clipboard.setData') {
+        writes.add((call.arguments as Map)['text'] as String);
+        await pendingCopy.future;
+      }
+      return null;
+    });
+    addTearDown(() => _resume(tester));
+    await _open(tester, onSave: (_, _) async => throw PlatformException(code: 'SUBSCRIPTION_NETWORK_ERROR'));
+    await _tap(tester, _save);
+    await tester.pumpAndSettle();
+    final oldCopy = tester.widget<TextButton>(find.byKey(_copyError)).onPressed!;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    oldCopy();
+    await tester.pump();
+    expect(writes, isEmpty);
+    expect(tester.widget<TextButton>(find.byKey(_copyError)).onPressed, isNull);
+    _resume(tester);
+    await tester.pump();
+    oldCopy();
+    await tester.pump();
+    expect(writes, isEmpty);
+    await _tap(tester, _copyError);
+    expect(writes.length, 1);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    pendingCopy.complete();
+    await tester.pump();
+    _resume(tester);
+    await tester.pumpAndSettle();
+    expect(find.byKey(_copyNotice), findsNothing);
+    expect(find.byKey(_error), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A delayed clipboard result cannot restore an edited subscription diagnostic',
+      (tester) async {
+    final pendingCopy = Completer<void>();
+    _mockClipboard((call) async {
+      if (call.method == 'Clipboard.setData') await pendingCopy.future;
+      return null;
+    });
+    await _open(tester, onSave: (_, _) async => throw PlatformException(code: 'SUBSCRIPTION_NETWORK_ERROR'));
+    await _tap(tester, _save);
+    await tester.pumpAndSettle();
+    await _tap(tester, _copyError);
+    expect(tester.widget<TextButton>(find.byKey(_copyError)).onPressed, isNull);
+    await tester.enterText(find.byKey(_name), 'Новое имя');
+    await tester.pump();
+    expect(find.byKey(_copyError), findsNothing);
+    pendingCopy.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(_copyNotice), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

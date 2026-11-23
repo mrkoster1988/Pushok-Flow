@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../platform/subscription_diagnostics.dart';
 import '../platform/subscriptions.dart';
 import '../platform/wireguard_profiles.dart';
 import 'subscription_editor.dart';
@@ -119,6 +120,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   bool _copyingImportError = false;
   String? _importCopyNotice;
   SubscriptionDraft? _subscriptionDraft;
+  SubscriptionDiagnosticSource _subscriptionSource = SubscriptionDiagnosticSource.manualInput;
   bool _editingSubscription = false;
 
   bool get _busy => _saving || _pasting || _importing || _editingSubscription;
@@ -250,7 +252,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         const {'/proxy', '/socks'}.contains(uri.path);
   }
 
-  bool _offerSubscription(String text) {
+  bool _offerSubscription(String text,
+      {SubscriptionDiagnosticSource source = SubscriptionDiagnosticSource.manualInput}) {
     final url = text.trim();
     if (widget.onSaveSubscription == null || !SubscriptionDraft.validUrl(url) ||
         _isTelegramProxy(url)) return false;
@@ -262,6 +265,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       _importFailure = null;
       _importCopyNotice = null;
       _subscriptionDraft = SubscriptionDraft(url: url);
+      _subscriptionSource = source;
       _notice = 'Найдена HTTPS-ссылка. Добавить её как подписку?';
     });
     return true;
@@ -341,7 +345,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         setState(() => _error = 'В буфере обмена нет конфигурации.');
         return;
       }
-      if (_offerSubscription(config)) return;
+      if (_offerSubscription(config, source: SubscriptionDiagnosticSource.clipboard)) return;
       final validation = _validationError(config);
       if (validation != null) {
         setState(() => _error = validation.message);
@@ -400,7 +404,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     try {
       final config = await read();
       if (!mounted || epoch != _importEpoch || config == null) return;
-      if (_offerSubscription(config)) return;
+      if (_offerSubscription(config, source: switch (source) {
+        _ProfileImportSource.file => SubscriptionDiagnosticSource.file,
+        _ProfileImportSource.cameraQr => SubscriptionDiagnosticSource.cameraQr,
+        _ProfileImportSource.imageQr => SubscriptionDiagnosticSource.imageQr,
+      })) return;
       final validation = _validationError(config);
       if (validation != null) {
         _setImportFailure(validation.code, source,
@@ -604,6 +612,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       return SubscriptionEditor(
         key: const Key('profile_subscription_editor'),
         draft: _subscriptionDraft,
+        initialSource: _subscriptionSource,
         onSave: (url, name) async {
           if (!mounted || !_editingSubscription || !_canReveal) {
             throw PlatformException(code: 'SUBSCRIPTION_INTERRUPTED');

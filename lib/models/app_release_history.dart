@@ -1,3 +1,5 @@
+import 'app_version.dart';
+
 /// Plain-text descriptions only. Download eligibility and verification remain
 /// native responsibilities; invalid optional notes never block an update.
 class AppReleaseNotes {
@@ -62,6 +64,11 @@ bool _isPlainReleaseText(String text) {
 /// Bundled descriptions stay readable offline. Keep the five most recent
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
+  AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'При ошибке добавления или обновления подписки можно скопировать отчёт с причиной сбоя и версией Flow.',
+    'Отчёт указывает действие и источник импорта: камера, фото, ссылка или вставка. Личные ссылки, имена серверов и ключи в него не включаются.',
+    'Ошибку конкретной подписки можно скопировать из её карточки. После повторной попытки отчёт обновляется вместе с результатом.',
+  ]),
   AppReleaseNotes(versionName: '0.54.0', versionCode: 54, changes: [
     'Из смешанной подписки добавляются совместимые серверы VLESS. Количество пропущенных несовместимых записей показано в карточке подписки.',
     'На главной видно, какой сервер выбран для подключения. Нажмите на его название, чтобы перейти к списку серверов.',
@@ -79,11 +86,6 @@ const bundledAppReleaseHistory = <AppReleaseNotes>[
     'Выбранный сервер подписки больше не сбрасывается при перестановке параметров VLESS-ссылки или изменении регистра адреса.',
     'Некорректное обновление с повторяющимися подключениями не заменяет сохранённые серверы.',
     'Ожидание чтения профиля перед подключением ограничено. Если чтение не завершилось, можно повторить попытку; запоздавший ответ не запускает подключение.',
-  ]),
-  AppReleaseNotes(versionName: '0.50.0', versionCode: 50, changes: [
-    'Ошибка одной подписки больше не прерывает автоматическое обновление остальных.',
-    'Причина неудачного обновления показана у соответствующей подписки. Повторить проверку можно отдельно.',
-    'Успешно обновлённые серверы сразу отображаются в списке. При ошибке провайдера сохраняются прежние серверы этой подписки.',
   ]),
 ];
 

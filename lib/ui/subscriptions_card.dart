@@ -2,13 +2,17 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../platform/subscription_diagnostics.dart';
 import '../platform/subscriptions.dart';
+import 'subscription_diagnostic_copy.dart';
 
 class SubscriptionsCard extends StatelessWidget {
   const SubscriptionsCard({
     super.key, this.status, this.loading = false, this.busy = false,
     this.savingAutoUpdate = false,
     this.mutationsEnabled = false, this.error, this.pendingLink = false,
+    this.errorDiagnostic, this.refreshDiagnostics = const {},
+    this.isCurrentErrorDiagnostic, this.isCurrentRefreshDiagnostic,
     this.onAdd, this.onRefreshList, this.onRefresh, this.onDelete,
     this.onAutomaticUpdatesChanged, this.onOpenAccount, this.onOpenPendingLink,
     this.now,
@@ -20,6 +24,10 @@ class SubscriptionsCard extends StatelessWidget {
   final bool savingAutoUpdate;
   final bool mutationsEnabled;
   final String? error;
+  final SubscriptionDiagnostic? errorDiagnostic;
+  final Map<String, SubscriptionDiagnostic> refreshDiagnostics;
+  final bool Function(SubscriptionDiagnostic)? isCurrentErrorDiagnostic;
+  final bool Function(String, SubscriptionDiagnostic)? isCurrentRefreshDiagnostic;
   final bool pendingLink;
   final VoidCallback? onAdd;
   final VoidCallback? onRefreshList;
@@ -85,6 +93,13 @@ class SubscriptionsCard extends StatelessWidget {
     final expiry = entry.expiresAt;
     final expired = expiry != null && !expiry.isAfter(now ?? DateTime.now());
     final refreshError = status?.refreshErrors[entry.id];
+    final suppliedDiagnostic = refreshDiagnostics[entry.id];
+    final matchingDiagnostic = refreshError != null && suppliedDiagnostic?.code == refreshError
+        ? suppliedDiagnostic : null;
+    final diagnostic = refreshError == null ? null : matchingDiagnostic ??
+        SubscriptionDiagnostic.fromCode(refreshError,
+          operation: SubscriptionDiagnosticOperation.refreshServers,
+          source: SubscriptionDiagnosticSource.savedSubscription);
     return PushokPanel(
       key: ValueKey('subscription_${entry.id}'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -128,6 +143,14 @@ class SubscriptionsCard extends StatelessWidget {
             child: Text(subscriptionErrorMessage(PlatformException(code: refreshError)),
               key: ValueKey('subscription_refresh_error_${entry.id}'),
               style: const TextStyle(color: PushokPalette.orange))),
+          if (diagnostic != null) SubscriptionDiagnosticCopy(
+            key: ValueKey('subscription_refresh_diagnostic_${entry.id}'),
+            diagnostic: diagnostic,
+            errorIdentity: matchingDiagnostic ?? (status, entry.id, refreshError),
+            buttonKey: ValueKey('copy_subscription_refresh_error_${entry.id}'),
+            noticeKey: ValueKey('subscription_refresh_error_copy_notice_${entry.id}'),
+            enabled: !_busy && !loading,
+            isCurrentError: () => isCurrentRefreshDiagnostic?.call(entry.id, diagnostic) ?? true),
         ],
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 8, children: [
@@ -172,6 +195,13 @@ class SubscriptionsCard extends StatelessWidget {
             child: Semantics(liveRegion: true,
               child: Text(error!, key: const Key('subscriptions_error'),
                 style: const TextStyle(color: PushokPalette.orange)))),
+          if (error != null && errorDiagnostic != null) SubscriptionDiagnosticCopy(
+            key: const Key('subscriptions_error_diagnostic'),
+            diagnostic: errorDiagnostic!,
+            buttonKey: const Key('copy_subscriptions_error'),
+            noticeKey: const Key('subscriptions_error_copy_notice'),
+            enabled: !_busy && !loading,
+            isCurrentError: () => isCurrentErrorDiagnostic?.call(errorDiagnostic!) ?? true),
           if (status?.refreshErrors.isNotEmpty ?? false)
             Padding(padding: const EdgeInsets.only(top: 12),
               child: Semantics(liveRegion: true,

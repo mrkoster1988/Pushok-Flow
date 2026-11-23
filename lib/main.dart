@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'design/pushok_theme.dart';
+import 'models/app_version.dart';
 import 'dart:io' show Platform;
 import 'dart:async' show Timer, unawaited;
 import 'platform/android_app_routes.dart';
@@ -10,6 +11,7 @@ import 'platform/wireguard_tunnel.dart';
 import 'platform/wireguard_profiles.dart';
 import 'platform/profile_privacy.dart';
 import 'platform/subscriptions.dart';
+import 'platform/subscription_diagnostics.dart';
 import 'platform/tunnel_diagnostics.dart';
 import 'ui/wireguard_profile_editor.dart';
 import 'ui/wireguard_profiles_card.dart';
@@ -69,6 +71,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   late final FlowSubscriptions _subscriptionBridge;
   SubscriptionStatus? _subscriptions;
   String? _subscriptionsError;
+  SubscriptionDiagnostic? _subscriptionsDiagnostic;
+  bool _subscriptionActionFailure = false;
+  final _subscriptionDiagnostics = <String, SubscriptionDiagnostic>{};
   bool _subscriptionsLoading = false;
   bool _subscriptionsBusy = false;
   bool _subscriptionsSavingAutoUpdate = false;
@@ -432,7 +437,68 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     } catch (_) { if (mounted) setState(() => feedbackMessage = 'Память недоступна на этом устройстве.'); }
   }
 
-  Future<void> _readSubscriptions({bool checkAutomatically = false}) async {
+  void _setSubscriptionFailure(Object error,
+      SubscriptionDiagnosticOperation operation) {
+    final diagnostic = SubscriptionDiagnostic.fromError(error,
+      operation: operation, source: SubscriptionDiagnosticSource.savedSubscription);
+    _subscriptionsDiagnostic = diagnostic;
+    _subscriptionActionFailure = operation != SubscriptionDiagnosticOperation.readStatus;
+    _subscriptionsError = diagnostic.message;
+  }
+
+  bool get _canCopySubscriptionDiagnostic => mounted && _foreground &&
+      !_subscriptionsBusy && !_subscriptionsLoading && !_subscriptionsSavingAutoUpdate &&
+      !(_subscriptions?.busy ?? false);
+
+  // Native status contains only the last per-provider code, not the operation
+  // that produced it. Keep known context while that same failure remains, and
+  // use a generic refresh label for restored or otherwise unobserved failures.
+  void _acceptSubscriptions(SubscriptionStatus status, {
+    SubscriptionDiagnosticOperation? operation,
+    String? affectedSubscriptionId,
+    bool preserveActionFailure = false,
+  }) {
+    final previousErrors = _subscriptions?.refreshErrors ?? const <String, String>{};
+    _subscriptionDiagnostics.removeWhere((id, _) => !status.refreshErrors.containsKey(id));
+    for (final entry in status.refreshErrors.entries) {
+      final previous = _subscriptionDiagnostics[entry.key];
+      final explicitRefresh = operation == SubscriptionDiagnosticOperation.manualRefresh &&
+          affectedSubscriptionId == entry.key &&
+          ((_subscriptionsDiagnostic?.operation == SubscriptionDiagnosticOperation.manualRefresh &&
+            _subscriptionsDiagnostic?.code == entry.value) || previousErrors[entry.key] != entry.value);
+      final newAutomaticFailure = operation == SubscriptionDiagnosticOperation.automaticRefresh &&
+          previousErrors[entry.key] != entry.value;
+      if (explicitRefresh || newAutomaticFailure || previous?.code != entry.value) {
+        _subscriptionDiagnostics[entry.key] = SubscriptionDiagnostic.fromCode(entry.value,
+          operation: explicitRefresh || newAutomaticFailure
+              ? operation! : SubscriptionDiagnosticOperation.refreshServers,
+          source: SubscriptionDiagnosticSource.savedSubscription);
+      }
+    }
+    _subscriptions = status;
+    if (preserveActionFailure && _subscriptionActionFailure && _subscriptionsDiagnostic != null) {
+      // A state reread is not a new action outcome. A stale native summary must
+      // not replace the exception that the user just observed from this action.
+      _subscriptionsError = _subscriptionsDiagnostic!.message;
+    } else if (status.errorCode != null) {
+      final diagnostic = SubscriptionDiagnostic.fromCode(status.errorCode,
+        operation: SubscriptionDiagnosticOperation.readStatus,
+        source: SubscriptionDiagnosticSource.savedSubscription);
+      if (_subscriptionsDiagnostic?.code != diagnostic.code) {
+        _subscriptionsDiagnostic = diagnostic;
+        _subscriptionActionFailure = false;
+      }
+      _subscriptionsError = _subscriptionsDiagnostic!.message;
+    } else if (!preserveActionFailure) {
+      _subscriptionsError = null;
+      _subscriptionsDiagnostic = null;
+      _subscriptionActionFailure = false;
+    }
+  }
+
+  Future<void> _readSubscriptions({bool checkAutomatically = false,
+      SubscriptionDiagnosticOperation? diagnosticOperation,
+      String? affectedSubscriptionId, bool preserveActionFailure = false}) async {
     if (!_isAndroid || !mounted || !_foreground || _subscriptionsLoading ||
         _subscriptionsBusy || _subscriptionsSavingAutoUpdate) return;
     final epoch = ++_subscriptionEpoch;
@@ -444,13 +510,13 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       if (!mounted || !_foreground || epoch != _subscriptionEpoch) return;
       received = true;
       setState(() {
-        _subscriptions = status;
-        _subscriptionsError = status.errorCode == null ? null
-            : subscriptionErrorMessage(PlatformException(code: status.errorCode!));
+        _acceptSubscriptions(status, operation: diagnosticOperation,
+          affectedSubscriptionId: affectedSubscriptionId,
+          preserveActionFailure: preserveActionFailure);
       });
     } catch (error) {
       if (mounted && _foreground && epoch == _subscriptionEpoch) {
-        setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+        setState(() => _setSubscriptionFailure(error, SubscriptionDiagnosticOperation.readStatus));
       }
     } finally {
       if (mounted && epoch == _subscriptionEpoch) {
@@ -460,7 +526,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (!mounted || !_foreground || epoch != _subscriptionEpoch) return;
     if (_subscriptions?.busy ?? false) {
       _subscriptionPoll = Timer(const Duration(seconds: 1), () {
-        if (mounted && _foreground) unawaited(_readSubscriptions());
+        if (mounted && _foreground) unawaited(_readSubscriptions(
+          preserveActionFailure: _subscriptionActionFailure));
       });
     }
     await _takePendingSubscriptionLink();
@@ -473,23 +540,28 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _changeSubscriptions(Future<SubscriptionStatus> Function() action,
-      {bool automatic = false}) async {
+      {bool automatic = false, String? subscriptionId,
+      SubscriptionDiagnosticOperation operation = SubscriptionDiagnosticOperation.manualRefresh}) async {
     if (!_canManageProfiles || _subscriptionsBusy || _subscriptionsSavingAutoUpdate ||
         (_subscriptions?.busy ?? false)) return;
     final epoch = ++_subscriptionEpoch;
+    final diagnosticOperation = automatic
+        ? SubscriptionDiagnosticOperation.automaticRefresh : operation;
     _subscriptionPoll?.cancel();
     _statusEpoch++;
     setState(() {
       _subscriptionsLoading = false;
       _subscriptionsBusy = true;
+      _subscriptionsError = null;
+      _subscriptionsDiagnostic = null;
+      _subscriptionActionFailure = false;
       _profileBusy = true;
     });
     try {
       final status = await action();
       if (mounted && _foreground && epoch == _subscriptionEpoch) setState(() {
-        _subscriptions = status;
-        _subscriptionsError = status.errorCode == null ? null
-            : subscriptionErrorMessage(PlatformException(code: status.errorCode!));
+        _acceptSubscriptions(status, operation: diagnosticOperation,
+          affectedSubscriptionId: subscriptionId);
       });
       if (!automatic && status.errorCode == null && status.refreshErrors.isEmpty &&
           mounted && _foreground && epoch == _subscriptionEpoch) {
@@ -497,14 +569,18 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       }
     } catch (error) {
       if (mounted && _foreground && epoch == _subscriptionEpoch) {
-        setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+        setState(() => _setSubscriptionFailure(error, diagnosticOperation));
       }
     } finally {
       if (mounted) {
         _statusEpoch++;
         setState(() { _subscriptionsBusy = false; _profileBusy = false; });
         await _refreshProfileStatus();
-        await _readSubscriptions();
+        final sameOperation = mounted && _foreground && epoch == _subscriptionEpoch;
+        await _readSubscriptions(
+          diagnosticOperation: sameOperation ? diagnosticOperation : null,
+          affectedSubscriptionId: sameOperation ? subscriptionId : null,
+          preserveActionFailure: _subscriptionActionFailure);
       }
     }
   }
@@ -520,22 +596,26 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     setState(() {
       _subscriptionsLoading = false;
       _subscriptionsSavingAutoUpdate = true;
+      _subscriptionsError = null;
+      _subscriptionsDiagnostic = null;
+      _subscriptionActionFailure = false;
     });
     try {
       final status = await _subscriptionBridge.setAutomaticUpdates(enabled);
       if (mounted && _foreground && epoch == _subscriptionEpoch) setState(() {
-        _subscriptions = status;
-        _subscriptionsError = null;
+        _acceptSubscriptions(status,
+          operation: SubscriptionDiagnosticOperation.setAutomaticUpdates);
       });
     } catch (error) {
       if (mounted && _foreground && epoch == _subscriptionEpoch) {
-        setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+        setState(() => _setSubscriptionFailure(error,
+          SubscriptionDiagnosticOperation.setAutomaticUpdates));
       }
     } finally {
       if (mounted) {
         setState(() => _subscriptionsSavingAutoUpdate = false);
         if (epoch != _subscriptionEpoch || (_subscriptions?.busy ?? false)) {
-          await _readSubscriptions();
+          await _readSubscriptions(preserveActionFailure: _subscriptionActionFailure);
         }
       }
     }
@@ -617,6 +697,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           side: BorderSide(color: PushokPalette.glowCyan)),
         builder: (context) => SubscriptionEditor(draft: draft,
+          initialSource: draft == null ? SubscriptionDiagnosticSource.manualInput
+              : SubscriptionDiagnosticSource.externalLink,
           onScanQr: WireGuardTunnel.scanProfileQr,
           onImportQrImage: WireGuardTunnel.importProfileQrImage,
           onCancelImport: WireGuardTunnel.cancelProfileImport,
@@ -656,8 +738,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     try {
       final status = await _subscriptionBridge.importSubscription(url, name);
       if (mounted) setState(() {
-        _subscriptions = status;
-        _subscriptionsError = null;
+        _acceptSubscriptions(status,
+          operation: SubscriptionDiagnosticOperation.addSubscription);
       });
     } finally {
       if (mounted) setState(() => _subscriptionsBusy = false);
@@ -687,7 +769,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
     if (confirmed != true || !mounted || !_foreground ||
         intentEpoch != _profileRequestEpoch) return;
-    await _changeSubscriptions(() => _subscriptionBridge.deleteSubscription(subscription.id));
+    await _changeSubscriptions(() => _subscriptionBridge.deleteSubscription(subscription.id),
+      subscriptionId: subscription.id, operation: SubscriptionDiagnosticOperation.deleteSubscription);
   }
 
   Future<void> _openPushokAccount() => _openPushokDestination();
@@ -1265,7 +1348,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.54.0',
+            version: appVersionName,
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -1501,12 +1584,20 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       busy: _subscriptionsBusy,
       savingAutoUpdate: _subscriptionsSavingAutoUpdate,
       error: !_isAndroid ? 'Подписки доступны в приложении для Android.' : _subscriptionsError,
+      errorDiagnostic: _isAndroid ? _subscriptionsDiagnostic : null,
+      refreshDiagnostics: _subscriptionDiagnostics,
+      isCurrentErrorDiagnostic: (diagnostic) => _canCopySubscriptionDiagnostic &&
+          _subscriptionsError != null && identical(diagnostic, _subscriptionsDiagnostic),
+      isCurrentRefreshDiagnostic: (id, diagnostic) => _canCopySubscriptionDiagnostic &&
+          _subscriptions?.refreshErrors[id] == diagnostic.code &&
+          identical(diagnostic, _subscriptionDiagnostics[id]),
       mutationsEnabled: _canManageProfiles,
       pendingLink: _pendingSubscriptionLink != null,
       onAdd: () => _addSubscription(),
       onRefreshList: _isAndroid && _foreground ? _readSubscriptions : null,
       onRefresh: (subscription) => _changeSubscriptions(
-        () => _subscriptionBridge.refreshSubscription(subscription.id)),
+        () => _subscriptionBridge.refreshSubscription(subscription.id),
+        subscriptionId: subscription.id),
       onDelete: _deleteSubscription,
       onAutomaticUpdatesChanged: _isAndroid && _foreground
           ? _setSubscriptionAutomaticUpdates : null,

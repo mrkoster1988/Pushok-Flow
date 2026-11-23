@@ -6,6 +6,7 @@ build/
 *.iml
 android/.gradle/
 android/app/libs/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 **/local.properties
 .env
 *.key
