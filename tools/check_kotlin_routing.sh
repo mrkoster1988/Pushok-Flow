@@ -208,6 +208,35 @@ import sys
 if hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() != '3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796':
     raise SystemExit('Pinned JVM JSON test library checksum mismatch')
 JSON_CHECK
+# Compile against the JVM generic signatures; execute Store JSON with Android's
+# null-preserving JSONObject(Map) semantics instead of the different JVM variant.
+android_json="$out/android-json.jar"
+if [[ -n "${FLOW_ANDROID_JSON_JAR:-}" ]]; then
+  cp "$FLOW_ANDROID_JSON_JAR" "$android_json"
+else
+  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
+    https://repo.maven.apache.org/maven2/com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar \
+    -o "$android_json"
+fi
+python3 - "$android_json" <<'ANDROID_JSON_CHECK'
+import hashlib
+from pathlib import Path
+import sys
+if hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() != 'dfb7bae2f404cfe0b72b4d23944698cb716b7665171812a0a4d0f5926c0fac79':
+    raise SystemExit('Pinned Android JSON test library checksum mismatch')
+ANDROID_JSON_CHECK
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountStore.kt \
+  native/android/tests/account_store_stubs/*.kt native/android/tests/FlowAccountStoreCheck.kt \
+  -classpath "$json_core" -include-runtime -d "$out/account-store-tests.jar"
+java -cp "$out/account-store-tests.jar:$android_json" shop.pushok.flow.FlowAccountStoreCheckKt
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/UpdateAutomationPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/UpdateCoordinator.kt \
+  native/android/tests/update_coordinator_stubs/*.kt native/android/tests/UpdateCoordinatorCheck.kt \
+  -classpath "$json_core" -nowarn -include-runtime -d "$out/update-coordinator-tests.jar"
+java -cp "$out/update-coordinator-tests.jar:$json_core" shop.pushok.flow.UpdateCoordinatorCheckKt
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt \

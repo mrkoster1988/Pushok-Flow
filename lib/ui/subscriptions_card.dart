@@ -6,6 +6,7 @@ import '../platform/subscriptions.dart';
 class SubscriptionsCard extends StatelessWidget {
   const SubscriptionsCard({
     super.key, this.status, this.loading = false, this.busy = false,
+    this.savingAutoUpdate = false,
     this.mutationsEnabled = false, this.error, this.pendingLink = false,
     this.onAdd, this.onRefreshList, this.onRefresh, this.onDelete,
     this.onAutomaticUpdatesChanged, this.onOpenAccount, this.onOpenPendingLink,
@@ -15,6 +16,7 @@ class SubscriptionsCard extends StatelessWidget {
   final SubscriptionStatus? status;
   final bool loading;
   final bool busy;
+  final bool savingAutoUpdate;
   final bool mutationsEnabled;
   final String? error;
   final bool pendingLink;
@@ -27,7 +29,7 @@ class SubscriptionsCard extends StatelessWidget {
   final VoidCallback? onOpenPendingLink;
   final DateTime? now;
 
-  bool get _busy => busy || (status?.busy ?? false);
+  bool get _busy => busy || savingAutoUpdate || (status?.busy ?? false);
   bool get _canChange => mutationsEnabled && !_busy && !loading && status != null;
 
   String _date(DateTime date) {
@@ -150,7 +152,9 @@ class SubscriptionsCard extends StatelessWidget {
               title: const Text('Обновлять серверы'),
               subtitle: const Text('Проверка при открытии Flow'),
               value: status!.automaticUpdatesEnabled,
-              onChanged: _busy || loading ? null : onAutomaticUpdatesChanged,
+              onChanged: savingAutoUpdate ||
+                  ((_busy || loading) && !status!.automaticUpdatesEnabled)
+                      ? null : onAutomaticUpdatesChanged,
             ),
           ],
           if (pendingLink) ...[

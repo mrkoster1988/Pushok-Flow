@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -16,12 +18,18 @@ class _Bridge {
   bool connected = false;
   bool imported = false;
   bool protectionAvailable = true;
+  bool automaticUpdatesEnabled = true;
+  bool subscriptionsBusy = false;
   Object? subscriptionStatusError;
+  Completer<Object?>? pendingReply;
+  Completer<Object?>? refreshReply;
+  Completer<Object?>? automaticUpdatesReply;
   Map<String, Object?>? pending = {'url': _privateUrl, 'name': 'Магазин'};
   final calls = <String>[];
   final leases = <String>{};
   Map<String, Object?> get subscriptions => {
-    'automaticUpdatesEnabled': true,
+    'automaticUpdatesEnabled': automaticUpdatesEnabled,
+    'busy': subscriptionsBusy,
     'subscriptions': imported ? [{
       'id': _subscriptionId, 'name': 'Магазин', 'host': 'example.invalid',
       'profileCount': 1, 'updatedAt': 1795377600000,
@@ -66,6 +74,9 @@ class _Bridge {
         if (subscriptionStatusError != null) throw subscriptionStatusError!;
         return subscriptions;
       case 'takePendingLink':
+        final reply = pendingReply;
+        pendingReply = null;
+        if (reply != null) return reply.future;
         final value = pending;
         pending = null;
         return value;
@@ -74,6 +85,15 @@ class _Bridge {
         expect(call.arguments, {'url': _privateUrl, 'name': 'Магазин'});
         imported = true;
         return subscriptions;
+      case 'refreshDue':
+        final reply = refreshReply;
+        if (reply == null) return subscriptions;
+        subscriptionsBusy = true;
+        try { return await reply.future; }
+        finally { subscriptionsBusy = false; }
+      case 'setAutomaticUpdates':
+        automaticUpdatesEnabled = (call.arguments as Map)['enabled'] as bool;
+        return automaticUpdatesReply?.future ?? subscriptions;
       case 'openPushokAccount':
       case 'openPushokHub':
         expect(call.arguments, isNull);
@@ -240,6 +260,87 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('A link reply from before app switching stays pending without navigating or opening',
+      (tester) async {
+    final reply = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..pendingReply = reply;
+    await _pump(tester, bridge);
+    expect(bridge.calls.where((call) => call == 'takePendingLink').length, 1);
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    reply.complete({'url': _privateUrl, 'name': 'Магазин'});
+    await tester.pumpAndSettle();
+    expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 0);
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    expect(bridge.leases, isEmpty);
+    expect(bridge.calls, isNot(contains('importSubscription')));
+    expect(bridge.calls, isNot(contains('refreshDue')));
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('pending_subscription_link')), findsOneWidget);
+    expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
+    final offer = find.byKey(const Key('open_pending_subscription_link'));
+    await tester.ensureVisible(offer);
+    await tester.tap(offer);
+    await tester.pumpAndSettle();
+    expect(find.byType(SubscriptionEditor), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('subscription_url')))
+        .controller!.text, _privateUrl);
+    expect(bridge.calls, isNot(contains('importSubscription')));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final newerFirst in [false, true]) {
+    testWidgets('A fresh resume link wins when the ${newerFirst ? 'newer' : 'older'} reply arrives first',
+        (tester) async {
+      const newerUrl = 'https://example.invalid/sub/NEW_PRIVATE_TOKEN';
+      final older = Completer<Object?>();
+      final newer = Completer<Object?>();
+      final bridge = _Bridge()
+        ..pending = null
+        ..pendingReply = older;
+      await _pump(tester, bridge);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      bridge.pendingReply = newer;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(bridge.calls.where((call) => call == 'takePendingLink').length, 2);
+
+      if (newerFirst) {
+        newer.complete({'url': newerUrl, 'name': 'Новая подписка'});
+        await tester.pumpAndSettle();
+        older.complete({'url': _privateUrl, 'name': 'Старая подписка'});
+      } else {
+        older.complete({'url': _privateUrl, 'name': 'Старая подписка'});
+        await tester.pumpAndSettle();
+        expect(find.byType(SubscriptionEditor), findsNothing);
+        await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+        await tester.pumpAndSettle();
+        // Finishing an old request must not release the newer request's read guard.
+        expect(bridge.calls.where((call) => call == 'takePendingLink').length, 2);
+        expect(find.byType(SubscriptionEditor), findsNothing);
+        newer.complete({'url': newerUrl, 'name': 'Новая подписка'});
+      }
+      await tester.pumpAndSettle();
+      expect(find.byType(SubscriptionEditor), findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(const Key('subscription_url')))
+          .controller!.text, newerUrl);
+      expect(tester.widget<TextField>(find.byKey(const Key('subscription_name')))
+          .controller!.text, 'Новая подписка');
+      expect(find.byKey(const Key('pending_subscription_link')), findsNothing);
+      expect(bridge.calls.where((call) => call == 'privacy:acquire').length, 1);
+      expect(bridge.calls, isNot(contains('importSubscription')));
+      expect(bridge.calls, isNot(contains('connectWireGuard')));
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   testWidgets('Privacy failure leaves a pending URL hidden and never downloads', (tester) async {
     final bridge = _Bridge()..protectionAvailable = false;
     await _pump(tester, bridge);
@@ -247,6 +348,48 @@ void main() {
     expect(find.byKey(const Key('pending_subscription_link')), findsOneWidget);
     expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
     expect(bridge.calls, isNot(contains('importSubscription')));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Automatic refresh can be switched off without releasing its mutation guard',
+      (tester) async {
+    final refresh = Completer<Object?>();
+    final setting = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..refreshReply = refresh
+      ..automaticUpdatesReply = setting;
+    final oldStatus = bridge.subscriptions;
+    await _pump(tester, bridge);
+    expect(bridge.calls.where((call) => call == 'refreshDue').length, 1);
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pump();
+    final control = find.byKey(const Key('automatic_subscription_updates'));
+    expect(tester.widget<SwitchListTile>(control).onChanged, isNotNull);
+    await tester.ensureVisible(control);
+    await tester.tap(control);
+    await tester.pump();
+    expect(bridge.automaticUpdatesEnabled, isFalse);
+    expect(bridge.calls.where((call) => call == 'setAutomaticUpdates').length, 1);
+    expect(tester.widget<SwitchListTile>(control).onChanged, isNull);
+    setting.complete(bridge.subscriptions);
+    await tester.pump();
+    expect(tester.widget<SwitchListTile>(control).value, isFalse);
+    for (final key in ['add_subscription', 'refresh_subscription_$_subscriptionId',
+      'delete_subscription_$_subscriptionId']) {
+      expect(tester.widget<OutlinedButton>(find.byKey(ValueKey(key))).onPressed, isNull);
+    }
+    expect(tester.widget<SwitchListTile>(control).onChanged, isNull);
+    // A queued refresh snapshot from before OFF must not turn the setting back on.
+    refresh.complete(oldStatus);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(control).value, isFalse);
+    expect(tester.widget<SwitchListTile>(control).onChanged, isNotNull);
+    expect(bridge.calls.where((call) => call == 'refreshDue').length, 1);
+    expect(bridge.calls, isNot(contains('importSubscription')));
+    expect(bridge.calls, isNot(contains('saveWireGuardProfile')));
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

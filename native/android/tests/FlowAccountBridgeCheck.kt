@@ -41,6 +41,10 @@ private class AccountBridgeFixture(initial: FlowAccountRecord = pending()) : Aut
         check(instance.get(null) == null)
         Handler.clearForTest()
         FlowAccountStore.value = initial
+        FlowAccountStore.rejectLoad = false
+        FlowAccountStore.rejectSave = false
+        FlowAccountStore.rejectRecovery = false
+        FlowAccountStore.recoveryCalls = 0
         FlowAccountClient.remote = FlowAccountRemote { method, path, bearer, body ->
             remoteCalls += path
             when (path) {
@@ -196,7 +200,7 @@ fun main() {
             mapOf("userCode" to OLD_CODE, "deviceCode" to fixtureDevice), mapOf("userCode" to 7))) {
             check(test.invoke("cancelLogin", arguments).errorCode == "FLOW_PROTOCOL_UNSUPPORTED")
         }
-        for (method in listOf("status", "beginLogin", "pollLogin", "refresh", "logout", "openLogin")) {
+        for (method in listOf("status", "beginLogin", "pollLogin", "refresh", "logout", "openLogin", "recoverLocalAccount")) {
             check(test.invoke(method, mapOf("userCode" to OLD_CODE)).errorCode == "FLOW_PROTOCOL_UNSUPPORTED")
         }
         check(Handler.pendingForTest() == 0 && test.remoteCalls.isEmpty())
@@ -229,5 +233,116 @@ fun main() {
         check(test.activity.attempts.isEmpty())
     }
 
-    println("Flow account actual bridge: qualified cancel, stale handoff, replacement, foreground and exact argument checks passed")
+    // Healthy state never authorizes destructive recovery, including a connected account
+    // that appeared while an older confirmation dialog was still visible.
+    for (initial in listOf(FlowAccountRecord(), pending(), current)) AccountBridgeFixture(initial).use { test ->
+        test.invoke("status"); test.idle(); test.reply()
+        val refused = test.invoke("recoverLocalAccount")
+        test.reply()
+        check(refused.metadata()["errorCode"] == "FLOW_RECOVERY_NOT_REQUIRED")
+        check(refused.metadata()["recoveryAvailable"] == false)
+        check(refused.metadata()["state"] == initial.metadata(System.currentTimeMillis())["state"])
+        check(FlowAccountStore.value == initial && FlowAccountStore.recoveryCalls == 0)
+        check(test.remoteCalls.isEmpty() && test.activity.attempts.isEmpty())
+    }
+
+    AccountBridgeFixture(current).use { test ->
+        FlowAccountStore.rejectLoad = true
+        for (method in listOf("status", "beginLogin")) {
+            val failed = test.invoke(method)
+            test.idle(); test.reply()
+            check(failed.metadata()["errorCode"] == "FLOW_STORE_UNAVAILABLE")
+            check(failed.metadata()["recoveryAvailable"] == true && failed.metadata()["state"] == "signed_out")
+            check(failed.metadata()["pending"] == null && failed.metadata()["profile"] == null)
+            check(FlowAccountStore.value == current && FlowAccountStore.recoveryCalls == 0)
+        }
+        FlowAccountStore.rejectRecovery = true
+        val failedReset = test.invoke("recoverLocalAccount")
+        test.idle(); test.reply()
+        check(failedReset.metadata()["errorCode"] == "FLOW_STORE_UNAVAILABLE")
+        check(failedReset.metadata()["recoveryAvailable"] == true && FlowAccountStore.value == current)
+        FlowAccountStore.rejectRecovery = false
+        val recovered = test.invoke("recoverLocalAccount")
+        test.idle(); test.reply()
+        check(recovered.metadata()["state"] == "signed_out" && recovered.metadata()["errorCode"] == null)
+        check(recovered.metadata()["recoveryAvailable"] == false && FlowAccountStore.value == FlowAccountRecord())
+        check(FlowAccountStore.recoveryCalls == 2 && test.remoteCalls.isEmpty() && test.activity.attempts.isEmpty())
+        val begin = test.invoke("beginLogin")
+        test.idle(); test.reply()
+        check(begin.metadata()["state"] == "pending" && begin.metadata()["recoveryAvailable"] == false)
+        val stale = test.invoke("recoverLocalAccount")
+        test.reply()
+        check(stale.metadata()["errorCode"] == "FLOW_RECOVERY_NOT_REQUIRED")
+        check((stale.metadata()["pending"] as Map<*, *>)["userCode"] == NEW_CODE)
+        check(FlowAccountStore.value.pending?.userCode == NEW_CODE && FlowAccountStore.recoveryCalls == 2)
+        check(test.remoteCalls == listOf("/capabilities", "/device") && test.activity.attempts.size == 1)
+    }
+
+    // A confirmed local reset survives pause/disposal, completes once, and never launches login.
+    for (dispose in listOf(false, true)) AccountBridgeFixture(current).use { test ->
+        FlowAccountStore.rejectLoad = true
+        test.invoke("status"); test.idle(); test.reply()
+        val reset: BridgeReply
+        test.pauseSerial().use {
+            reset = test.invoke("recoverLocalAccount")
+            check(test.coordinator.metadata()["busy"] == true && test.coordinator.metadata()["recoveryAvailable"] == true)
+            if (dispose) test.bridge.dispose() else test.bridge.setForeground(false)
+        }
+        test.idle(); test.reply()
+        check(reset.completions == 1)
+        check(FlowAccountStore.value == FlowAccountRecord() && FlowAccountStore.recoveryCalls == 1)
+        check(test.coordinator.metadata()["recoveryAvailable"] == false)
+        check(test.remoteCalls.isEmpty() && test.activity.attempts.isEmpty())
+        if (!dispose) check(reset.metadata()["errorCode"] == null && reset.metadata()["state"] == "signed_out")
+    }
+
+    // Refusal must happen before epoch/cancellation changes, not merely before the store clear.
+    // Suspend real coordinator work inside each healthy remote operation and deliver the stale
+    // recovery command while it is still active. Its eventual response must still commit.
+    for (method in listOf("beginLogin", "pollLogin", "refresh")) AccountBridgeFixture(when (method) {
+        "beginLogin" -> FlowAccountRecord()
+        "pollLogin" -> pending().let { it.copy(pending = it.pending!!.copy(nextPollAt = System.currentTimeMillis() - 1)) }
+        else -> current
+    }).use { test ->
+        test.invoke("status"); test.idle(); test.reply()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val originalRemote = FlowAccountClient.remote
+        val blockedPath = when (method) { "beginLogin" -> "/device"; "pollLogin" -> "/device/token"; else -> "/me" }
+        FlowAccountClient.remote = FlowAccountRemote { verb, path, bearer, body ->
+            if (path == blockedPath) {
+                entered.countDown()
+                check(release.await(2, TimeUnit.SECONDS))
+            }
+            when (path) {
+                "/device/token" -> {
+                    test.remoteCalls += path
+                    FlowAccountResponse(200, mapOf("status" to "pending", "interval" to 5, "expires_in" to 295))
+                }
+                "/me" -> {
+                    test.remoteCalls += path
+                    FlowAccountResponse(200, mapOf("id" to "12345678-1234-1234-1234-123456789abc",
+                        "display_name" to "Аккаунт", "role" to "user", "phone_verified" to true,
+                        "wallet" to mapOf("RUB" to 0, "BONUS" to 0, "XTR" to 0)))
+                }
+                else -> originalRemote.request(verb, path, bearer, body)
+            }
+        }
+        val active = test.invoke(method)
+        try {
+            check(entered.await(2, TimeUnit.SECONDS))
+            val before = FlowAccountStore.value
+            val refused = test.invoke("recoverLocalAccount")
+            test.reply()
+            check(refused.metadata()["errorCode"] == "FLOW_RECOVERY_NOT_REQUIRED")
+            check(refused.metadata()["busy"] == true && refused.metadata()["recoveryAvailable"] == false)
+            check(FlowAccountStore.value == before && FlowAccountStore.recoveryCalls == 0 && active.completions == 0)
+        } finally { release.countDown() }
+        test.idle(); test.reply()
+        check(active.metadata()["errorCode"] == null && active.metadata()["busy"] == false)
+        check(active.metadata()["state"] == if (method == "refresh") "connected" else "pending")
+        check(FlowAccountStore.recoveryCalls == 0)
+    }
+
+    println("Flow account actual bridge: qualified cancel, stale handoff, recovery refusal during begin/poll/refresh, local reset and foreground checks passed")
 }

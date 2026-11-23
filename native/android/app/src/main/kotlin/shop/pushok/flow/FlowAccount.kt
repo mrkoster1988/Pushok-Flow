@@ -40,7 +40,8 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
         cancel?.cancel()
     }
     fun metadata(override: String? = null): Map<String, Any?> = synchronized(lock) {
-        manager.record.metadata(System.currentTimeMillis(), busy, override ?: error)
+        manager.record.metadata(System.currentTimeMillis(), busy, override ?: error) +
+            ("recoveryAvailable" to manager.recoveryAvailable)
     }
     fun status(callback: (Map<String, Any?>) -> Unit) {
         io.execute {
@@ -63,8 +64,14 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
     }
     fun perform(owner: Any, command: String, cancelUserCode: String? = null,
         callback: (Map<String, Any?>) -> Unit) {
-        val supersede = command in setOf("beginLogin", "cancelLogin", "logout")
+        val supersede = command in setOf("beginLogin", "cancelLogin", "logout", "recoverLocalAccount")
         val selected: Pair<Long, FlowAccountCall?> = synchronized(lock) {
+            // Refuse before advancing the epoch or cancelling a healthy operation. This also
+            // protects a new begin/poll whose result has not reached the old recovery dialog yet.
+            if (command == "recoverLocalAccount" && !manager.recoveryAvailable) {
+                main.post { callback(metadata("FLOW_RECOVERY_NOT_REQUIRED")) }
+                return
+            }
             if (busy && !supersede) { main.post { callback(metadata("FLOW_BUSY")) }; return }
             epoch += 1
             busy = true
@@ -80,8 +87,10 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
                     if (epoch != selectedEpoch) throw FlowAccountFailure("FLOW_INTERRUPTED")
                     active = Active(owner, selectedEpoch, call)
                 }
-                // Local cancel/logout must commit even if the user immediately leaves the Activity.
-                val commit = transaction(selectedEpoch, owner.takeUnless { command in setOf("cancelLogin", "logout") })
+                // An explicit local clear/recovery survives immediately leaving the Activity.
+                val commit = transaction(selectedEpoch, owner.takeUnless {
+                    command in setOf("cancelLogin", "logout", "recoverLocalAccount")
+                })
                 manager.execute(command, FlowAccountClient(call), commit, cancelUserCode)
             } catch (failure: FlowAccountFailure) {
                 synchronized(lock) {
@@ -139,7 +148,7 @@ class FlowAccount(activity: Activity) {
                 }
                 when (call.method) {
                     "status" -> request(result) { done -> coordinator.status(done) }
-                    "beginLogin", "pollLogin", "cancelLogin", "refresh", "logout" -> {
+                    "beginLogin", "pollLogin", "cancelLogin", "refresh", "logout", "recoverLocalAccount" -> {
                         val launchEpoch = foregroundEpoch.get()
                         request(result, openAfter = call.method == "beginLogin", launchEpoch = launchEpoch) { done ->
                             coordinator.perform(this, call.method, cancelUserCode, done)

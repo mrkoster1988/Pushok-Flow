@@ -110,6 +110,11 @@ fun main() {
         UpdatePolicy.requireFresh(PublishedUpdateRelease(124, "0.26.0"), manifest, "0.24.0", 24)
     }
     val nextManifest = manifestVersion("0.26.0", 26)
+    check(UpdatePolicy.shouldRunScheduledDownload(manifest, "0.24.0", 24, emptyList()))
+    check(UpdatePolicy.shouldRunScheduledDownload(manifest, "0.24.0", 24, listOf(manifest)))
+    check(!UpdatePolicy.shouldRunScheduledDownload(manifest, "0.25.0", 25, emptyList()))
+    check(!UpdatePolicy.shouldRunScheduledDownload(manifest, "0.24.0", 24, listOf(nextManifest)))
+    check(UpdatePolicy.shouldRunScheduledDownload(nextManifest, "0.24.0", 24, listOf(manifest)))
     rejected("UPDATE_METADATA_STALE") {
         UpdatePolicy.requireFresh(release, manifest, "0.24.0", 24, listOf(nextManifest))
     }
@@ -119,6 +124,9 @@ fun main() {
         rejected("UPDATE_METADATA_STALE") {
             UpdatePolicy.requireFresh(PublishedUpdateRelease(125, changed.versionName), changed,
                 "0.24.0", 24, listOf(manifest))
+        }
+        rejected("UPDATE_METADATA_STALE") {
+            UpdatePolicy.shouldRunScheduledDownload(changed, "0.24.0", 24, listOf(manifest))
         }
     }
     // Version components are compared numerically without parsing them into an overflowing integer.

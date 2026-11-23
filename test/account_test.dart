@@ -16,7 +16,8 @@ Map<String, Object?> _profile() => {
 };
 
 Map<String, Object?> _state({String state = 'signed_out', String? error,
-    bool stale = false, int? nextPollAt, Map<String, Object?>? profile, String userCode = _code}) {
+    bool stale = false, bool recoveryAvailable = false, int? nextPollAt,
+    Map<String, Object?>? profile, String userCode = _code}) {
   final now = DateTime.now().millisecondsSinceEpoch;
   return {
     'state': state, 'busy': false, 'errorCode': error,
@@ -27,6 +28,7 @@ Map<String, Object?> _state({String state = 'signed_out', String? error,
     'refreshedAt': state == 'connected' ? now : null,
     'sessionExpiresAt': state == 'connected' ? now + 43200000 : null,
     'stale': stale,
+    'recoveryAvailable': recoveryAvailable,
   };
 }
 
@@ -36,6 +38,7 @@ class _AccountBridge {
   final gates = <String, Completer<Object?>>{};
   Object? statusError;
   String? logoutError;
+  String? recoveryError;
   String sessionUserCode = _code;
 
   int count(String method) => calls.where((call) => call.method == method).length;
@@ -73,6 +76,12 @@ class _AccountBridge {
       case 'refresh': return Map<String, Object?>.from(state);
       case 'logout':
         state = _state(error: logoutError);
+        return state;
+      case 'recoverLocalAccount':
+        if (state['recoveryAvailable'] != true) {
+          return {...state, 'errorCode': 'FLOW_RECOVERY_NOT_REQUIRED'};
+        }
+        state = _state(error: recoveryError, recoveryAvailable: recoveryError != null);
         return state;
       case 'openLogin': return true;
       default: throw MissingPluginException();
@@ -156,6 +165,8 @@ void main() {
       null, <Object?>[], {..._state(), 'access_token': 'PRIVATE_TOKEN'},
       {..._state(), 'state': 'approved'}, {..._state(), 'busy': 1},
       {..._state(), 'stale': 'false'}, {..._state(), 'errorCode': 'token=PRIVATE_TOKEN'},
+      {..._state(), 'recoveryAvailable': 1}, {..._state(), 'recoveryAvailable': null},
+      {...connected, 'recoveryAvailable': true}, {...pending, 'recoveryAvailable': true},
       {..._state(), 'errorCode': 'X' * 65}, {..._state(), 'profile': _profile()},
       {..._state(), 'sessionExpiresAt': 1000}, {...pending, 'pending': null},
       {...connected, 'pending': pending['pending']},
@@ -174,6 +185,14 @@ void main() {
     for (final value in cases) {
       expect(() => FlowAccountStatus.fromPlatform(value), throwsFormatException);
     }
+  });
+
+  test('Recovery metadata is explicit and remains compatible with older snapshots', () {
+    final legacy = _state()..remove('recoveryAvailable');
+    expect(FlowAccountStatus.fromPlatform(legacy).recoveryAvailable, isFalse);
+    expect(FlowAccountStatus.fromPlatform(_state(error: 'FLOW_STORE_UNAVAILABLE',
+      recoveryAvailable: true)).recoveryAvailable, isTrue);
+    expect(flowAccountErrorMessage('FLOW_STORE_UNAVAILABLE'), isNot(contains('Перезапустите')));
   });
 
   test('Wallet formatting keeps integer precision, signed minor units and whole Stars', () {
@@ -197,8 +216,10 @@ void main() {
     await account.cancelLogin(_code);
     await account.refresh();
     await account.logout();
+    await account.recoverLocalAccount();
     expect(bridge.calls.map((call) => call.method),
-        ['status', 'beginLogin', 'openLogin', 'pollLogin', 'cancelLogin', 'refresh', 'logout']);
+        ['status', 'beginLogin', 'openLogin', 'pollLogin', 'cancelLogin', 'refresh', 'logout',
+          'recoverLocalAccount']);
     expect(bridge.calls.singleWhere((call) => call.method == 'cancelLogin').arguments, {'userCode': _code});
     expect(bridge.calls.where((call) => call.method != 'cancelLogin')
       .every((call) => call.arguments == null), isTrue);
@@ -526,7 +547,7 @@ void main() {
       expect(find.text('Проверочный аккаунт'), findsNothing);
       expect(find.byKey(const Key('account_wallet_rub')), findsNothing);
       expect(find.text('Выход ещё не подтверждён.'), findsOneWidget);
-      expect(find.textContaining('Перезапустите приложение'), findsOneWidget);
+      expect(find.textContaining('Локальное хранилище аккаунта недоступно'), findsOneWidget);
       expect(find.byKey(const Key('begin_flow_login')), findsNothing);
       await tester.tap(find.byKey(const Key('retry_flow_account_clear')));
       await tester.pumpAndSettle();
@@ -627,6 +648,139 @@ void main() {
       expect(bridge.count('cancelLogin'), 1);
       expect(bridge.count('pollLogin'), 0);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Storage recovery requires confirmation and never starts a login automatically', (tester) async {
+    bridge.state = _state(error: 'FLOW_STORE_UNAVAILABLE', recoveryAvailable: true);
+    await _withCard(tester, () async {
+      expect(find.byKey(const Key('begin_flow_login')), findsNothing);
+      expect(bridge.count('recoverLocalAccount'), 0);
+      final button = tester.widget<FilledButton>(find.byKey(const Key('recover_flow_account')));
+      button.onPressed!();
+      button.onPressed!();
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(bridge.count('recoverLocalAccount'), 0);
+      await tester.tap(find.byKey(const Key('cancel_account_recovery')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('recoverLocalAccount'), 0);
+      await tester.tap(find.byKey(const Key('recover_flow_account')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_account_recovery')));
+      await tester.pumpAndSettle();
+      expect(bridge.calls.map((call) => call.method), ['status', 'recoverLocalAccount']);
+      expect(find.byKey(const Key('flow_account_error')), findsNothing);
+      expect(find.byKey(const Key('flow_account_recovery_needed')), findsNothing);
+      expect(tester.widget<FilledButton>(find.byKey(const Key('begin_flow_login'))).onPressed, isNotNull);
+      await tester.tap(find.byKey(const Key('begin_flow_login')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('beginLogin'), 1);
+      expect(find.byKey(const Key('flow_account_code')), findsOneWidget);
+    });
+  });
+
+  testWidgets('Failed storage recovery stays masked and permits an explicit retry', (tester) async {
+    bridge.state = _state(error: 'FLOW_STORE_UNAVAILABLE', recoveryAvailable: true);
+    bridge.recoveryError = 'FLOW_STORE_UNAVAILABLE';
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('recover_flow_account')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_account_recovery')));
+      await tester.pumpAndSettle();
+      expect(find.text('Восстановление ещё не подтверждено.'), findsOneWidget);
+      expect(find.byKey(const Key('begin_flow_login')), findsNothing);
+      expect(find.byKey(const Key('flow_account_code')), findsNothing);
+      expect(find.byKey(const Key('account_display_name')), findsNothing);
+      expect(bridge.count('beginLogin'), 0);
+      bridge.recoveryError = null;
+      await tester.tap(find.byKey(const Key('retry_flow_account_clear')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('recoverLocalAccount'), 2);
+      expect(bridge.count('beginLogin'), 0);
+      expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+      expect(find.byKey(const Key('flow_account_clearing')), findsNothing);
+    });
+  });
+
+  testWidgets('Recovery dialog from before background cannot clear a resumed account', (tester) async {
+    bridge.state = _state(error: 'FLOW_STORE_UNAVAILABLE', recoveryAvailable: true);
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('recover_flow_account')));
+      await tester.pumpAndSettle();
+      _pause(tester);
+      bridge.state = _state(state: 'connected');
+      _resume(tester);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_account_recovery')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('recoverLocalAccount'), 0);
+      expect(find.text('Проверочный аккаунт'), findsOneWidget);
+      expect(bridge.count('beginLogin'), 0);
+      expect(bridge.count('logout'), 0);
+    });
+  });
+
+  testWidgets('Native refusal of stale recovery preserves a newer busy login', (tester) async {
+    bridge.state = _state(error: 'FLOW_STORE_UNAVAILABLE', recoveryAvailable: true);
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('recover_flow_account')));
+      await tester.pumpAndSettle();
+      bridge.state = {..._state(state: 'pending', userCode: '89GH23JK45LM'), 'busy': true};
+      await tester.tap(find.byKey(const Key('confirm_account_recovery')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('recoverLocalAccount'), 1);
+      expect(find.text('89GH · 23JK · 45LM'), findsOneWidget);
+      expect(find.byKey(const Key('flow_account_clearing')), findsNothing);
+      expect(find.textContaining('Восстановление больше не требуется'), findsOneWidget);
+      expect(bridge.count('cancelLogin'), 0);
+      expect(bridge.count('beginLogin'), 0);
+    });
+  });
+
+  testWidgets('Resume reconciles recovery and ignores a late failed reply', (tester) async {
+    bridge.state = _state(error: 'FLOW_STORE_UNAVAILABLE', recoveryAvailable: true);
+    final recovery = Completer<Object?>();
+    bridge.gates['recoverLocalAccount'] = recovery;
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('recover_flow_account')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_account_recovery')));
+      await tester.pump();
+      expect(bridge.count('recoverLocalAccount'), 1);
+      _pause(tester);
+      bridge.state = _state();
+      _resume(tester);
+      await tester.pumpAndSettle();
+      recovery.complete(_state(error: 'FLOW_STORE_UNAVAILABLE', recoveryAvailable: true));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+      expect(find.byKey(const Key('flow_account_clearing')), findsNothing);
+      expect(find.byKey(const Key('flow_account_error')), findsNothing);
+      expect(bridge.count('beginLogin'), 0);
+    });
+  });
+
+  testWidgets('Storage failure during logout offers recovery without exposing cached profile', (tester) async {
+    bridge.state = _state(state: 'connected');
+    final logout = Completer<Object?>();
+    bridge.gates['logout'] = logout;
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('logout_flow_account')));
+      await tester.pump();
+      bridge.state = _state(error: 'FLOW_STORE_UNAVAILABLE', recoveryAvailable: true);
+      logout.complete(bridge.state);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('account_display_name')), findsNothing);
+      expect(find.byKey(const Key('retry_flow_account_clear')), findsNothing);
+      expect(find.byKey(const Key('recover_flow_account')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('recover_flow_account')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_account_recovery')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+      expect(bridge.count('recoverLocalAccount'), 1);
+      expect(bridge.count('logout'), 1);
     });
   });
 

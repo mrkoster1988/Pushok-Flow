@@ -70,9 +70,8 @@ internal class FlowAccountStore(context: Context) : FlowAccountPersistence {
             return try { FlowAccountPolicy.restore(FlowAccountJson.parse(plain)) }
             finally { plain.fill(0) }
         } catch (_: Exception) {
-            // A missing/invalidated key cannot reveal an old account. Explicit next login can create
-            // a fresh record; unrelated encrypted VPN profiles and their keys are never touched.
-            if (!preferences.edit().remove("record").commit()) poisoned = true
+            // Preserve ciphertext on read failure: the key service may be temporarily unavailable.
+            // Only a separately confirmed local recovery may discard this record and its key.
             unavailable()
         }
     }
@@ -96,8 +95,36 @@ internal class FlowAccountStore(context: Context) : FlowAccountPersistence {
                 poisoned = true
                 unavailable()
             }
-        } catch (failure: FlowAccountFailure) { throw failure }
-        catch (_: Exception) { unavailable() }
+        } catch (_: Exception) { unavailable() }
+    }
+    override fun recoverLocalAccount() {
+        if (!poisoned) throw FlowAccountFailure("FLOW_RECOVERY_NOT_REQUIRED")
+        try {
+            // The old record must be durably absent before replacing its key. A failed removal
+            // must leave the alias untouched, including when SharedPreferences changed in memory.
+            if (!preferences.edit().remove("record").commit()) unavailable()
+            val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            store.deleteEntry(ALIAS)
+            if (store.containsAlias(ALIAS)) unavailable()
+            checkFreshKey()
+            poisoned = false
+        } catch (_: Exception) { unavailable() }
+    }
+    private fun checkFreshKey() {
+        val probe = ByteArray(32) { it.toByte() }
+        try {
+            val encrypt = Cipher.getInstance("AES/GCM/NoPadding")
+            encrypt.init(Cipher.ENCRYPT_MODE, key(true))
+            encrypt.updateAAD(AAD)
+            if (encrypt.iv.size != 12) unavailable()
+            val encrypted = encrypt.doFinal(probe)
+            val decrypt = Cipher.getInstance("AES/GCM/NoPadding")
+            decrypt.init(Cipher.DECRYPT_MODE, key(false), GCMParameterSpec(128, encrypt.iv))
+            decrypt.updateAAD(AAD)
+            val checked = decrypt.doFinal(encrypted)
+            try { if (!checked.contentEquals(probe)) unavailable() }
+            finally { checked.fill(0) }
+        } finally { probe.fill(0) }
     }
     private fun key(create: Boolean): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -110,5 +137,8 @@ internal class FlowAccountStore(context: Context) : FlowAccountPersistence {
                 .setKeySize(256).build())
         }.generateKey()
     }
-    private fun unavailable(): Nothing = throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
+    private fun unavailable(): Nothing {
+        poisoned = true
+        throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
+    }
 }

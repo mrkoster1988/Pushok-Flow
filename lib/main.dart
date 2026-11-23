@@ -71,7 +71,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   String? _subscriptionsError;
   bool _subscriptionsLoading = false;
   bool _subscriptionsBusy = false;
-  bool _pendingSubscriptionReading = false;
+  bool _subscriptionsSavingAutoUpdate = false;
+  int? _pendingSubscriptionReading;
+  int _pendingSubscriptionReadSequence = 0;
+  int _pendingSubscriptionLinkSequence = 0;
+  int? _pendingSubscriptionLinkIntentEpoch;
   bool _openingPushok = false;
   int _subscriptionEpoch = 0;
   Timer? _subscriptionPoll;
@@ -387,6 +391,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       _routeEpoch++;
       _recommendationEpoch++;
       _subscriptionEpoch++;
+      _pendingSubscriptionReading = null;
       _subscriptionPoll?.cancel();
       _recommendationPoll?.cancel();
       setState(() {
@@ -413,7 +418,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Future<void> _readSubscriptions({bool checkAutomatically = false}) async {
     if (!_isAndroid || !mounted || !_foreground || _subscriptionsLoading ||
-        _subscriptionsBusy) return;
+        _subscriptionsBusy || _subscriptionsSavingAutoUpdate) return;
     final epoch = ++_subscriptionEpoch;
     _subscriptionPoll?.cancel();
     var received = false;
@@ -443,6 +448,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       });
     }
     await _takePendingSubscriptionLink();
+    if (!mounted || !_foreground || epoch != _subscriptionEpoch) return;
     if (checkAutomatically && _pendingSubscriptionLink == null &&
         received && (_subscriptions?.automaticUpdatesEnabled ?? false) &&
         !_subscriptions!.busy && _subscriptions!.subscriptions.isNotEmpty && _canManageProfiles) {
@@ -452,19 +458,30 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Future<void> _changeSubscriptions(Future<SubscriptionStatus> Function() action,
       {bool automatic = false}) async {
-    if (!_canManageProfiles || _subscriptionsBusy || (_subscriptions?.busy ?? false)) return;
+    if (!_canManageProfiles || _subscriptionsBusy || _subscriptionsSavingAutoUpdate ||
+        (_subscriptions?.busy ?? false)) return;
+    final epoch = ++_subscriptionEpoch;
+    _subscriptionPoll?.cancel();
     _statusEpoch++;
-    setState(() { _subscriptionsBusy = true; _profileBusy = true; });
+    setState(() {
+      _subscriptionsLoading = false;
+      _subscriptionsBusy = true;
+      _profileBusy = true;
+    });
     try {
       final status = await action();
-      if (mounted) setState(() {
+      if (mounted && _foreground && epoch == _subscriptionEpoch) setState(() {
         _subscriptions = status;
         _subscriptionsError = status.errorCode == null ? null
             : subscriptionErrorMessage(PlatformException(code: status.errorCode!));
       });
-      if (!automatic && mounted && _foreground) _showNotice('Список серверов обновлён.');
+      if (!automatic && mounted && _foreground && epoch == _subscriptionEpoch) {
+        _showNotice('Список серверов обновлён.');
+      }
     } catch (error) {
-      if (mounted) setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+      if (mounted && _foreground && epoch == _subscriptionEpoch) {
+        setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+      }
     } finally {
       if (mounted) {
         _statusEpoch++;
@@ -476,39 +493,63 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   Future<void> _setSubscriptionAutomaticUpdates(bool enabled) async {
-    if (!_isAndroid || !mounted || !_foreground || _subscriptionsBusy ||
-        _subscriptionsLoading || _subscriptions == null) return;
-    setState(() => _subscriptionsBusy = true);
+    if (!_isAndroid || !mounted || !_foreground || _subscriptionsSavingAutoUpdate ||
+        _subscriptions == null || (enabled && (_subscriptionsBusy ||
+            _subscriptionsLoading || _subscriptions!.busy))) return;
+    // OFF can cancel a native automatic download. Saving this preference must
+    // neither wait for that download nor release its profile-mutation guard.
+    final epoch = ++_subscriptionEpoch;
+    _subscriptionPoll?.cancel();
+    setState(() {
+      _subscriptionsLoading = false;
+      _subscriptionsSavingAutoUpdate = true;
+    });
     try {
       final status = await _subscriptionBridge.setAutomaticUpdates(enabled);
-      if (mounted) setState(() {
+      if (mounted && _foreground && epoch == _subscriptionEpoch) setState(() {
         _subscriptions = status;
         _subscriptionsError = null;
       });
     } catch (error) {
-      if (mounted) setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+      if (mounted && _foreground && epoch == _subscriptionEpoch) {
+        setState(() => _subscriptionsError = subscriptionErrorMessage(error));
+      }
     } finally {
-      if (mounted) setState(() => _subscriptionsBusy = false);
+      if (mounted) {
+        setState(() => _subscriptionsSavingAutoUpdate = false);
+        if (epoch != _subscriptionEpoch || (_subscriptions?.busy ?? false)) {
+          await _readSubscriptions();
+        }
+      }
     }
   }
 
   Future<void> _takePendingSubscriptionLink() async {
-    if (!_isAndroid || !mounted || !_foreground || _pendingSubscriptionReading) return;
-    _pendingSubscriptionReading = true;
+    if (!_isAndroid || !mounted || !_foreground || _pendingSubscriptionReading != null) return;
+    final request = ++_pendingSubscriptionReadSequence;
+    final intentEpoch = _profileRequestEpoch;
+    _pendingSubscriptionReading = request;
+    bool current() => mounted && _foreground && intentEpoch == _profileRequestEpoch &&
+        request == _pendingSubscriptionReadSequence;
     try {
       final draft = await _subscriptionBridge.takePendingLink();
       if (!mounted) return;
-      if (draft != null) setState(() {
+      if (draft != null && request > _pendingSubscriptionLinkSequence) setState(() {
+        // Native already consumed this link. Keep a late reply as a masked offer,
+        // but never navigate from an old intent or replace a newer received link.
+        _pendingSubscriptionLinkSequence = request;
         _pendingSubscriptionLink = draft;
-        tab = 2;
+        _pendingSubscriptionLinkIntentEpoch = current() ? intentEpoch : null;
+        if (current()) tab = 2;
       });
     } catch (_) {
       // A broken external link cannot reveal native message/details or replace
       // an existing saved subscription. A later explicit link can be retried.
     } finally {
-      _pendingSubscriptionReading = false;
+      if (_pendingSubscriptionReading == request) _pendingSubscriptionReading = null;
     }
-    if (mounted && _foreground && _pendingSubscriptionLink != null &&
+    if (current() && _pendingSubscriptionLinkIntentEpoch == intentEpoch &&
+        _pendingSubscriptionLink != null &&
         _subscriptions != null && !_subscriptions!.busy &&
         _canManageProfiles && !_subscriptionsBusy) {
       await _addSubscription(draft: _pendingSubscriptionLink);
@@ -1204,7 +1245,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.48.0',
+            version: '0.49.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,
@@ -1389,6 +1430,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       status: _subscriptions,
       loading: _subscriptionsLoading,
       busy: _subscriptionsBusy,
+      savingAutoUpdate: _subscriptionsSavingAutoUpdate,
       error: !_isAndroid ? 'Подписки доступны в приложении для Android.' : _subscriptionsError,
       mutationsEnabled: _canManageProfiles,
       pendingLink: _pendingSubscriptionLink != null,

@@ -196,7 +196,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
     }
 
     /** A user download is durable before the channel call completes, even with automation disabled.
-     * Only WorkManager may execute the transfer; this short queue just captures the verified manifest. */
+     * This queue verifies a cached candidate or captures its manifest; WorkManager owns the transfer. */
     fun requestDownload(callback: (Map<String, Any?>) -> Unit) {
         if (!busy.compareAndSet(false, true)) { callback(snapshot("UPDATE_BUSY")); return }
         io.execute {
@@ -205,16 +205,17 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                 reconcileInstallAttempt()
                 if (readState().phase == "installing") throw UpdateFailure("UPDATE_BUSY")
                 val manifest = readState().manifest ?: throw UpdateFailure("UPDATE_NOT_READY")
-                val current = installedPackage()
-                UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
-                UpdatePolicy.requireDeviceCompatible(manifest, Build.SUPPORTED_ABIS.toList())
-                UpdatePolicy.requireNewer(manifest, versionCode(current))
-                if (retainedReady?.manifest == manifest) changeState { retainedReady!! }
-                else {
+                if (!reuseReadyCandidate(manifest)) {
+                    // Invalidating an older retained file may reveal a newer verified discovery.
+                    val selected = readState().manifest ?: throw UpdateFailure("UPDATE_NOT_READY")
+                    val current = installedPackage()
+                    UpdatePolicy.requireCompatible(selected, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
+                    UpdatePolicy.requireDeviceCompatible(selected, Build.SUPPORTED_ABIS.toList())
+                    UpdatePolicy.requireNewer(selected, versionCode(current))
                     // The payload, URL, hash and signing identity survive process death together.
                     // KEEP is scoped to this exact artifact, never to an unrelated newer update.
-                    BackgroundUpdateScheduler.download(context, manifest,
-                        JSONObject(UpdatePolicy.manifestFields(manifest)).toString())
+                    BackgroundUpdateScheduler.download(context, selected,
+                        JSONObject(UpdatePolicy.manifestFields(selected)).toString())
                     changeState { it.copy(phase = "downloading", errorCode = null, checkStage = null) }
                 }
             } catch (error: UpdateFailure) { failOperation(error.code) }
@@ -239,8 +240,18 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                 if (reconcileOnly || readState().phase == "installing") return@submit null
                 if (manualManifest != null) {
                     val manifest = cachedManifestFromJson(parseJson(manualManifest.toByteArray(StandardCharsets.UTF_8)))
-                    // A process/update restart can outlive the job that originally selected this build.
-                    if (manifest.versionCode <= versionCode(installedPackage())) return@submit null
+                    val current = installedPackage()
+                    // WorkManager owns one persisted job per artifact; their execution order is not
+                    // selection order. Retire an older job before it can touch a newer ready file.
+                    val selected = try {
+                        UpdatePolicy.shouldRunScheduledDownload(manifest, current.versionName ?: "0.0.0",
+                            versionCode(current), listOfNotNull(latestManifest, retainedReady?.manifest, readState().manifest))
+                    } catch (failure: UpdateFailure) {
+                        // A conflicting cached job must not roll a newer UI state back to retainedReady.
+                        setError(failure.code)
+                        return@submit failure.code
+                    }
+                    if (!selected) return@submit null
                     downloadCandidate(manifest)
                 } else {
                     checkRemote()
@@ -352,7 +363,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
         UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
         UpdatePolicy.requireDeviceCompatible(manifest, Build.SUPPORTED_ABIS.toList())
         UpdatePolicy.requireNewer(manifest, versionCode(current))
-        if (retainedReady?.manifest == manifest) { changeState { retainedReady!! }; return }
+        if (reuseReadyCandidate(manifest)) return
         val directory = updateDirectory()
         val temporary = File(directory, "pending-${manifest.versionCode}-${manifest.sha256.take(16)}.apk")
         if (temporary.canonicalFile != temporary) throw UpdateFailure("UPDATE_STORAGE_ERROR")
@@ -421,6 +432,39 @@ internal class UpdateCoordinator private constructor(private val context: Contex
             // Network loss, Worker stop and process death deliberately retain the resumable part.
             throw failure
         }
+    }
+
+    private fun reuseReadyCandidate(manifest: UpdateManifest, reportInvalid: Boolean = false): Boolean {
+        val ready = retainedReady?.takeIf { it.manifest == manifest } ?: return false
+        try {
+            verifyReadyFile(ready.apk ?: throw UpdateFailure("UPDATE_NOT_READY"), manifest)
+        } catch (failure: UpdateFailure) {
+            if (failure.code !in setOf("UPDATE_NOT_READY", "UPDATE_CHECKSUM_MISMATCH",
+                    "UPDATE_APK_INVALID", "UPDATE_SIGNATURE_MISMATCH")) throw failure
+            // An invalid exact candidate cannot keep winning the download shortcut. Hide it
+            // before cleanup so even a failed deletion cannot advertise this APK as ready.
+            retainedReady = null
+            val available = latestManifest?.takeIf { it.versionCode > manifest.versionCode } ?: manifest
+            changeState { if (it.manifest == manifest) it.copy(phase = "available", manifest = available, apk = null,
+                downloadedBytes = 0, totalBytes = available.sizeBytes, errorCode = null, checkStage = null) else it }
+            try {
+                val store = candidateStore()
+                store.delete()
+                if (listOf("", ".bak", ".new").any { File(store.baseFile.path + it).exists() }) {
+                    throw UpdateFailure("UPDATE_STORAGE_ERROR")
+                }
+                ready.apk?.let { file ->
+                    deleteOwnedFile(file)
+                    // An Android installer may still hold this explicit manual-install path.
+                    // Its replacement is published only after full verification, as usual.
+                    if (file.name != manualFileName && file.exists()) throw UpdateFailure("UPDATE_STORAGE_ERROR")
+                }
+            } catch (_: Exception) { throw UpdateFailure("UPDATE_STORAGE_ERROR") }
+            if (reportInvalid) throw failure
+            return false
+        }
+        changeState { ready }
+        return true
     }
 
     private fun tryAutomaticInstall() {
@@ -518,7 +562,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
                 val apk = ready.apk ?: throw UpdateFailure("UPDATE_NOT_READY")
                 if (ready.phase != "ready" || guard.isInstalling()) throw UpdateFailure("UPDATE_BUSY")
                 if (!installPermissionGranted()) throw UpdateFailure("INSTALL_PERMISSION_REQUIRED")
-                verifyReadyFile(apk, manifest)
+                if (!reuseReadyCandidate(manifest, reportInvalid = true)) throw UpdateFailure("UPDATE_NOT_READY")
                 // A cancelled/manual installer must not be reopened automatically by a Worker.
                 blockAutomatic(manifest.sha256)
                 if (!preferences.edit().putString("manual_file", apk.name).commit()) throw UpdateFailure("UPDATE_STORAGE_ERROR")

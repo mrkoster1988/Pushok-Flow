@@ -2,13 +2,26 @@ package shop.pushok.flow
 
 private class AccountMemoryStore : FlowAccountPersistence {
     var value = FlowAccountRecord()
+    var rejectLoad = false
     var rejectSession = false
     var rejectClear = false
-    override fun load() = FlowAccountPolicy.restore(FlowAccountPolicy.record(value))
+    var rejectRecovery = false
+    var recoveryCalls = 0
+    override fun load(): FlowAccountRecord {
+        if (rejectLoad) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
+        return FlowAccountPolicy.restore(FlowAccountPolicy.record(value))
+    }
     override fun save(value: FlowAccountRecord) {
         if (rejectSession && value.session != null) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
         if (rejectClear && value.session == null && value.pending == null) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
         this.value = FlowAccountPolicy.restore(FlowAccountPolicy.record(value))
+    }
+    override fun recoverLocalAccount() {
+        recoveryCalls++
+        if (rejectRecovery || rejectClear) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
+        value = FlowAccountRecord()
+        rejectLoad = false
+        rejectSession = false
     }
 }
 
@@ -139,6 +152,45 @@ fun main() {
     val callCount = calls.size
     failure("FLOW_STORE_UNAVAILABLE") { brokenLogout.execute("refresh", remote, commit) }
     check(calls.size == callCount) // A poisoned store cannot reuse the pre-logout token.
+
+    // Recovery is an explicit local choice after a confirmed storage failure. Merely repeating
+    // status/login never drops the durable record, and a failed reset stays fail-closed.
+    val noRemote = FlowAccountRemote { _, _, _, _ -> error("Recovery must not access the network") }
+    check(brokenLogout.recoveryAvailable && brokenStore.value == cached)
+    failure("FLOW_STORE_UNAVAILABLE") { brokenLogout.execute("recoverLocalAccount", noRemote, commit) }
+    check(brokenLogout.recoveryAvailable && brokenStore.value == cached && brokenStore.recoveryCalls == 1)
+    brokenStore.rejectClear = false
+    brokenLogout.execute("recoverLocalAccount", noRemote, commit)
+    check(!brokenLogout.recoveryAvailable && brokenLogout.record == FlowAccountRecord())
+    check(brokenStore.value == FlowAccountRecord() && brokenStore.recoveryCalls == 2)
+    brokenLogout.execute("beginLogin", remote, commit)
+    val recoveredPending = brokenLogout.record
+    failure("FLOW_RECOVERY_NOT_REQUIRED") { brokenLogout.execute("recoverLocalAccount", noRemote, commit) }
+    check(brokenStore.value == recoveredPending && recoveredPending.pending != null && brokenStore.recoveryCalls == 2)
+    val healthyStore = AccountMemoryStore().apply { value = cached }
+    val healthy = FlowAccountSessionManager(healthyStore) { now }
+    healthy.execute("status", noRemote, commit)
+    failure("FLOW_RECOVERY_NOT_REQUIRED") { healthy.execute("recoverLocalAccount", noRemote, commit) }
+    check(healthy.record == cached && !healthy.recoveryAvailable && healthyStore.recoveryCalls == 0)
+
+    val unreadableStore = AccountMemoryStore().apply { value = cached; rejectLoad = true; rejectRecovery = true }
+    val unreadable = FlowAccountSessionManager(unreadableStore) { now }
+    failure("FLOW_STORE_UNAVAILABLE") { unreadable.execute("status", noRemote, commit) }
+    check(unreadable.recoveryAvailable && unreadable.record == FlowAccountRecord() && unreadableStore.value == cached)
+    failure("FLOW_STORE_UNAVAILABLE") { unreadable.execute("beginLogin", noRemote, commit) }
+    failure("FLOW_STORE_UNAVAILABLE") { unreadable.execute("recoverLocalAccount", noRemote, commit) }
+    check(unreadable.recoveryAvailable && unreadableStore.recoveryCalls == 1)
+    unreadableStore.rejectRecovery = false
+    // A newer recovery/login can win before an old command reaches the commit lock.
+    failure("FLOW_RECOVERY_NOT_REQUIRED") {
+        unreadable.execute("recoverLocalAccount", noRemote, { change ->
+            unreadable.execute("recoverLocalAccount", noRemote, commit)
+            unreadable.execute("beginLogin", remote, commit)
+            change()
+        })
+    }
+    check(!unreadable.recoveryAvailable && unreadable.record.pending != null)
+    check(unreadableStore.value == unreadable.record && unreadableStore.recoveryCalls == 2)
 
     // Token issuance can win before /me or before the UI receives its reply.
     // Cancellation remains bound to the displayed public challenge across restart.

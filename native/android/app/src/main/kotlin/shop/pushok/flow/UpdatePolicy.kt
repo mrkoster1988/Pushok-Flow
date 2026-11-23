@@ -324,8 +324,25 @@ internal object UpdatePolicy {
 
     fun requireFresh(release: PublishedUpdateRelease, manifest: UpdateManifest,
         installedVersion: String, installedBuild: Long, known: List<UpdateManifest> = emptyList()) {
+        if (manifest.versionName != release.versionName) throw UpdateFailure("UPDATE_METADATA_STALE")
+        requireFresh(manifest, installedVersion, installedBuild, known)
+    }
+
+    /** Durable manual jobs may run out of order, even after a newer candidate survives a restart. */
+    fun shouldRunScheduledDownload(manifest: UpdateManifest, installedVersion: String,
+        installedBuild: Long, known: List<UpdateManifest>): Boolean {
+        if (manifest.versionCode <= installedBuild || known.any {
+                manifest.versionCode < it.versionCode || compareVersions(manifest.versionName, it.versionName) < 0
+            }) return false
+        // The same version/build must keep its exact artifact identity, including its SHA and ABI.
+        requireFresh(manifest, installedVersion, installedBuild, known)
+        return true
+    }
+
+    private fun requireFresh(manifest: UpdateManifest, installedVersion: String,
+        installedBuild: Long, known: List<UpdateManifest>) {
         fun stale(): Nothing = throw UpdateFailure("UPDATE_METADATA_STALE")
-        if (manifest.versionName != release.versionName || manifest.versionCode < installedBuild ||
+        if (manifest.versionCode < installedBuild ||
             (manifest.versionCode == installedBuild && manifest.versionName != installedVersion)) stale()
         if (versionPattern.matches(installedVersion) && compareVersions(manifest.versionName, installedVersion) < 0) stale()
         for (prior in known) {

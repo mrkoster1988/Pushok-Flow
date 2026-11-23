@@ -3,6 +3,7 @@ package shop.pushok.flow
 internal interface FlowAccountPersistence {
     fun load(): FlowAccountRecord
     fun save(value: FlowAccountRecord)
+    fun recoverLocalAccount() { throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE") }
 }
 internal data class FlowAccountResponse(val status: Int, val json: Map<String, Any?> = emptyMap(), val retryAfter: Int? = null) {
     override fun toString() = "FlowAccountResponse($status, redacted)"
@@ -18,6 +19,7 @@ internal class FlowAccountSessionManager(private val store: FlowAccountPersisten
     @Volatile var record = FlowAccountRecord(); private set
     private var loaded = false
     private var storageUnavailable = false
+    val recoveryAvailable: Boolean get() = storageUnavailable
 
     fun load(commit: (() -> Unit) -> Unit) {
         if (storageUnavailable) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
@@ -34,7 +36,8 @@ internal class FlowAccountSessionManager(private val store: FlowAccountPersisten
     }
     private fun failStorage(): Nothing {
         // A failed commit has uncertain durability. Do not publish/reuse any cached credential,
-        // including after failed logout removal; only a fresh process may read durable state again.
+        // including after failed logout removal. An explicit local recovery or a fresh process
+        // must establish usable storage before another credential can be published.
         record = FlowAccountRecord()
         storageUnavailable = true
         throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
@@ -51,6 +54,19 @@ internal class FlowAccountSessionManager(private val store: FlowAccountPersisten
     }
     fun execute(command: String, remote: FlowAccountRemote, commit: (() -> Unit) -> Unit,
         cancelUserCode: String? = null) {
+        if (command == "recoverLocalAccount") {
+            commit {
+                // Recheck under the same commit lock as credential publication. A stale dialog
+                // must never clear a healthy challenge/session that appeared after it was shown.
+                if (!storageUnavailable) throw FlowAccountFailure("FLOW_RECOVERY_NOT_REQUIRED")
+                try { store.recoverLocalAccount() }
+                catch (_: Exception) { failStorage() }
+                record = FlowAccountRecord()
+                loaded = true
+                storageUnavailable = false
+            }
+            return
+        }
         load(commit)
         if (command !in setOf("logout", "cancelLogin", "beginLogin")) expire(commit)
         when (command) {

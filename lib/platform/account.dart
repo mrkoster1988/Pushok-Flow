@@ -109,7 +109,8 @@ class FlowAccountPending {
 
 class FlowAccountStatus {
   const FlowAccountStatus({required this.state, this.busy = false, this.errorCode,
-    this.pending, this.profile, this.refreshedAt, this.sessionExpiresAt, this.stale = false});
+    this.pending, this.profile, this.refreshedAt, this.sessionExpiresAt, this.stale = false,
+    this.recoveryAvailable = false});
   final FlowAccountState state;
   final bool busy;
   final String? errorCode;
@@ -118,17 +119,19 @@ class FlowAccountStatus {
   final int? refreshedAt;
   final int? sessionExpiresAt;
   final bool stale;
+  final bool recoveryAvailable;
 
   factory FlowAccountStatus.fromPlatform(Object? value) {
     final map = _accountMap(value, {'state', 'busy', 'errorCode', 'pending', 'profile',
-      'refreshedAt', 'sessionExpiresAt', 'stale'});
+      'refreshedAt', 'sessionExpiresAt', 'stale', 'recoveryAvailable'});
     final state = switch (map['state']) {
       'signed_out' => FlowAccountState.signedOut,
       'pending' => FlowAccountState.pending,
       'connected' => FlowAccountState.connected,
       _ => throw const FormatException('Invalid account state'),
     };
-    if (map['busy'] is! bool || map['stale'] is! bool) {
+    if (map['busy'] is! bool || map['stale'] is! bool ||
+        (map.containsKey('recoveryAvailable') && map['recoveryAvailable'] is! bool)) {
       throw const FormatException('Invalid account flags');
     }
     final errorCode = map['errorCode'];
@@ -140,15 +143,18 @@ class FlowAccountStatus {
     final profile = map['profile'] == null ? null : FlowAccountProfile.fromPlatform(map['profile']);
     final refreshedAt = _accountTime(map['refreshedAt']);
     final sessionExpiresAt = _accountTime(map['sessionExpiresAt']);
+    final recoveryAvailable = map['recoveryAvailable'] == true;
     if ((state == FlowAccountState.pending) != (pending != null) ||
         (state != FlowAccountState.connected && (profile != null || sessionExpiresAt != null || refreshedAt != null)) ||
         (state == FlowAccountState.connected && sessionExpiresAt == null) ||
-        (profile != null && refreshedAt == null)) {
+        (profile != null && refreshedAt == null) ||
+        (recoveryAvailable && state != FlowAccountState.signedOut)) {
       throw const FormatException('Contradictory account metadata');
     }
     return FlowAccountStatus(state: state, busy: map['busy']! as bool,
       errorCode: errorCode as String?, pending: pending, profile: profile,
-      refreshedAt: refreshedAt, sessionExpiresAt: sessionExpiresAt, stale: map['stale']! as bool);
+      refreshedAt: refreshedAt, sessionExpiresAt: sessionExpiresAt, stale: map['stale']! as bool,
+      recoveryAvailable: recoveryAvailable);
   }
 
   @override
@@ -172,6 +178,7 @@ class FlowAccount {
       _status('cancelLogin', arguments: {'userCode': userCode});
   Future<FlowAccountStatus> refresh() => _status('refresh');
   Future<FlowAccountStatus> logout() => _status('logout');
+  Future<FlowAccountStatus> recoverLocalAccount() => _status('recoverLocalAccount');
   Future<void> openLogin() async {
     if (!isAndroid) throw MissingPluginException();
     await _channel.invokeMethod<void>('openLogin');
@@ -196,7 +203,10 @@ String flowAccountErrorMessage(Object error) {
       'Не удалось открыть Telegram или браузер. Повторите открытие подтверждения.',
     'FLOW_LOGOUT_REMOTE_FAILED' =>
       'На этом устройстве вход завершён. Сервер не подтвердил отзыв сессии; она истечёт автоматически.',
-    'FLOW_STORE_UNAVAILABLE' => 'Не удалось защитить данные аккаунта. Перезапустите приложение.',
+    'FLOW_STORE_UNAVAILABLE' =>
+      'Локальное хранилище аккаунта недоступно. Восстановите вход и затем войдите через Telegram снова.',
+    'FLOW_RECOVERY_NOT_REQUIRED' =>
+      'Состояние аккаунта изменилось. Восстановление больше не требуется.',
     'FLOW_INTERRUPTED' =>
       'Состояние входа изменилось. Проверьте текущий аккаунт и повторите действие при необходимости.',
     'FLOW_BUSY' => 'Дождитесь завершения текущего действия с аккаунтом.',

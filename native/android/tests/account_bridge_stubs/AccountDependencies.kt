@@ -5,9 +5,28 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** The bridge test uses actual coordinator/manager/policy, with no Android key or network access. */
 internal class FlowAccountStore(context: Context) : FlowAccountPersistence {
-    override fun load() = FlowAccountPolicy.restore(FlowAccountPolicy.record(value))
-    override fun save(value: FlowAccountRecord) { Companion.value = FlowAccountPolicy.restore(FlowAccountPolicy.record(value)) }
-    companion object { @Volatile var value = FlowAccountRecord() }
+    override fun load(): FlowAccountRecord {
+        if (rejectLoad) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
+        return FlowAccountPolicy.restore(FlowAccountPolicy.record(value))
+    }
+    override fun save(value: FlowAccountRecord) {
+        if (rejectSave) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
+        Companion.value = FlowAccountPolicy.restore(FlowAccountPolicy.record(value))
+    }
+    override fun recoverLocalAccount() {
+        recoveryCalls++
+        if (rejectRecovery) throw FlowAccountFailure("FLOW_STORE_UNAVAILABLE")
+        value = FlowAccountRecord()
+        rejectLoad = false
+        rejectSave = false
+    }
+    companion object {
+        @Volatile var value = FlowAccountRecord()
+        @Volatile var rejectLoad = false
+        @Volatile var rejectSave = false
+        @Volatile var rejectRecovery = false
+        @Volatile var recoveryCalls = 0
+    }
 }
 
 internal class FlowAccountCall(private val current: () -> Boolean) {

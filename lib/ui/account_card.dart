@@ -6,7 +6,7 @@ import '../design/pushok_theme.dart';
 import '../platform/account.dart';
 import '../platform/subscriptions.dart';
 
-enum _LocalAccountClear { cancelLogin, logout }
+enum _LocalAccountClear { cancelLogin, logout, recoverAccount }
 
 class PushokAccountCard extends StatefulWidget {
   const PushokAccountCard({super.key, required this.isAndroid, this.account,
@@ -27,6 +27,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   String? _error;
   bool _busy = false;
   bool _foreground = true;
+  bool _recoveryDialogOpen = false;
   _LocalAccountClear? _clearingAccount;
   String? _cancellingUserCode;
   int _epoch = 0;
@@ -144,7 +145,14 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         // uncertain; it must not be presented as a completed logout.
         if (_clearingAccount != null && !status.busy &&
             status.state == FlowAccountState.signedOut &&
-            status.errorCode != 'FLOW_STORE_UNAVAILABLE') {
+            !status.recoveryAvailable && status.errorCode != 'FLOW_STORE_UNAVAILABLE') {
+          _clearingAccount = null;
+          _cancellingUserCode = null;
+        } else if (_clearingAccount == _LocalAccountClear.recoverAccount &&
+            !status.recoveryAvailable &&
+            (!status.busy || status.errorCode == 'FLOW_RECOVERY_NOT_REQUIRED')) {
+          // A newer healthy login can reject an old recovery request, even
+          // while its own network operation is still busy. Keep that login.
           _clearingAccount = null;
           _cancellingUserCode = null;
         } else if (clearing == _LocalAccountClear.cancelLogin &&
@@ -180,9 +188,40 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   Future<void> _clearAccount(_LocalAccountClear clearing, {String? userCode}) async {
     final cancelCode = userCode ?? _cancellingUserCode;
     if (clearing == _LocalAccountClear.cancelLogin && cancelCode == null) return;
-    await _run(clearing == _LocalAccountClear.logout
-      ? _account.logout : () => _account.cancelLogin(cancelCode!),
+    await _run(switch (clearing) {
+      _LocalAccountClear.logout => _account.logout,
+      _LocalAccountClear.recoverAccount => _account.recoverLocalAccount,
+      _LocalAccountClear.cancelLogin => () => _account.cancelLogin(cancelCode!),
+    },
       clearing: clearing, cancellingUserCode: cancelCode);
+  }
+
+  Future<void> _confirmRecovery() async {
+    if (!mounted || !_foreground || _busy || _recoveryDialogOpen ||
+        !(_status?.recoveryAvailable ?? false)) return;
+    final epoch = _epoch;
+    setState(() => _recoveryDialogOpen = true);
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Восстановить вход?'),
+      content: const SingleChildScrollView(child: Text(
+        'Flow удалит сохранённый вход в аккаунт на этом устройстве. '
+        'После восстановления нужно будет снова войти через Telegram.\n\n'
+        'Аккаунт и баланс в кабинете MTProxy, добавленные серверы и подписки сохранятся.'
+      )),
+      actions: [
+        TextButton(key: const Key('cancel_account_recovery'),
+          onPressed: () => Navigator.of(context).pop(false), child: const Text('Отмена')),
+        FilledButton(key: const Key('confirm_account_recovery'),
+          onPressed: () => Navigator.of(context).pop(true), child: const Text('Восстановить вход')),
+      ],
+    ));
+    if (!mounted) return;
+    setState(() => _recoveryDialogOpen = false);
+    // Returning from another app refreshes native state. A dialog opened for
+    // an older snapshot cannot authorize clearing that refreshed account.
+    if (confirmed != true || !_foreground || epoch != _epoch ||
+        !(_status?.recoveryAvailable ?? false)) return;
+    await _clearAccount(_LocalAccountClear.recoverAccount);
   }
 
   void _help() {
@@ -248,8 +287,9 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     final stale = (status?.stale ?? false) || (connected &&
       _nowMs - (status?.refreshedAt ?? 0) >= 5 * 60000);
     final clearing = _clearingAccount;
+    final recoveryAvailable = status?.recoveryAvailable ?? false;
     final enabled = widget.isAndroid && _foreground && !_busy &&
-        clearing == null && !(status?.busy ?? false);
+        !_recoveryDialogOpen && clearing == null && !(status?.busy ?? false);
     // Cancellation/logout supersede reads and polling in the native authority.
     // Only another local-clear request remains blocked until its own reply.
     final canClear = widget.isAndroid && _foreground && !(_busy && clearing != null);
@@ -268,15 +308,27 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       if (!widget.isAndroid)
         const Text('Вход доступен в приложении для Android.', style: TextStyle(color: PushokPalette.muted))
       else if (clearing != null) ...[
-        Text(_busy
-          ? clearing == _LocalAccountClear.logout ? 'Выходим из аккаунта…' : 'Отменяем вход…'
-          : clearing == _LocalAccountClear.logout ? 'Выход ещё не подтверждён.' : 'Отмена входа ещё не подтверждена.',
+        Text(switch ((clearing, _busy)) {
+          (_LocalAccountClear.logout, true) => 'Выходим из аккаунта…',
+          (_LocalAccountClear.logout, false) => 'Выход ещё не подтверждён.',
+          (_LocalAccountClear.cancelLogin, true) => 'Отменяем вход…',
+          (_LocalAccountClear.cancelLogin, false) => 'Отмена входа ещё не подтверждена.',
+          (_LocalAccountClear.recoverAccount, true) => 'Восстанавливаем вход…',
+          (_LocalAccountClear.recoverAccount, false) => 'Восстановление ещё не подтверждено.',
+        },
           key: const Key('flow_account_clearing'), style: const TextStyle(color: PushokPalette.muted)),
-        if (!_busy) TextButton(
+        if (!_busy && (!recoveryAvailable || clearing == _LocalAccountClear.recoverAccount)) TextButton(
           key: const Key('retry_flow_account_clear'),
           onPressed: canClear ? () => unawaited(_clearAccount(clearing)) : null,
-          child: Text(clearing == _LocalAccountClear.logout ? 'Повторить выход' : 'Повторить отмену')),
+          child: Text(switch (clearing) {
+            _LocalAccountClear.logout => 'Повторить выход',
+            _LocalAccountClear.cancelLogin => 'Повторить отмену',
+            _LocalAccountClear.recoverAccount => 'Повторить восстановление',
+          })),
       ]
+      else if (recoveryAvailable)
+        const Text('Чтобы снова подключить аккаунт MTProxy, восстановите вход на этом устройстве.',
+          key: Key('flow_account_recovery_needed'), style: TextStyle(color: PushokPalette.muted))
       else if (status == null && _busy)
         const Padding(padding: EdgeInsets.symmetric(vertical: 12),
           child: Center(child: CircularProgressIndicator()))
@@ -321,6 +373,13 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         FilledButton.icon(key: const Key('begin_flow_login'),
           onPressed: enabled && status != null ? () => unawaited(_run(_account.beginLogin)) : null,
           icon: const Icon(Icons.login), label: const Text('Войти через Telegram')),
+      ],
+      if (recoveryAvailable && clearing != _LocalAccountClear.recoverAccount) ...[
+        const SizedBox(height: 12),
+        FilledButton.icon(key: const Key('recover_flow_account'),
+          onPressed: _foreground && !_busy && !_recoveryDialogOpen && !(status?.busy ?? false)
+            ? () => unawaited(_confirmRecovery()) : null,
+          icon: const Icon(Icons.restart_alt), label: const Text('Восстановить вход')),
       ],
       if (_busy && status != null) const Padding(padding: EdgeInsets.only(top: 8),
         child: LinearProgressIndicator(minHeight: 2)),
