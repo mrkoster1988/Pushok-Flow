@@ -47,11 +47,13 @@ fun checkRecommendationAutomation() {
     val session = RecommendationAutomationSession()
     val first = RecommendationAutomationStore(memory, session)
 
-    // Status and consent changes have no refresh side effects; default and persisted opt-out hold.
+    // Fresh installs check automatically; an explicit persisted opt-out wins.
     first.restore(guard)
-    check(!first.snapshot().enabled && memory.writes == 0)
+    check(first.snapshot().enabled && memory.writes == 0)
+    first.setEnabled(false)
+    check(!first.snapshot().enabled && memory.writes == 1)
     check(!first.reserve(start, automatic = true, guard))
-    check(memory.writes == 0)
+    check(memory.writes == 1)
     first.setEnabled(true)
     check(first.snapshot().enabled && first.snapshot().attemptedAtMillis == null)
     check(memory.disk!!.size == RecommendationAutomationStore.STORAGE_BYTES)
@@ -105,7 +107,7 @@ fun checkRecommendationAutomation() {
         val damagedStore = RecommendationAutomationStore(damaged, RecommendationAutomationSession())
         automationRejected("RECOMMENDATIONS_STORAGE_ERROR") { damagedStore.reserve(start, true, guard) }
         check(damagedStore.reserve(start, false, guard))
-        check(!damagedStore.snapshot().enabled && damaged.writes == 0)
+        check(damagedStore.snapshot().enabled && damaged.writes == 0)
         // Explicit consent changes repair even an oversized-record error from the bounded adapter.
         damagedStore.setEnabled(true)
         check(damagedStore.snapshot().enabled && damaged.writes == 1)

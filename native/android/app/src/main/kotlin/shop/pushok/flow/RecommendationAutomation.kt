@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Local scheduling metadata is separate from the signed catalogue and never authorizes routes. */
 data class RecommendationAutomationSettings(
-    val enabled: Boolean = false,
+    val enabled: Boolean = true,
     val attemptedAtMillis: Long? = null,
     val succeededAtMillis: Long? = null,
 )

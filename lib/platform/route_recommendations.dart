@@ -48,7 +48,7 @@ class RecommendationStatus {
         packages = const {},
         checkedAtMillis = null,
         busy = false,
-        autoUpdateEnabled = false,
+        autoUpdateEnabled = true,
         errorCode = null;
 
   final int rulesVersion;

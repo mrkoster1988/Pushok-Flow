@@ -75,7 +75,7 @@ void main() {
     expect(empty.rulesVersion, 0);
     expect(empty.packages, isEmpty);
     expect(empty.autoUpdateEnabled, isFalse);
-    expect(const RecommendationStatus.empty().autoUpdateEnabled, isFalse);
+    expect(const RecommendationStatus.empty().autoUpdateEnabled, isTrue);
     final withdrawn = RecommendationStatus.fromPlatform(_status(version: 2, packages: []));
     expect(withdrawn.rulesVersion, 2);
     expect(withdrawn.packages, isEmpty);
