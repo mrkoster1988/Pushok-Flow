@@ -60,8 +60,33 @@
 объявляет сервер подписки неисправным и не подтверждает получение его списка.
 
 <!-- verified-v0.52.0-release:begin -->
-Полный прогон и сборка Android выполняются перед публикацией. Здесь будут
-зафиксированы фактические результаты CI, подписи и публичной загрузки.
+**v0.52.0 опубликована 23.11.2026 в 12:29:58 МСК.** [Скачать универсальный APK](https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.52.0/Pushok-Flow-v0.52.0.apk) · [Страница выпуска](https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.52.0) · [Workflow публикации](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45147489538).
+
+Локальный общий прогон и полный CI точного исходного коммита подтвердили **269 тестов Python, 380 тестов Flutter и 34 исполняемых набора Kotlin**. В журнале Kotlin — **35 сообщений об успешных проверках**: один исполняемый набор может сообщать о нескольких группах. Анализатор Flutter не обнаружил замечаний.
+
+### Проверенный APK и CI
+
+Исходный коммит: `e65867680a3d8e3245f146d3a14fee5e7f1a8446`. [Source checks](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45145324135) и [Android candidate](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45145324131) — success. [Workflow публикации](https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45147489538) завершился со всеми 19 успешными шагами.
+
+| Поле | Значение |
+|---|---|
+| Файл | [Pushok-Flow-v0.52.0.apk](https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.52.0/Pushok-Flow-v0.52.0.apk) |
+| Версия | `0.52.0+52` |
+| Пакет | `shop.pushok.flow` |
+| Android | 7.0 и новее; minSdk 24 |
+| Размер | 66936882 байт |
+| SHA-256 | `d4b7a0b98bdb72711e21519e4f757c87319e6d00b83cff5427fa0e991988815e` |
+| Сертификат SHA-256 | `8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047` |
+
+Проверены постоянная подпись, пакет и версия, три ABI, нативные библиотеки, выравнивание 16 КиБ и манифест Android. Опубликованы ровно один универсальный APK, его [SHA-256](https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.52.0/Pushok-Flow-v0.52.0.apk.sha256) и [update.json](https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.52.0/update.json) схемы 1.
+
+### Публичное обновление
+
+Независимая проверка с 23.11.2026 в 12:30:27 МСК по 23.11.2026 в 12:30:42 МСК подтвердила HTTP 200 для последнего выпуска, обоих путей манифеста, полного APK и checksum — **5 из 5**. Манифесты совпали побайтно, APK полностью скачан без авторизации и cookies; размер и SHA-256 совпали с подписанным файлом. Тег указывает на проверенный исходный коммит.
+
+[Проверка перед публикацией](release-checks/v0.52.0-prepublication-check.json) · [Доказательства публикации](release-checks/v0.52.0-publication-evidence.json) · [Публичная проверка](release-checks/v0.52.0-public-check.json).
+
+Приёмка на физическом Android ещё не выполнена; её отдельный объём указан ниже.
 <!-- verified-v0.52.0-release:end -->
 
 ## Проверка на телефоне
