@@ -1,0 +1,138 @@
+{
+  "checks": {
+    "apkStream": {
+      "assetName": "Pushok-Flow-v0.49.0.apk",
+      "authentication": "none",
+      "bytesComplete": true,
+      "elapsedSeconds": 12.988,
+      "expectedSha256": "607d52b699bdc668560029da3d7e1517a2e080b6cce069fa3818631f9d712401",
+      "expectedSizeBytes": 66928690,
+      "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/f9cd8fc9-6217-49ea-b1ea-28207a68884d",
+      "finishedAt": "2026-11-23T06:14:41.626662+00:00",
+      "freshOpener": true,
+      "httpStatus": 200,
+      "name": "apkStream",
+      "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/Pushok-Flow-v0.49.0.apk",
+      "sha256": "607d52b699bdc668560029da3d7e1517a2e080b6cce069fa3818631f9d712401",
+      "sizeBytes": 66928690,
+      "startedAt": "2026-11-23T06:14:28.638561+00:00",
+      "status": "passed"
+    },
+    "checksumStream": {
+      "assetName": "Pushok-Flow-v0.49.0.apk.sha256",
+      "authentication": "none",
+      "bytesComplete": true,
+      "elapsedSeconds": 8.373,
+      "expectedSha256": "e6333317b0d89ca1756fd6c483ea2a95c95f8e638d701b89e720c29e5bf02a11",
+      "expectedSizeBytes": 90,
+      "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/a243b569-4061-46d8-a30e-4b9a6bf021d9",
+      "finishedAt": "2026-11-23T06:14:37.012197+00:00",
+      "freshOpener": true,
+      "httpStatus": 200,
+      "name": "checksumStream",
+      "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/Pushok-Flow-v0.49.0.apk.sha256",
+      "sha256": "e6333317b0d89ca1756fd6c483ea2a95c95f8e638d701b89e720c29e5bf02a11",
+      "sizeBytes": 90,
+      "startedAt": "2026-11-23T06:14:28.639360+00:00",
+      "status": "passed"
+    },
+    "classicManifest": {
+      "authentication": "none",
+      "bytesComplete": true,
+      "elapsedSeconds": 8.77,
+      "exactBytesMatched": true,
+      "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/7ca92809-0864-43ab-a1bd-8a34f008a198",
+      "finishedAt": "2026-11-23T06:14:37.406256+00:00",
+      "freshOpener": true,
+      "httpStatus": 200,
+      "name": "classicManifest",
+      "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+      "sha256": "13cdc4000c90216ef73ef128879d38c8c73c59254512d3378e5183d288c57807",
+      "sizeBytes": 431,
+      "startedAt": "2026-11-23T06:14:28.636576+00:00",
+      "status": "passed"
+    },
+    "latestRelease": {
+      "authentication": "none",
+      "bytesComplete": true,
+      "elapsedSeconds": 3.514,
+      "exactAssetCount": 3,
+      "finalUrl": "https://api.github.com/repos/mrkoster1988/Pushok-Flow/releases/latest",
+      "finishedAt": "2026-11-23T06:14:32.149732+00:00",
+      "freshOpener": true,
+      "httpStatus": 200,
+      "name": "latestRelease",
+      "observedTag": "v0.49.0",
+      "publishedAt": "2026-11-23T06:11:48Z",
+      "releaseId": 455050513,
+      "releaseNotesMatched": true,
+      "releaseNotesSha256": "fa053c8f8f7e71a938b2d1780654e4969b9bdae5a00777b72f0252c993f6c8f6",
+      "requestUrl": "https://api.github.com/repos/mrkoster1988/Pushok-Flow/releases/latest",
+      "sha256": "86c4a1b89f4e01a727e9737e471ae9a8e2067e6019aa19fd4360e578f10e0e90",
+      "sizeBytes": 10412,
+      "startedAt": "2026-11-23T06:14:28.635690+00:00",
+      "status": "passed",
+      "verifiedAssets": {
+        "Pushok-Flow-v0.49.0.apk": {
+          "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/Pushok-Flow-v0.49.0.apk",
+          "digest": "sha256:607d52b699bdc668560029da3d7e1517a2e080b6cce069fa3818631f9d712401",
+          "size": 66928690
+        },
+        "Pushok-Flow-v0.49.0.apk.sha256": {
+          "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/Pushok-Flow-v0.49.0.apk.sha256",
+          "digest": "sha256:e6333317b0d89ca1756fd6c483ea2a95c95f8e638d701b89e720c29e5bf02a11",
+          "size": 90
+        },
+        "update.json": {
+          "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/update.json",
+          "digest": "sha256:13cdc4000c90216ef73ef128879d38c8c73c59254512d3378e5183d288c57807",
+          "size": 431
+        }
+      }
+    },
+    "pinnedManifest": {
+      "authentication": "none",
+      "bytesComplete": true,
+      "elapsedSeconds": 8.871,
+      "exactBytesMatched": true,
+      "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/7ca92809-0864-43ab-a1bd-8a34f008a198",
+      "finishedAt": "2026-11-23T06:14:37.508512+00:00",
+      "freshOpener": true,
+      "httpStatus": 200,
+      "name": "pinnedManifest",
+      "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/update.json",
+      "sha256": "13cdc4000c90216ef73ef128879d38c8c73c59254512d3378e5183d288c57807",
+      "sizeBytes": 431,
+      "startedAt": "2026-11-23T06:14:28.637882+00:00",
+      "status": "passed"
+    }
+  },
+  "elapsedSeconds": 13.08,
+  "expectedAssets": {
+    "Pushok-Flow-v0.49.0.apk": {
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/Pushok-Flow-v0.49.0.apk",
+      "digest": "sha256:607d52b699bdc668560029da3d7e1517a2e080b6cce069fa3818631f9d712401",
+      "size": 66928690
+    },
+    "Pushok-Flow-v0.49.0.apk.sha256": {
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/Pushok-Flow-v0.49.0.apk.sha256",
+      "digest": "sha256:e6333317b0d89ca1756fd6c483ea2a95c95f8e638d701b89e720c29e5bf02a11",
+      "size": 90
+    },
+    "update.json": {
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.49.0/update.json",
+      "digest": "sha256:13cdc4000c90216ef73ef128879d38c8c73c59254512d3378e5183d288c57807",
+      "size": 431
+    }
+  },
+  "finishedAt": "2026-11-23T06:14:41.627551+00:00",
+  "repository": "mrkoster1988/Pushok-Flow",
+  "schemaVersion": 1,
+  "sourceChecksRunId": 45120964357,
+  "sourceCommit": "8fe3dae2ad898ad6dc60e1086c373bdf7e6689e0",
+  "sourceRunId": 45120964288,
+  "stagingSha256": "6e01a6a9221f5b4f916e3ba3fa17c031fa33765fe222c81e34a96c5c9bca37cc",
+  "startedAt": "2026-11-23T06:14:28.547182+00:00",
+  "status": "passed",
+  "version": "0.49.0"
+}
