@@ -1,0 +1,605 @@
+{
+  "schemaVersion": 1,
+  "verifiedAtUtc": "2026-11-23T14:26:13.725681+00:00",
+  "runId": 45193567719,
+  "url": "https://github.com/mrkoster1988/Pushok-Flow/actions/runs/45193567719",
+  "status": "completed",
+  "conclusion": "success",
+  "headSha": "c6a6e28f2216d2bc4b1f85466c47417f56a97c6f",
+  "sourceCommit": "b437d28aebb5f780654ed01cc4e31ac90b354b11",
+  "tagTarget": "b437d28aebb5f780654ed01cc4e31ac90b354b11",
+  "workflowPath": ".github/workflows/publish-public-release.yml",
+  "runAttempt": 1,
+  "createdAtUtc": "2026-11-23T14:22:48Z",
+  "updatedAtUtc": "2026-11-23T14:25:15Z",
+  "jobId": 137757957039,
+  "allStepsSuccessful": true,
+  "steps": [
+    {
+      "name": "Set up job",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 1,
+      "started_at": "2026-11-23T14:22:53Z",
+      "completed_at": "2026-11-23T14:22:54Z"
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 2,
+      "started_at": "2026-11-23T14:22:54Z",
+      "completed_at": "2026-11-23T14:22:55Z"
+    },
+    {
+      "name": "Run actions/setup-python@v5",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 3,
+      "started_at": "2026-11-23T14:22:55Z",
+      "completed_at": "2026-11-23T14:22:56Z"
+    },
+    {
+      "name": "Validate tracked staging, successful CI and current public channel",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 4,
+      "started_at": "2026-11-23T14:22:56Z",
+      "completed_at": "2026-11-23T14:22:59Z"
+    },
+    {
+      "name": "Check out the exact tested application source",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 5,
+      "started_at": "2026-11-23T14:22:59Z",
+      "completed_at": "2026-11-23T14:23:00Z"
+    },
+    {
+      "name": "Run actions/setup-java@v4",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 6,
+      "started_at": "2026-11-23T14:23:00Z",
+      "completed_at": "2026-11-23T14:23:00Z"
+    },
+    {
+      "name": "Download and restore the exact locally signed public APKs",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 7,
+      "started_at": "2026-11-23T14:23:00Z",
+      "completed_at": "2026-11-23T14:23:03Z"
+    },
+    {
+      "name": "Verify signature, exact package and all update assets",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 8,
+      "started_at": "2026-11-23T14:23:03Z",
+      "completed_at": "2026-11-23T14:23:05Z"
+    },
+    {
+      "name": "Preserve verified public files",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 9,
+      "started_at": "2026-11-23T14:23:05Z",
+      "completed_at": "2026-11-23T14:23:09Z"
+    },
+    {
+      "name": "Create a new draft, verify uploaded assets and publish latest",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 10,
+      "started_at": "2026-11-23T14:23:09Z",
+      "completed_at": "2026-11-23T14:23:22Z"
+    },
+    {
+      "name": "Verify the public updater endpoint without credentials",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 11,
+      "started_at": "2026-11-23T14:23:22Z",
+      "completed_at": "2026-11-23T14:25:05Z"
+    },
+    {
+      "name": "Verify public release discovery and the version-specific manifest",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 12,
+      "started_at": "2026-11-23T14:25:05Z",
+      "completed_at": "2026-11-23T14:25:06Z"
+    },
+    {
+      "name": "Verify every public APK and checksum without credentials",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 13,
+      "started_at": "2026-11-23T14:25:06Z",
+      "completed_at": "2026-11-23T14:25:09Z"
+    },
+    {
+      "name": "Preserve publication diagnostics",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 14,
+      "started_at": "2026-11-23T14:25:09Z",
+      "completed_at": "2026-11-23T14:25:10Z"
+    },
+    {
+      "name": "Post Run actions/setup-java@v4",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 25,
+      "started_at": "2026-11-23T14:25:10Z",
+      "completed_at": "2026-11-23T14:25:10Z"
+    },
+    {
+      "name": "Post Check out the exact tested application source",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 26,
+      "started_at": "2026-11-23T14:25:10Z",
+      "completed_at": "2026-11-23T14:25:10Z"
+    },
+    {
+      "name": "Post Run actions/setup-python@v5",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 27,
+      "started_at": "2026-11-23T14:25:10Z",
+      "completed_at": "2026-11-23T14:25:11Z"
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 28,
+      "started_at": "2026-11-23T14:25:11Z",
+      "completed_at": "2026-11-23T14:25:11Z"
+    },
+    {
+      "name": "Complete job",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 29,
+      "started_at": "2026-11-23T14:25:11Z",
+      "completed_at": "2026-11-23T14:25:11Z"
+    }
+  ],
+  "release": {
+    "id": 455530916,
+    "tag_name": "v0.56.0",
+    "html_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/tag/v0.56.0",
+    "target_commitish": "b437d28aebb5f780654ed01cc4e31ac90b354b11",
+    "published_at": "2026-11-23T14:23:22Z",
+    "draft": false,
+    "prerelease": false
+  },
+  "assets": [
+    {
+      "id": 783241448,
+      "name": "Pushok-Flow-v0.56.0.apk",
+      "size": 66998322,
+      "digest": "sha256:844d6cc97ee04a6d584eecf27f09ae1bf2fd3c0f649870f0609587f087059ad2",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.56.0/Pushok-Flow-v0.56.0.apk"
+    },
+    {
+      "id": 783241866,
+      "name": "Pushok-Flow-v0.56.0.apk.sha256",
+      "size": 90,
+      "digest": "sha256:d5c40fde25432f4bf90c6fd4884f6453225a1eaf1e28c055bad2ebc905444074",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.56.0/Pushok-Flow-v0.56.0.apk.sha256"
+    },
+    {
+      "id": 783241911,
+      "name": "update.json",
+      "size": 431,
+      "digest": "sha256:66226bbb34fff7e3726b1b0dc362f35b364e684124830a3fbd468ae8b6c862f1",
+      "browser_download_url": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.56.0/update.json"
+    }
+  ],
+  "evidenceSha256": {
+    "publication-run.json": "224cd0695903aa0b2e6f334f83126f09a235a72121633b2edf4944feb612655c",
+    "publication-jobs.json": "6cdebbc48d8350e454f5b72ced7229a0d15af8bb7e55e54157461b3afb17f3d5",
+    "publication-job.log": "359f8d91be41f99bb97463343dcd418b8d17b485cb208c9bb77f87b7fb3e2302",
+    "publication-artifacts.json": "e962b6010b7f7e4bb04fd267356bb1a47b5d467f6771393fdc49ed1d4cdd87a7",
+    "publication-approved-staging.json": "a672d3851fc4fafa96e643f24d8b9571d6d64f108add20eb7a0ee9fe8492be9b",
+    "publication-release.json": "835020fb8ef97bd5628bd55a086fb0bb927b3b2fb770468b0342d7c5d9b15a13",
+    "publication-tag.json": "0ae7b5ad7919df82461a6a7c265110935180601199f44c02822ac6c03cf4f680"
+  },
+  "logMarkersVerified": [
+    "Both CI runs, source artifact and previous public update channel confirmed.",
+    "Restored verified public APK Pushok-Flow-v0.56.0.apk: 66998322 bytes; SHA256 844d6cc97ee04a6d584eecf27f09ae1bf2fd3c0f649870f0609587f087059ad2",
+    "Release package, version, minSdk and non-debuggable state verified.",
+    "APK signature verified; certificate SHA-256: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047",
+    "APK SHA-256: 844d6cc97ee04a6d584eecf27f09ae1bf2fd3c0f649870f0609587f087059ad2",
+    "APK isolated Xray service, required native ABIs, ELF 16 KiB pages and licenses verified",
+    "APK compressed native libraries, exact expected ABIs and extraction flag verified",
+    "Staged Pushok Flow 0.56.0 (56) and update.json",
+    "Public latest/download/update.json exactly matches the verified release, without credentials.",
+    "Public release discovery and pinned update.json exactly match the verified release, without credentials.",
+    "All 2 public APK/checksum assets exactly match the verified release, without credentials."
+  ],
+  "ciPublicObservations": {
+    "Public updater": [
+      {
+        "attempt": 1,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:22.893889+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "25",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 2,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:28.029596+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "17",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 3,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:33.155618+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "35",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 4,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:38.279121+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "27",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 5,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:43.400411+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "32",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 6,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:48.538105+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "37",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 7,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:53.661875+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "56",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 8,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:23:58.795955+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "61",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 9,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:03.920488+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "66",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 10,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:09.069035+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "58",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 11,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:14.190253+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "76",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 12,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:19.314321+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "82",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 13,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:24.440380+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "87",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 14,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:29.590721+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "78",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 15,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:34.716265+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "84",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 16,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:39.838340+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "102",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 17,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:44.971743+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "94",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 18,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:50.091068+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "99",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 19,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:24:55.224076+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "104",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 20,
+        "matches": false,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:25:00.342396+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/09f51ce9-6bef-45cb-8acc-4c3916d19026",
+        "sizeBytes": 431,
+        "sha256": "94d8f20513f3084684ef8e6ec37d1a0a46d792487fb482e18f03cb009e484b55",
+        "cacheControl": "",
+        "age": "110",
+        "observedVersion": "0.55.0",
+        "observedBuild": 55,
+        "failure": "MANIFEST_MISMATCH"
+      },
+      {
+        "attempt": 21,
+        "matches": true,
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/latest/download/update.json",
+        "requestedAt": "2026-11-23T14:25:05.479783+00:00",
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/2a0f399b-41b0-4a4a-8ee5-223afe3c6334",
+        "sizeBytes": 431,
+        "sha256": "66226bbb34fff7e3726b1b0dc362f35b364e684124830a3fbd468ae8b6c862f1",
+        "cacheControl": "",
+        "age": "0",
+        "observedVersion": "0.56.0",
+        "observedBuild": 56
+      }
+    ],
+    "Update discovery": [
+      {
+        "attempt": 1,
+        "release": {
+          "requestUrl": "https://api.github.com/repos/mrkoster1988/Pushok-Flow/releases/latest",
+          "requestedAt": "2026-11-23T14:25:05.925243+00:00",
+          "httpStatus": 200,
+          "sizeBytes": 10158,
+          "sha256": "8daa744e86c6c0152ee6ad0a7190e3b0f616b8d7a2264f5fc46dd6deef34665a",
+          "age": "",
+          "observedTag": "v0.56.0"
+        },
+        "manifest": {
+          "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.56.0/update.json",
+          "requestedAt": "2026-11-23T14:25:06.112553+00:00",
+          "httpStatus": 200,
+          "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/2a0f399b-41b0-4a4a-8ee5-223afe3c6334",
+          "sizeBytes": 431,
+          "sha256": "66226bbb34fff7e3726b1b0dc362f35b364e684124830a3fbd468ae8b6c862f1",
+          "cacheControl": "",
+          "age": "0",
+          "observedVersion": "0.56.0",
+          "observedBuild": 56
+        },
+        "matches": true
+      }
+    ],
+    "Public asset": [
+      {
+        "name": "Pushok-Flow-v0.56.0.apk.sha256",
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.56.0/Pushok-Flow-v0.56.0.apk.sha256",
+        "requestedAt": "2026-11-23T14:25:06.461282+00:00",
+        "matches": true,
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/35a56f8d-6da0-4252-aeee-6015e95749c6",
+        "completedAt": "2026-11-23T14:25:06.777824+00:00",
+        "sizeBytes": 90,
+        "sha256": "d5c40fde25432f4bf90c6fd4884f6453225a1eaf1e28c055bad2ebc905444074"
+      },
+      {
+        "name": "Pushok-Flow-v0.56.0.apk",
+        "requestUrl": "https://github.com/mrkoster1988/Pushok-Flow/releases/download/v0.56.0/Pushok-Flow-v0.56.0.apk",
+        "requestedAt": "2026-11-23T14:25:06.460286+00:00",
+        "matches": true,
+        "httpStatus": 200,
+        "finalUrl": "https://release-assets.githubusercontent.com/github-production-release-asset/1465732364/cdf6c1c6-9fc6-4e46-b755-b63b691780d5",
+        "completedAt": "2026-11-23T14:25:09.102882+00:00",
+        "sizeBytes": 66998322,
+        "sha256": "844d6cc97ee04a6d584eecf27f09ae1bf2fd3c0f649870f0609587f087059ad2"
+      }
+    ]
+  },
+  "latestManifestPropagation": {
+    "attempts": 21,
+    "finalMatches": true
+  },
+  "publicAssetCount": 3,
+  "universalApkCount": 1,
+  "releaseNotes": {
+    "matchesApprovedText": true,
+    "sha256": "ca44b76187f9bea1b92507a64a9ec6f3820c89c0db20789d0e64bde2f7aa732c"
+  },
+  "scope": "Exact-source CI, persistent signing, completed publication and its anonymous checks; independent external GET checks are recorded separately. Physical phone acceptance not performed."
+}
