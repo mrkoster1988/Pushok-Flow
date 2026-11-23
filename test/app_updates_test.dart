@@ -933,15 +933,15 @@ void main() {
 
   testWidgets('Newer release changes appear before download and remain distinct from installed changes', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.53.0', installedBuild: 53,
-      availableVersion: '0.54.0', availableBuild: 54,
-      releaseNotes: _notes(version: '0.54.0', build: 54, changes: ['Будущее изменение.', '<b>Обычный текст без HTML.</b>']));
+      installedVersion: '0.54.0', installedBuild: 54,
+      availableVersion: '0.55.0', availableBuild: 55,
+      releaseNotes: _notes(version: '0.55.0', build: 55, changes: ['Будущее изменение.', '<b>Обычный текст без HTML.</b>']));
     await _withCard(tester, () async {
-      expect(find.text('Изменения в версии 0.54.0'), findsOneWidget);
+      expect(find.text('Изменения в версии 0.55.0'), findsOneWidget);
       expect(find.text('Будущее изменение.'), findsOneWidget);
       expect(find.text('<b>Обычный текст без HTML.</b>'), findsOneWidget);
       expect(find.text('Опубликовано 23.11.2026'), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.53.0'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.54.0'), findsOneWidget);
       final notes = find.byKey(const Key('available_release_notes'));
       final download = find.byKey(const Key('download_app_update'));
       expect(tester.getBottomLeft(notes).dy, lessThan(tester.getTopLeft(download).dy));
@@ -953,9 +953,9 @@ void main() {
 
   testWidgets('Missing or mismatched notes do not borrow installed changes for a newer version', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.53.0', installedBuild: 53,
+      installedVersion: '0.54.0', installedBuild: 54,
       availableVersion: '0.99.0', availableBuild: 99,
-      releaseNotes: _notes(version: '0.53.0', build: 53, changes: ['Неверная версия описания.']));
+      releaseNotes: _notes(version: '0.54.0', build: 54, changes: ['Неверная версия описания.']));
     await _withCard(tester, () async {
       expect(find.byKey(const Key('available_release_notes_missing')), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
@@ -967,11 +967,11 @@ void main() {
 
   testWidgets('Matching bundled notes describe a newer release when older native metadata has no notes', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.53.0', installedBuild: 53,
-      availableVersion: '0.54.0', availableBuild: 54);
+      installedVersion: '0.54.0', installedBuild: 54,
+      availableVersion: '0.55.0', availableBuild: 55);
     await _withCard(tester, () async {
-      expect(find.text('Изменения в версии 0.54.0'), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.53.0'), findsOneWidget);
+      expect(find.text('Изменения в версии 0.55.0'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.54.0'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes_missing')), findsNothing);
     });
   });
@@ -1007,9 +1007,9 @@ void main() {
 
   testWidgets('Long notes and expanded history fit a narrow screen with enlarged text', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
-      installedVersion: '0.53.0', installedBuild: 53,
-      availableVersion: '0.54.0', availableBuild: 54,
-      releaseNotes: _notes(version: '0.54.0', build: 54, changes: ['x' * 600, ...List.filled(7, 'Длинное описание изменения. ' * 17)]));
+      installedVersion: '0.54.0', installedBuild: 54,
+      availableVersion: '0.55.0', availableBuild: 55,
+      releaseNotes: _notes(version: '0.55.0', build: 55, changes: ['x' * 600, ...List.filled(7, 'Длинное описание изменения. ' * 17)]));
     await _withCard(tester, () async {
       expect(find.byKey(const Key('available_release_notes')), findsOneWidget);
       expect(tester.takeException(), isNull);
