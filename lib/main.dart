@@ -475,7 +475,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         _subscriptionsError = status.errorCode == null ? null
             : subscriptionErrorMessage(PlatformException(code: status.errorCode!));
       });
-      if (!automatic && mounted && _foreground && epoch == _subscriptionEpoch) {
+      if (!automatic && status.errorCode == null && status.refreshErrors.isEmpty &&
+          mounted && _foreground && epoch == _subscriptionEpoch) {
         _showNotice('Список серверов обновлён.');
       }
     } catch (error) {
@@ -1245,7 +1246,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.49.0',
+            version: '0.50.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,

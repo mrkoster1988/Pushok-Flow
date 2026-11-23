@@ -28,24 +28,34 @@ class FlowSubscription {
 class SubscriptionStatus {
   const SubscriptionStatus.empty()
       : subscriptions = const [], automaticUpdatesEnabled = true,
-        busy = false, errorCode = null;
+        busy = false, errorCode = null, refreshErrors = const {};
 
   SubscriptionStatus._(List<FlowSubscription> values,
-      this.automaticUpdatesEnabled, this.busy, this.errorCode)
-      : subscriptions = List.unmodifiable(values);
+      this.automaticUpdatesEnabled, this.busy, this.errorCode,
+      Map<String, String> refreshErrors)
+      : subscriptions = List.unmodifiable(values),
+        refreshErrors = Map.unmodifiable(refreshErrors);
 
   static const maxSubscriptions = 5;
+  static const _refreshErrorCodes = {
+    'SUBSCRIPTION_URL_INVALID', 'SUBSCRIPTION_INVALID', 'SUBSCRIPTION_TOO_LARGE',
+    'SUBSCRIPTION_EMPTY', 'SUBSCRIPTION_UNSUPPORTED',
+    'SUBSCRIPTION_NETWORK_ERROR', 'SUBSCRIPTION_AUTH_REQUIRED',
+  };
   static final _id = RegExp(
       r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
   final List<FlowSubscription> subscriptions;
   final bool automaticUpdatesEnabled;
   final bool busy;
   final String? errorCode;
+  /// Last provider failures for current subscriptions; never contains URLs or messages.
+  final Map<String, String> refreshErrors;
 
   factory SubscriptionStatus.fromPlatform(Object? raw) {
     const invalid = FormatException('Invalid subscription status');
     if (raw is! Map || raw.keys.any((key) => !const {
           'subscriptions', 'automaticUpdatesEnabled', 'busy', 'errorCode',
+          'refreshErrors',
         }.contains(key)) ||
         raw['subscriptions'] is! List ||
         raw['automaticUpdatesEnabled'] is! bool) throw invalid;
@@ -87,8 +97,20 @@ class SubscriptionStatus {
         expiresAt: date(entry['expiresAt']), usedBytes: bytes(entry['usedBytes']),
         totalBytes: bytes(entry['totalBytes'])));
     }
+    final errors = <String, String>{};
+    if (raw.containsKey('refreshErrors')) {
+      final failures = raw['refreshErrors'];
+      if (failures is! Map || failures.length > maxSubscriptions) throw invalid;
+      for (final entry in failures.entries) {
+        final id = entry.key;
+        final code = entry.value;
+        if (id is! String || !seen.contains(id) || code is! String ||
+            !_refreshErrorCodes.contains(code)) throw invalid;
+        errors[id] = code;
+      }
+    }
     return SubscriptionStatus._(subscriptions, raw['automaticUpdatesEnabled'] as bool,
-      busy, errorCode as String?);
+      busy, errorCode as String?, errors);
   }
 }
 

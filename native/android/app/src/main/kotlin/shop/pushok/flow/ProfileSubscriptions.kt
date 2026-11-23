@@ -37,6 +37,12 @@ class ProfileSubscriptions(
     @Volatile private var automatic = false
     @Volatile private var enabled = readEnabled()
     @Volatile private var errorCode: String? = null
+    // Session-only outcomes, protected by lifecycleLock. Identity includes the private URL,
+    // but the public snapshot contains only current IDs and constant error codes.
+    private class RefreshError(val url: String, val code: String) {
+        override fun toString() = "RefreshError(<redacted>)"
+    }
+    private val refreshErrors = mutableMapOf<String, RefreshError>()
 
     companion object {
         private val network = Executors.newSingleThreadExecutor()
@@ -45,6 +51,9 @@ class ProfileSubscriptions(
         private var pendingDraft: SubscriptionLinks.Draft? = null
         private var pendingAt = 0L
         private const val PENDING_LINK_TTL_MS = 10 * 60_000L
+        private val PROVIDER_ERRORS = setOf("SUBSCRIPTION_URL_INVALID", "SUBSCRIPTION_INVALID",
+            "SUBSCRIPTION_TOO_LARGE", "SUBSCRIPTION_EMPTY", "SUBSCRIPTION_UNSUPPORTED",
+            "SUBSCRIPTION_NETWORK_ERROR", "SUBSCRIPTION_AUTH_REQUIRED")
     }
 
     fun register(messenger: BinaryMessenger) {
@@ -94,7 +103,10 @@ class ProfileSubscriptions(
                         val id = (call.arguments as? Map<*, *>)?.get("id") as? String
                         if (id == null || !ProfileCatalogStore.validId(id)) failure(result, "SUBSCRIPTION_NOT_FOUND")
                         else request(result) { operationEpoch ->
-                            guardedWrite(operationEpoch) { store.deleteSubscription(id) }
+                            guardedWrite(operationEpoch) {
+                                store.deleteSubscription(id)
+                                refreshErrors.remove(id)
+                            }
                             settings.edit().remove("attempt_$id").apply()
                         }
                     }
@@ -106,7 +118,7 @@ class ProfileSubscriptions(
                                 val now = System.currentTimeMillis()
                                 val attempt = settings.getLong("attempt_${record.id}", 0L)
                                 if (SubscriptionRefreshPolicy.due(now, record.updatedAt, attempt)) {
-                                    refresh(record, operationEpoch)
+                                    refresh(record, operationEpoch, isolateProviderFailure = true)
                                 }
                             }
                         }
@@ -216,11 +228,21 @@ class ProfileSubscriptions(
     private fun readEnabled(): Boolean = try { settings.getBoolean("enabled", true) }
         catch (_: Exception) { false }
 
-    private fun snapshot(): Map<String, Any?> = store.subscriptions() + mapOf(
-        "automaticUpdatesEnabled" to enabled,
-        "busy" to busy.get(),
-        "errorCode" to errorCode,
-    )
+    private fun snapshot(): Map<String, Any?> {
+        val metadata = store.subscriptions()
+        val records = store.subscriptionRecords()
+        val visibleIds = (metadata["subscriptions"] as List<*>).map { (it as Map<*, *>)["id"] }.toSet()
+        val failures = synchronized(lifecycleLock) {
+            pruneRefreshErrors(records)
+            refreshErrors.filterKeys { it in visibleIds }.mapValues { it.value.code }
+        }
+        return metadata + mapOf(
+            "automaticUpdatesEnabled" to enabled,
+            "busy" to busy.get(),
+            "errorCode" to errorCode,
+            "refreshErrors" to failures,
+        )
+    }
 
     private fun request(result: MethodChannel.Result, isAutomatic: Boolean = false,
         action: (Long) -> Unit) {
@@ -255,18 +277,46 @@ class ProfileSubscriptions(
         }
     }
 
-    private fun refresh(record: StoredSubscription, operationEpoch: Long) {
+    private fun refresh(record: StoredSubscription, operationEpoch: Long,
+        isolateProviderFailure: Boolean = false) {
         // Reserve only after the authoritative tunnel-state check succeeds. An active Flow
         // connection does not consume the retry window or lose its selected configuration.
         guardedWrite(operationEpoch) { }
         if (!settings.edit().putLong("attempt_${record.id}", System.currentTimeMillis()).commit()) {
             throw SubscriptionFailure("SUBSCRIPTION_STORE_FAILED")
         }
-        val response = downloader.fetch(record.url) { ensureActive(operationEpoch) }
-        val feed = try { SubscriptionFeed.parse(response.body, response.userInfo, response.title) }
-            finally { response.body.fill(0) }
+        val feed = try {
+            val response = downloader.fetch(record.url) { ensureActive(operationEpoch) }
+            try { SubscriptionFeed.parse(response.body, response.userInfo, response.title) }
+                finally { response.body.fill(0) }
+        } catch (failure: SubscriptionFailure) {
+            if (failure.code !in PROVIDER_ERRORS) throw failure
+            synchronized(lifecycleLock) {
+                // OFF, pause and disposal dominate a concurrent provider error. Never
+                // publish it as a completed attempt or proceed to another provider.
+                ensureActive(operationEpoch)
+                val records = store.subscriptionRecords()
+                val current = records.firstOrNull { it.id == record.id }
+                    ?: throw SubscriptionFailure("SUBSCRIPTION_NOT_FOUND")
+                if (current.url != record.url) throw SubscriptionFailure("SUBSCRIPTION_CHANGED")
+                pruneRefreshErrors(records)
+                refreshErrors[record.id] = RefreshError(record.url, failure.code)
+            }
+            if (isolateProviderFailure) return
+            throw failure
+        }
+        // Only the download/parse boundary above may be isolated. Catalog, capacity,
+        // tunnel and settings errors remain fatal even if their public code overlaps.
         guardedWrite(operationEpoch) {
             store.refreshSubscription(record.id, record.url, feed, System.currentTimeMillis())
+            refreshErrors.remove(record.id)
+        }
+    }
+
+    /** Caller holds lifecycleLock; removed/replaced records never inherit an older outcome. */
+    private fun pruneRefreshErrors(records: List<StoredSubscription>) {
+        refreshErrors.entries.removeAll { (id, failure) ->
+            records.none { it.id == id && it.url == failure.url }
         }
     }
 

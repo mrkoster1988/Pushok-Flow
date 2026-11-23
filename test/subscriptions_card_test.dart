@@ -7,6 +7,7 @@ import 'package:pushok_flow/ui/subscription_editor.dart';
 import 'package:pushok_flow/ui/subscriptions_card.dart';
 
 const _id = '10000000-0000-4000-8000-000000000001';
+const _otherId = '10000000-0000-4000-8000-000000000002';
 const _url = 'https://example.invalid/sub/PRIVATE_TOKEN';
 SubscriptionStatus _status({int? expiresAt, bool busy = false}) =>
     SubscriptionStatus.fromPlatform({
@@ -64,6 +65,52 @@ void main() {
       expect(tester.widget<OutlinedButton>(find.byKey(const Key('manage_pushok_subscription'))).onPressed,
         isNotNull);
     }
+  });
+
+  testWidgets('Partial refresh keeps healthy metadata and retries only the failed subscription',
+      (tester) async {
+    final refreshed = <String>[];
+    final status = SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true,
+      'subscriptions': [
+        {'id': _id, 'name': 'Магазин', 'host': 'example.invalid',
+          'profileCount': 2, 'updatedAt': 1795377600000},
+        {'id': _otherId, 'name': 'Другой магазин', 'host': 'other.invalid',
+          'profileCount': 4, 'updatedAt': 1795464000000},
+      ],
+      'refreshErrors': {_id: 'SUBSCRIPTION_NETWORK_ERROR'},
+    });
+    await _pump(tester, SubscriptionsCard(status: status, mutationsEnabled: true,
+      onRefresh: (entry) => refreshed.add(entry.id)));
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsOneWidget);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_id')), findsOneWidget);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_otherId')), findsNothing);
+    expect(find.text('other.invalid · Серверов: 4'), findsOneWidget);
+    expect(find.text('Серверы обновлены: 23.11.2026'), findsOneWidget);
+    expect(find.text('Повторить обновление'), findsOneWidget);
+    expect(find.textContaining('SUBSCRIPTION_NETWORK_ERROR'), findsNothing);
+    await _tap(tester, 'refresh_subscription_$_id');
+    expect(refreshed, [_id]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('All failed providers remain visible while retry respects connection guards',
+      (tester) async {
+    final status = SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true,
+      'subscriptions': [
+        {'id': _id, 'name': 'Магазин', 'host': 'example.invalid',
+          'profileCount': 2, 'updatedAt': 1795377600000},
+      ],
+      'refreshErrors': {_id: 'SUBSCRIPTION_AUTH_REQUIRED'},
+    });
+    await _pump(tester, SubscriptionsCard(status: status,
+      mutationsEnabled: false, onRefresh: (_) => fail('Connected Flow cannot refresh')));
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsOneWidget);
+    expect(find.textContaining('Сервис не предоставил список серверов'), findsOneWidget);
+    expect(find.text('example.invalid · Серверов: 2'), findsOneWidget);
+    expect(tester.widget<OutlinedButton>(find.byKey(
+      const ValueKey('refresh_subscription_$_id'))).onPressed, isNull);
   });
 
   testWidgets('A received URL stays masked and only explicit save imports', (tester) async {

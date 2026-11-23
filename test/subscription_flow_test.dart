@@ -10,6 +10,7 @@ import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
 const _manualId = '10000000-0000-4000-8000-000000000001';
 const _managedId = '10000000-0000-4000-8000-000000000002';
 const _subscriptionId = '10000000-0000-4000-8000-000000000003';
+const _otherSubscriptionId = '10000000-0000-4000-8000-000000000004';
 const _privateUrl = 'https://example.invalid/sub/PRIVATE_TOKEN';
 const _manualConfig = '[Interface]\nPrivateKey = UI_ONLY\nAddress = 10.0.0.2/32\n'
     '[Peer]\nPublicKey = UI_ONLY_PEER\n';
@@ -20,6 +21,13 @@ class _Bridge {
   bool protectionAvailable = true;
   bool automaticUpdatesEnabled = true;
   bool subscriptionsBusy = false;
+  bool secondImported = false;
+  int secondProfileCount = 1;
+  int secondUpdatedAt = 1795377600000;
+  String? subscriptionErrorCode;
+  String? manualRefreshFailureCode;
+  final refreshErrors = <String, String>{};
+  final refreshedIds = <String>[];
   Object? subscriptionStatusError;
   Completer<Object?>? pendingReply;
   Completer<Object?>? refreshReply;
@@ -30,11 +38,20 @@ class _Bridge {
   Map<String, Object?> get subscriptions => {
     'automaticUpdatesEnabled': automaticUpdatesEnabled,
     'busy': subscriptionsBusy,
-    'subscriptions': imported ? [{
-      'id': _subscriptionId, 'name': 'Магазин', 'host': 'example.invalid',
-      'profileCount': 1, 'updatedAt': 1795377600000,
-      'expiresAt': null, 'usedBytes': null, 'totalBytes': null,
-    }] : <Object?>[],
+    'errorCode': subscriptionErrorCode,
+    'refreshErrors': {...refreshErrors},
+    'subscriptions': [
+      if (imported) {
+        'id': _subscriptionId, 'name': 'Магазин', 'host': 'example.invalid',
+        'profileCount': 1, 'updatedAt': 1795377600000,
+        'expiresAt': null, 'usedBytes': null, 'totalBytes': null,
+      },
+      if (secondImported) {
+        'id': _otherSubscriptionId, 'name': 'Другой магазин', 'host': 'other.invalid',
+        'profileCount': secondProfileCount, 'updatedAt': secondUpdatedAt,
+        'expiresAt': null, 'usedBytes': null, 'totalBytes': null,
+      },
+    ],
   };
 
   Future<Object?> routes(MethodCall call) async {
@@ -94,6 +111,18 @@ class _Bridge {
       case 'setAutomaticUpdates':
         automaticUpdatesEnabled = (call.arguments as Map)['enabled'] as bool;
         return automaticUpdatesReply?.future ?? subscriptions;
+      case 'refreshSubscription':
+        final id = (call.arguments as Map)['id'] as String;
+        refreshedIds.add(id);
+        final failure = manualRefreshFailureCode;
+        if (failure != null) {
+          refreshErrors[id] = failure;
+          subscriptionErrorCode = failure;
+          throw PlatformException(code: failure, message: 'PRIVATE_PROVIDER_DETAILS');
+        }
+        refreshErrors.remove(id);
+        subscriptionErrorCode = null;
+        return subscriptions;
       case 'openPushokAccount':
       case 'openPushokHub':
         expect(call.arguments, isNull);
@@ -389,6 +418,126 @@ void main() {
     expect(bridge.calls.where((call) => call == 'refreshDue').length, 1);
     expect(bridge.calls, isNot(contains('importSubscription')));
     expect(bridge.calls, isNot(contains('saveWireGuardProfile')));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Partial automatic refresh preserves successful provider metadata and scoped retry',
+      (tester) async {
+    final refresh = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..secondImported = true
+      ..refreshReply = refresh;
+    await _pump(tester, bridge);
+    expect(bridge.calls.where((call) => call == 'refreshDue').length, 1);
+    bridge.refreshErrors[_subscriptionId] = 'SUBSCRIPTION_NETWORK_ERROR';
+    bridge.secondProfileCount = 4;
+    bridge.secondUpdatedAt = 1795464000000;
+    bridge.subscriptionsBusy = false;
+    refresh.complete(bridge.subscriptions);
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsOneWidget);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_subscriptionId')), findsOneWidget);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_otherSubscriptionId')), findsNothing);
+    expect(find.text('other.invalid · Серверов: 4'), findsOneWidget);
+    expect(find.text('Серверы обновлены: 23.11.2026'), findsOneWidget);
+    expect(find.text('Список серверов обновлён.'), findsNothing);
+    expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
+    final retry = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(bridge.refreshedIds, [_subscriptionId]);
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_subscriptionId')), findsNothing);
+    expect(find.text('other.invalid · Серверов: 4'), findsOneWidget);
+    expect(bridge.calls, isNot(contains('connectWireGuard')));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('A later fatal automatic refresh error still rereads completed provider changes',
+      (tester) async {
+    final refresh = Completer<Object?>();
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..secondImported = true
+      ..refreshReply = refresh;
+    await _pump(tester, bridge);
+    // A provider committed successfully before a later global stop.
+    bridge.secondProfileCount = 3;
+    bridge.secondUpdatedAt = 1795464000000;
+    bridge.subscriptionErrorCode = 'VPN_ACTIVE';
+    refresh.completeError(PlatformException(code: 'VPN_ACTIVE', message: 'PRIVATE_DETAILS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('subscriptions_error')), findsOneWidget);
+    expect(find.text('Для обновления серверов отключите подключение Flow.'), findsOneWidget);
+    expect(find.text('other.invalid · Серверов: 3'), findsOneWidget);
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
+    expect(find.text('Список серверов обновлён.'), findsNothing);
+    expect(find.textContaining('PRIVATE_DETAILS'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Manual success clears only that provider and never announces all errors resolved',
+      (tester) async {
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..secondImported = true
+      ..automaticUpdatesEnabled = false;
+    bridge.refreshErrors.addAll({
+      _subscriptionId: 'SUBSCRIPTION_NETWORK_ERROR',
+      _otherSubscriptionId: 'SUBSCRIPTION_AUTH_REQUIRED',
+    });
+    await _pump(tester, bridge);
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+    final retry = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(bridge.refreshedIds, [_subscriptionId]);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_subscriptionId')), findsNothing);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_otherSubscriptionId')), findsOneWidget);
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsOneWidget);
+    expect(find.text('Список серверов обновлён.'), findsNothing);
+    expect(bridge.calls, isNot(contains('refreshDue')));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Manual provider failure rereads its row warning without exposing native details',
+      (tester) async {
+    final bridge = _Bridge()
+      ..pending = null
+      ..imported = true
+      ..automaticUpdatesEnabled = false
+      ..manualRefreshFailureCode = 'SUBSCRIPTION_AUTH_REQUIRED';
+    await _pump(tester, bridge);
+    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
+    final refresh = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
+    await tester.ensureVisible(refresh);
+    await tester.tap(refresh);
+    await tester.pumpAndSettle();
+    expect(bridge.refreshedIds, [_subscriptionId]);
+    expect(find.byKey(const ValueKey('subscription_refresh_error_$_subscriptionId')), findsOneWidget);
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsOneWidget);
+    expect(find.text('Повторить обновление'), findsOneWidget);
+    expect(tester.widget<OutlinedButton>(refresh).onPressed, isNotNull);
+    expect(find.text('example.invalid · Серверов: 1'), findsOneWidget);
+    expect(find.text('Список серверов обновлён.'), findsNothing);
+    expect(find.textContaining('PRIVATE_PROVIDER_DETAILS'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

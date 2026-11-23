@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
@@ -59,6 +60,7 @@ class SubscriptionsCard extends StatelessWidget {
         'Flow загружает список серверов и сохраняет его на устройстве. '
         'Автообновление проверяет список при открытии приложения, когда подключение '
         'Flow отключено: не чаще раза в шесть часов после успешной проверки. '
+        'Ошибка одного сервиса не мешает проверке остальных подписок. '
         'После ошибки сохранённые настройки остаются доступны.\n\n'
         'Срок и расход трафика отображаются, если сервис передал эти данные. '
         'Они не заменяют информацию об оплате в магазине. '
@@ -73,6 +75,7 @@ class SubscriptionsCard extends StatelessWidget {
   Widget _subscription(FlowSubscription entry) {
     final expiry = entry.expiresAt;
     final expired = expiry != null && !expiry.isAfter(now ?? DateTime.now());
+    final refreshError = status?.refreshErrors[entry.id];
     return PushokPanel(
       key: ValueKey('subscription_${entry.id}'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -102,11 +105,19 @@ class SubscriptionsCard extends StatelessWidget {
         const SizedBox(height: 6),
         Text('Серверы обновлены: ${_date(entry.updatedAt)}',
           style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+        if (refreshError != null) ...[
+          const SizedBox(height: 10),
+          Semantics(liveRegion: true,
+            child: Text(subscriptionErrorMessage(PlatformException(code: refreshError)),
+              key: ValueKey('subscription_refresh_error_${entry.id}'),
+              style: const TextStyle(color: PushokPalette.orange))),
+        ],
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 8, children: [
           OutlinedButton.icon(key: ValueKey('refresh_subscription_${entry.id}'),
             onPressed: _canChange && onRefresh != null ? () => onRefresh!(entry) : null,
-            icon: const Icon(Icons.refresh), label: const Text('Обновить серверы')),
+            icon: const Icon(Icons.refresh), label: Text(refreshError == null
+              ? 'Обновить серверы' : 'Повторить обновление')),
           OutlinedButton.icon(key: ValueKey('delete_subscription_${entry.id}'),
             onPressed: _canChange && onDelete != null ? () => onDelete!(entry) : null,
             icon: const Icon(Icons.delete_outline), label: const Text('Удалить')),
@@ -144,6 +155,13 @@ class SubscriptionsCard extends StatelessWidget {
             child: Semantics(liveRegion: true,
               child: Text(error!, key: const Key('subscriptions_error'),
                 style: const TextStyle(color: PushokPalette.orange)))),
+          if (status?.refreshErrors.isNotEmpty ?? false)
+            Padding(padding: const EdgeInsets.only(top: 12),
+              child: Semantics(liveRegion: true,
+                child: const Text('Не все подписки удалось обновить. '
+                    'Подробности — в карточках ниже.',
+                  key: Key('subscriptions_refresh_warning'),
+                  style: TextStyle(color: PushokPalette.orange)))),
           if (status != null) ...[
             const SizedBox(height: 12),
             SwitchListTile.adaptive(

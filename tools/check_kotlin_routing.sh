@@ -152,6 +152,14 @@ kotlinc "${subscription_core[@]}" \
 java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionFeedCheckKt
 java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionCatalogCheckKt
 java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionTransportCheckKt
+kotlinc "${subscription_core[@]}" \
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionDownloader.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileSubscriptions.kt \
+  native/android/tests/subscription_coordinator_stubs/*.kt \
+  native/android/tests/SubscriptionCoordinatorCheck.kt -include-runtime -d "$out/subscription-coordinator-tests.jar"
+java -jar "$out/subscription-coordinator-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.kt \
   native/android/tests/RouteSettingsCheck.kt -include-runtime -d "$out/route-settings-tests.jar"
 java -jar "$out/route-settings-tests.jar"
