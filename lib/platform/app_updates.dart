@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../models/app_release_history.dart';
+
 enum UpdatePhase {
   idle,
   checking,
@@ -59,6 +61,7 @@ class UpdateStatus {
     this.installWaitingReason,
     this.checkedAtMillis,
     this.checkStage,
+    this.releaseNotes,
   });
 
   const UpdateStatus.unavailable({this.errorCode = 'UNSUPPORTED_PLATFORM'})
@@ -73,7 +76,8 @@ class UpdateStatus {
         automaticUpdatesEnabled = false,
         installWaitingReason = null,
         checkedAtMillis = null,
-        checkStage = null;
+        checkStage = null,
+        releaseNotes = null;
 
   final String installedVersion;
   final int installedBuild;
@@ -89,6 +93,10 @@ class UpdateStatus {
   /// The last successful native verification, never the start of a request.
   final int? checkedAtMillis;
   final String? checkStage;
+  final AppReleaseNotes? releaseNotes;
+
+  bool get hasNewerVersion => availableVersion != null &&
+      availableBuild != null && availableBuild! > installedBuild;
 
   double? get downloadProgress => totalBytes <= 0
       ? null
@@ -163,6 +171,11 @@ class UpdateStatus {
         !const {'release', 'manifest'}.contains(checkStage))) {
       throw const FormatException('Invalid update check stage');
     }
+    final hasNewerVersion = availableVersion != null && availableBuild != null &&
+        availableBuild > installedBuild;
+    final releaseNotes = AppReleaseNotes.fromPlatform(data['releaseNotes'],
+      expectedVersion: hasNewerVersion ? availableVersion : installedVersion,
+      expectedBuild: hasNewerVersion ? availableBuild : installedBuild);
 
     return UpdateStatus(
       installedVersion: installedVersion,
@@ -178,6 +191,7 @@ class UpdateStatus {
       installWaitingReason: installWaitingReason as String?,
       checkedAtMillis: checkedAtMillis,
       checkStage: checkStage as String?,
+      releaseNotes: releaseNotes,
     );
   }
 
@@ -197,6 +211,7 @@ class UpdateStatus {
         checkedAtMillis: checkedAtMillis,
         checkStage: nextPhase == UpdatePhase.checking &&
             phase == UpdatePhase.checking ? checkStage : null,
+        releaseNotes: releaseNotes,
       );
 }
 

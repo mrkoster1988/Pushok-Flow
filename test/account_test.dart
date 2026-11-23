@@ -16,12 +16,12 @@ Map<String, Object?> _profile() => {
 };
 
 Map<String, Object?> _state({String state = 'signed_out', String? error,
-    bool stale = false, int? nextPollAt, Map<String, Object?>? profile}) {
+    bool stale = false, int? nextPollAt, Map<String, Object?>? profile, String userCode = _code}) {
   final now = DateTime.now().millisecondsSinceEpoch;
   return {
     'state': state, 'busy': false, 'errorCode': error,
     'pending': state == 'pending' ? {
-      'userCode': _code, 'expiresAt': now + 300000, 'nextPollAt': nextPollAt ?? now + 5000,
+      'userCode': userCode, 'expiresAt': now + 300000, 'nextPollAt': nextPollAt ?? now + 5000,
     } : null,
     'profile': state == 'connected' ? profile ?? _profile() : null,
     'refreshedAt': state == 'connected' ? now : null,
@@ -36,12 +36,20 @@ class _AccountBridge {
   final gates = <String, Completer<Object?>>{};
   Object? statusError;
   String? logoutError;
+  String sessionUserCode = _code;
 
   int count(String method) => calls.where((call) => call.method == method).length;
 
   Future<Object?> handle(MethodCall call) async {
     calls.add(call);
-    expect(call.arguments, isNull, reason: 'Flutter must never transport credentials or destination URLs.');
+    if (call.method == 'cancelLogin') {
+      expect(call.arguments, isA<Map>());
+      expect((call.arguments as Map).keys, ['userCode']);
+      expect((call.arguments as Map)['userCode'], matches(RegExp(r'^[A-HJ-NP-Z2-9]{12}$')),
+        reason: 'Cancellation transports only the displayed public confirmation code.');
+    } else {
+      expect(call.arguments, isNull, reason: 'Flutter must never transport credentials or destination URLs.');
+    }
     final gate = gates.remove(call.method);
     if (gate != null) return gate.future;
     switch (call.method) {
@@ -55,6 +63,11 @@ class _AccountBridge {
         if (state['state'] == 'pending') state = _state(state: 'pending');
         return Map<String, Object?>.from(state);
       case 'cancelLogin':
+        final code = state['state'] == 'pending'
+          ? (state['pending'] as Map)['userCode'] : sessionUserCode;
+        if (state['state'] != 'signed_out' && (call.arguments as Map)['userCode'] != code) {
+          return {...state, 'errorCode': 'FLOW_INTERRUPTED'};
+        }
         state = _state();
         return state;
       case 'refresh': return Map<String, Object?>.from(state);
@@ -181,12 +194,14 @@ void main() {
     await account.beginLogin();
     await account.openLogin();
     await account.pollLogin();
-    await account.cancelLogin();
+    await account.cancelLogin(_code);
     await account.refresh();
     await account.logout();
     expect(bridge.calls.map((call) => call.method),
         ['status', 'beginLogin', 'openLogin', 'pollLogin', 'cancelLogin', 'refresh', 'logout']);
-    expect(bridge.calls.every((call) => call.arguments == null), isTrue);
+    expect(bridge.calls.singleWhere((call) => call.method == 'cancelLogin').arguments, {'userCode': _code});
+    expect(bridge.calls.where((call) => call.method != 'cancelLogin')
+      .every((call) => call.arguments == null), isTrue);
   });
 
   test('Error display never includes platform messages or arbitrary server bodies', () {
@@ -408,6 +423,210 @@ void main() {
       expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
       expect(find.textContaining('На этом устройстве вход завершён'), findsOneWidget);
       expect(find.byKey(const Key('account_wallet_rub')), findsNothing);
+    });
+  });
+
+  for (final replyBeforeCancel in [true, false]) {
+    testWidgets('Cancel supersedes a waiting poll; old reply before clear=$replyBeforeCancel', (tester) async {
+      bridge.state = _state(state: 'pending');
+      final poll = Completer<Object?>();
+      final cancel = Completer<Object?>();
+      bridge.gates['pollLogin'] = poll;
+      bridge.gates['cancelLogin'] = cancel;
+      await _withCard(tester, () async {
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pump();
+        expect(bridge.count('pollLogin'), 1);
+        final button = tester.widget<TextButton>(find.byKey(const Key('cancel_flow_login')));
+        expect(button.onPressed, isNotNull);
+        button.onPressed!();
+        button.onPressed!(); // A queued second tap must not submit a second clear.
+        await tester.pump();
+        expect(bridge.count('cancelLogin'), 1);
+        expect(find.byKey(const Key('flow_account_code')), findsNothing);
+        expect(find.byKey(const Key('flow_account_waiting')), findsNothing);
+        expect(find.text('Отменяем вход…'), findsOneWidget);
+        expect(find.byKey(const Key('begin_flow_login')), findsNothing);
+        if (replyBeforeCancel) {
+          poll.complete(_state(state: 'connected'));
+          await tester.pump();
+          expect(find.text('Проверочный аккаунт'), findsNothing);
+          expect(find.text('Отменяем вход…'), findsOneWidget);
+          expect(find.byType(LinearProgressIndicator), findsOneWidget);
+        }
+        bridge.state = _state();
+        cancel.complete(bridge.state);
+        await tester.pumpAndSettle();
+        if (!replyBeforeCancel) {
+          poll.complete(_state(state: 'connected'));
+          await tester.pumpAndSettle();
+        }
+        expect(find.text('Проверочный аккаунт'), findsNothing);
+        expect(find.byKey(const Key('flow_account_code')), findsNothing);
+        expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+        await tester.pump(const Duration(seconds: 10));
+        expect(bridge.count('pollLogin'), 1);
+        expect(bridge.count('cancelLogin'), 1);
+      });
+    });
+  }
+
+  testWidgets('Logout supersedes a held refresh and hides identity until native clear', (tester) async {
+    bridge.state = _state(state: 'connected');
+    final refresh = Completer<Object?>();
+    final logout = Completer<Object?>();
+    bridge.gates['refresh'] = refresh;
+    bridge.gates['logout'] = logout;
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('refresh_flow_account')));
+      await tester.pump();
+      expect(bridge.count('refresh'), 1);
+      final button = tester.widget<TextButton>(find.byKey(const Key('logout_flow_account')));
+      expect(button.onPressed, isNotNull);
+      button.onPressed!();
+      button.onPressed!();
+      await tester.pump();
+      expect(bridge.count('logout'), 1);
+      expect(find.text('Проверочный аккаунт'), findsNothing);
+      expect(find.byKey(const Key('account_wallet_rub')), findsNothing);
+      expect(find.text('Выходим из аккаунта…'), findsOneWidget);
+      expect(find.byKey(const Key('begin_flow_login')), findsNothing);
+      bridge.state = _state();
+      logout.complete(bridge.state);
+      await tester.pumpAndSettle();
+      refresh.complete(_state(state: 'connected'));
+      await tester.pumpAndSettle();
+      expect(find.text('Проверочный аккаунт'), findsNothing);
+      expect(find.byKey(const Key('account_wallet_rub')), findsNothing);
+      expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+      expect(bridge.count('logout'), 1);
+    });
+  });
+
+  for (final state in ['pending', 'connected']) {
+    testWidgets('Native busy $state metadata still allows deliberate local clear', (tester) async {
+      bridge.state = {..._state(state: state), 'busy': true};
+      await _withCard(tester, () async {
+        final key = state == 'pending' ? 'cancel_flow_login' : 'logout_flow_account';
+        expect(tester.widget<TextButton>(find.byKey(Key(key))).onPressed, isNotNull);
+        await tester.tap(find.byKey(Key(key)));
+        await tester.pumpAndSettle();
+        expect(bridge.count(state == 'pending' ? 'cancelLogin' : 'logout'), 1);
+        expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+      });
+    });
+  }
+
+  testWidgets('Uncertain durable clear stays masked and reports store failure truthfully', (tester) async {
+    bridge.state = _state(state: 'connected');
+    bridge.logoutError = 'FLOW_STORE_UNAVAILABLE';
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('logout_flow_account')));
+      await tester.pumpAndSettle();
+      expect(find.text('Проверочный аккаунт'), findsNothing);
+      expect(find.byKey(const Key('account_wallet_rub')), findsNothing);
+      expect(find.text('Выход ещё не подтверждён.'), findsOneWidget);
+      expect(find.textContaining('Перезапустите приложение'), findsOneWidget);
+      expect(find.byKey(const Key('begin_flow_login')), findsNothing);
+      await tester.tap(find.byKey(const Key('retry_flow_account_clear')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('logout'), 2);
+      expect(find.text('Выход ещё не подтверждён.'), findsOneWidget);
+      expect(find.byKey(const Key('begin_flow_login')), findsNothing);
+    });
+  });
+
+  testWidgets('Lost clear reply permits retry without restoring cached identity', (tester) async {
+    bridge.state = _state(state: 'connected');
+    final logout = Completer<Object?>();
+    bridge.gates['logout'] = logout;
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('logout_flow_account')));
+      await tester.pump();
+      logout.completeError(PlatformException(code: 'FLOW_NETWORK_ERROR', message: 'PRIVATE_DETAILS'));
+      await tester.pumpAndSettle();
+      expect(find.text('Проверочный аккаунт'), findsNothing);
+      expect(find.textContaining('PRIVATE'), findsNothing);
+      expect(find.text('Выход ещё не подтверждён.'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('retry_flow_account_clear')));
+      await tester.pumpAndSettle();
+      expect(bridge.count('logout'), 2);
+      expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+    });
+  });
+
+  for (final newerState in ['pending', 'connected']) {
+    testWidgets('Qualified cancel preserves a newer $newerState account after a lost reply', (tester) async {
+      const newerCode = '89GH23JK45MN';
+      bridge.state = _state(state: 'pending');
+      final cancel = Completer<Object?>();
+      bridge.gates['cancelLogin'] = cancel;
+      await _withCard(tester, () async {
+        await tester.tap(find.byKey(const Key('cancel_flow_login')));
+        await tester.pump();
+        expect(find.byKey(const Key('flow_account_code')), findsNothing);
+        cancel.completeError(PlatformException(code: 'FLOW_NETWORK_ERROR'));
+        await tester.pumpAndSettle();
+        expect(find.text('Отмена входа ещё не подтверждена.'), findsOneWidget);
+        bridge.state = _state(state: newerState, userCode: newerCode,
+          profile: {..._profile(), 'displayName': 'Другой аккаунт'});
+        bridge.sessionUserCode = newerCode;
+        _pause(tester);
+        _resume(tester);
+        await tester.pumpAndSettle();
+        expect(find.text('Другой аккаунт'), findsNothing);
+        expect(find.text('89GH · 23JK · 45MN'), findsNothing);
+        await tester.tap(find.byKey(const Key('retry_flow_account_clear')));
+        await tester.pumpAndSettle();
+        final cancellations = bridge.calls.where((call) => call.method == 'cancelLogin').toList();
+        expect(cancellations, hasLength(2));
+        expect(cancellations.map((call) => call.arguments),
+          [{'userCode': _code}, {'userCode': _code}],
+          reason: 'Retry must target the originally displayed request, even after resume.');
+        expect(bridge.state['state'], newerState);
+        expect(find.byKey(const Key('flow_account_clearing')), findsNothing);
+        expect(find.byKey(const Key('begin_flow_login')), findsNothing);
+        expect(find.textContaining('Состояние входа изменилось'), findsOneWidget);
+        expect(find.text(newerState == 'pending' ? '89GH · 23JK · 45MN' : 'Другой аккаунт'), findsOneWidget);
+        expect(bridge.count('logout'), 0);
+      });
+    });
+  }
+
+  testWidgets('Resume reconciles an outstanding local clear and ignores its late reply', (tester) async {
+    bridge.state = _state(state: 'connected');
+    final logout = Completer<Object?>();
+    bridge.gates['logout'] = logout;
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('logout_flow_account')));
+      await tester.pump();
+      _pause(tester);
+      bridge.state = _state();
+      _resume(tester);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+      logout.complete(_state(state: 'connected'));
+      await tester.pumpAndSettle();
+      expect(find.text('Проверочный аккаунт'), findsNothing);
+      expect(find.byKey(const Key('begin_flow_login')), findsOneWidget);
+      expect(bridge.count('logout'), 1);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('Disposing the card during local clear ignores the eventual reply', (tester) async {
+    bridge.state = _state(state: 'pending');
+    final cancel = Completer<Object?>();
+    bridge.gates['cancelLogin'] = cancel;
+    await _withCard(tester, () async {
+      await tester.tap(find.byKey(const Key('cancel_flow_login')));
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+      cancel.complete(_state(state: 'connected'));
+      await tester.pump(const Duration(seconds: 10));
+      expect(bridge.count('cancelLogin'), 1);
+      expect(bridge.count('pollLogin'), 0);
+      expect(tester.takeException(), isNull);
     });
   });
 

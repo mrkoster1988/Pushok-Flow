@@ -73,6 +73,7 @@ internal class UpdateCoordinator private constructor(private val context: Contex
     @Volatile private var restored = false // Only the serial I/O queue mutates restoration/candidate fields.
     private var retainedReady: UpdateState? = null
     private var latestManifest: UpdateManifest? = null
+    @Volatile private var latestReleaseNotes: UpdateReleaseNotes? = null
     private var state = UpdateState(if (installed == null) "unavailable" else "idle",
         errorCode = if (installed == null) "UPDATE_INCOMPATIBLE" else null)
 
@@ -146,6 +147,8 @@ internal class UpdateCoordinator private constructor(private val context: Contex
             "checkStage" to current.checkStage,
             "automaticUpdatesEnabled" to enabled,
             "installWaitingReason" to waiting,
+            "releaseNotes" to UpdateReleaseNotesPolicy.visible(latestReleaseNotes, current.manifest,
+                installed?.versionName ?: "0.0.0", installed?.let(::versionCode) ?: 0L)?.metadata(),
         )
     }
 
@@ -298,6 +301,11 @@ internal class UpdateCoordinator private constructor(private val context: Contex
         latestManifest = try { preferences.getString("latest_manifest", null)?.let {
             cachedManifestFromJson(parseJson(it.toByteArray(StandardCharsets.UTF_8)))
         } } catch (_: Exception) { null }
+        latestReleaseNotes = try { latestManifest?.let { manifest ->
+            preferences.getString("latest_release_notes", null)?.takeIf { it.length <= 16_384 }?.let {
+                cachedReleaseNotesFromJson(parseJson(it.toByteArray(StandardCharsets.UTF_8)), manifest)
+            }
+        } } catch (_: Exception) { null }
         retainedReady = restoreCandidate()
         restored = true
         changeState { retainedReady ?: UpdateState(if (installed == null) "unavailable" else "idle",
@@ -325,9 +333,15 @@ internal class UpdateCoordinator private constructor(private val context: Contex
             UpdatePolicy.requireCompatible(manifest, current.packageName, signerDigests(current), Build.VERSION.SDK_INT)
             UpdatePolicy.requireDeviceCompatible(manifest, Build.SUPPORTED_ABIS.toList())
             val next = session.complete(release, manifest, current.versionName ?: "0.0.0", System.currentTimeMillis())
-            if (!preferences.edit().putString("latest_manifest", JSONObject(UpdatePolicy.manifestFields(manifest)).toString())
-                    .putLong("checked_at", next.checkedAtMillis ?: 0).commit()) throw UpdateFailure("UPDATE_STORAGE_ERROR")
+            val notes = UpdateReleaseNotesPolicy.verified(release, manifest)
+            val editor = preferences.edit()
+                .putString("latest_manifest", JSONObject(UpdatePolicy.manifestFields(manifest)).toString())
+                .putLong("checked_at", next.checkedAtMillis ?: 0)
+            if (notes == null) editor.remove("latest_release_notes")
+            else editor.putString("latest_release_notes", JSONObject(notes.cacheFields()).toString())
+            if (!editor.commit()) throw UpdateFailure("UPDATE_STORAGE_ERROR")
             latestManifest = manifest
+            latestReleaseNotes = notes
             // The older ready record remains intact until a newer file is fully verified and atomically published.
             changeState { next }
         } catch (failure: UpdateFailure) { changeState { session.failed(failure.code) }; throw failure }
@@ -747,6 +761,15 @@ internal class UpdateCoordinator private constructor(private val context: Contex
 
     private fun cachedManifestFromJson(json: JSONObject): UpdateManifest =
         UpdatePolicy.cachedManifest(jsonValues(json), Build.SUPPORTED_ABIS.toList())
+
+    private fun cachedReleaseNotesFromJson(json: JSONObject, manifest: UpdateManifest): UpdateReleaseNotes? {
+        val changes = json.optJSONArray("changes") ?: return null
+        if (changes.length() > UpdateReleaseNotesPolicy.MAX_CHANGES) return null
+        val values = jsonValues(json).toMutableMap()
+        values["changes"] = (0 until changes.length()).map { changes.get(it) }
+        if (json.has("publishedOn") && json.isNull("publishedOn")) values["publishedOn"] = null
+        return UpdateReleaseNotesPolicy.restore(values, manifest)
+    }
 
     private fun releaseFromJson(json: JSONObject): PublishedUpdateRelease {
         val values = jsonValues(json).toMutableMap()

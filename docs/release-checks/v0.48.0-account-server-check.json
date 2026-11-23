@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "observations": [
+    {
+      "name": "capabilities",
+      "url": "https://pushok.shop/api/v1/flow/capabilities",
+      "checkedAtUtc": "2026-11-23T04:57:48.556157+00:00",
+      "authenticated": false,
+      "httpStatus": 200,
+      "sizeBytes": 90,
+      "sha256": "b31824e2370ab282e540b06441341db6f9cbcabfc9a31160cee7555ddfd54e77",
+      "body": {
+        "protocol_version": 1,
+        "scopes": [
+          "profile:read",
+          "wallet:read"
+        ],
+        "session_ttl_seconds": 43200
+      }
+    },
+    {
+      "name": "public-config",
+      "url": "https://pushok.shop/api/v1/public-config",
+      "checkedAtUtc": "2026-11-23T04:57:55.545542+00:00",
+      "authenticated": false,
+      "httpStatus": 200,
+      "sizeBytes": 309,
+      "sha256": "424c244f158366fd01e4360b48404473b24a2027784548130ec2f2de78813ffd",
+      "body": {
+        "telegram_bot_username": "mtproxy_pushok_bot"
+      },
+      "bodyScope": "Only the relevant public bot identity retained; raw-response size/hash cover the original response."
+    }
+  ],
+  "scope": {
+    "authentication": "none",
+    "deviceCodesCreated": 0,
+    "sessionsCreated": 0,
+    "telegramMessagesSent": 0,
+    "fullPhoneLoginTested": false,
+    "serverApplicationVersionRechecked": false
+  }
+}

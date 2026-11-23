@@ -6,6 +6,8 @@ import '../design/pushok_theme.dart';
 import '../platform/account.dart';
 import '../platform/subscriptions.dart';
 
+enum _LocalAccountClear { cancelLogin, logout }
+
 class PushokAccountCard extends StatefulWidget {
   const PushokAccountCard({super.key, required this.isAndroid, this.account,
     this.onOpenCabinet, this.onOpenHub, this.now});
@@ -25,6 +27,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   String? _error;
   bool _busy = false;
   bool _foreground = true;
+  _LocalAccountClear? _clearingAccount;
+  String? _cancellingUserCode;
   int _epoch = 0;
   Timer? _poll;
   Timer? _viewTimer;
@@ -68,7 +72,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   void _schedulePoll() {
     _poll?.cancel();
     final pending = _status?.pending;
-    if (!mounted || !_foreground || _busy || pending == null || _expired || !widget.isAndroid) return;
+    if (!mounted || !_foreground || _busy || _clearingAccount != null ||
+        pending == null || _expired || !widget.isAndroid) return;
     final now = _nowMs;
     final delay = (pending.nextPollAt - now).clamp(1000, 60000).toInt();
     _poll = Timer(Duration(milliseconds: delay), () => unawaited(_run(_account.pollLogin)));
@@ -76,7 +81,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
 
   void _scheduleViewUpdate() {
     _viewTimer?.cancel();
-    if (!mounted || !_foreground || !widget.isAndroid) return;
+    if (!mounted || !_foreground || _clearingAccount != null || !widget.isAndroid) return;
     final expires = _expiresAt;
     if (expires == null) { _expiryChecked = null; return; }
     final now = _nowMs;
@@ -106,25 +111,56 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   }
 
   Future<void> _read() async {
-    await _run(_account.status);
+    if (!await _run(_account.status)) return;
     final status = _status;
-    if (!mounted || !_foreground || _busy || _expired || status?.state != FlowAccountState.connected) return;
+    if (!mounted || !_foreground || _busy || _clearingAccount != null ||
+        _expired || status?.state != FlowAccountState.connected) return;
     final age = _nowMs - (status!.refreshedAt ?? 0);
     if (status.stale || age > 60000) await _run(_account.refresh);
   }
 
-  Future<void> _run(Future<FlowAccountStatus> Function() action) async {
-    if (!mounted || !_foreground || _busy || !widget.isAndroid) return;
+  Future<bool> _run(Future<FlowAccountStatus> Function() action,
+      {_LocalAccountClear? clearing, String? cancellingUserCode}) async {
+    if (!mounted || !_foreground || !widget.isAndroid ||
+        (_busy && (clearing == null || _clearingAccount != null))) return false;
     final epoch = ++_epoch;
     _poll?.cancel();
-    setState(() { _busy = true; _error = null; });
+    if (clearing != null) _viewTimer?.cancel();
+    setState(() {
+      _busy = true;
+      _error = null;
+      if (clearing != null) {
+        _clearingAccount = clearing;
+        _cancellingUserCode = cancellingUserCode;
+      }
+    });
     try {
       final status = await action();
-      if (!mounted || !_foreground || epoch != _epoch) return;
-      setState(() => _status = status);
+      if (!mounted || !_foreground || epoch != _epoch) return false;
+      setState(() {
+        _status = status;
+        // Keep identity/code hidden until native code confirms a durable local
+        // clear. A failed store is fail-closed in memory but its disk state is
+        // uncertain; it must not be presented as a completed logout.
+        if (_clearingAccount != null && !status.busy &&
+            status.state == FlowAccountState.signedOut &&
+            status.errorCode != 'FLOW_STORE_UNAVAILABLE') {
+          _clearingAccount = null;
+          _cancellingUserCode = null;
+        } else if (clearing == _LocalAccountClear.cancelLogin &&
+            !status.busy && status.errorCode == 'FLOW_INTERRUPTED') {
+          // The qualified cancel was rejected because native state has moved
+          // on. Show that authoritative state and its interruption message;
+          // retrying the old public code cannot cancel a newer login.
+          _clearingAccount = null;
+          _cancellingUserCode = null;
+        }
+      });
+      return true;
     } catch (error) {
-      if (!mounted || !_foreground || epoch != _epoch) return;
+      if (!mounted || !_foreground || epoch != _epoch) return false;
       setState(() => _error = flowAccountErrorMessage(error));
+      return false;
     } finally {
       if (mounted && epoch == _epoch) {
         setState(() => _busy = false);
@@ -134,10 +170,20 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     }
   }
 
-  Future<void> _openLogin() => _run(() async {
-    await _account.openLogin();
-    return _account.status();
-  });
+  Future<void> _openLogin() async {
+    await _run(() async {
+      await _account.openLogin();
+      return _account.status();
+    });
+  }
+
+  Future<void> _clearAccount(_LocalAccountClear clearing, {String? userCode}) async {
+    final cancelCode = userCode ?? _cancellingUserCode;
+    if (clearing == _LocalAccountClear.cancelLogin && cancelCode == null) return;
+    await _run(clearing == _LocalAccountClear.logout
+      ? _account.logout : () => _account.cancelLogin(cancelCode!),
+      clearing: clearing, cancellingUserCode: cancelCode);
+  }
 
   void _help() {
     showDialog<void>(context: context, builder: (context) => AlertDialog(
@@ -201,7 +247,12 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     final connected = status?.state == FlowAccountState.connected && !expired;
     final stale = (status?.stale ?? false) || (connected &&
       _nowMs - (status?.refreshedAt ?? 0) >= 5 * 60000);
-    final enabled = widget.isAndroid && _foreground && !_busy && !(status?.busy ?? false);
+    final clearing = _clearingAccount;
+    final enabled = widget.isAndroid && _foreground && !_busy &&
+        clearing == null && !(status?.busy ?? false);
+    // Cancellation/logout supersede reads and polling in the native authority.
+    // Only another local-clear request remains blocked until its own reply.
+    final canClear = widget.isAndroid && _foreground && !(_busy && clearing != null);
     final errorCode = expired
       ? status?.pending != null ? 'FLOW_LOGIN_EXPIRED' : 'FLOW_SESSION_EXPIRED'
       : status?.errorCode;
@@ -216,6 +267,16 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       const SizedBox(height: 8),
       if (!widget.isAndroid)
         const Text('Вход доступен в приложении для Android.', style: TextStyle(color: PushokPalette.muted))
+      else if (clearing != null) ...[
+        Text(_busy
+          ? clearing == _LocalAccountClear.logout ? 'Выходим из аккаунта…' : 'Отменяем вход…'
+          : clearing == _LocalAccountClear.logout ? 'Выход ещё не подтверждён.' : 'Отмена входа ещё не подтверждена.',
+          key: const Key('flow_account_clearing'), style: const TextStyle(color: PushokPalette.muted)),
+        if (!_busy) TextButton(
+          key: const Key('retry_flow_account_clear'),
+          onPressed: canClear ? () => unawaited(_clearAccount(clearing)) : null,
+          child: Text(clearing == _LocalAccountClear.logout ? 'Повторить выход' : 'Повторить отмену')),
+      ]
       else if (status == null && _busy)
         const Padding(padding: EdgeInsets.symmetric(vertical: 12),
           child: Center(child: CircularProgressIndicator()))
@@ -231,7 +292,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
             onPressed: enabled ? () => unawaited(_run(_account.refresh)) : null,
             icon: const Icon(Icons.refresh), label: const Text('Обновить профиль')),
           TextButton.icon(key: const Key('logout_flow_account'),
-            onPressed: enabled ? () => unawaited(_run(_account.logout)) : null,
+            onPressed: canClear ? () => unawaited(_clearAccount(_LocalAccountClear.logout)) : null,
             icon: const Icon(Icons.logout), label: const Text('Выйти')),
         ]),
       ] else if (pending != null) ...[
@@ -250,7 +311,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
           onPressed: enabled ? () => unawaited(_openLogin()) : null,
           icon: const Icon(Icons.open_in_new), label: const Text('Открыть подтверждение')),
         TextButton(key: const Key('cancel_flow_login'),
-          onPressed: enabled ? () => unawaited(_run(_account.cancelLogin)) : null,
+          onPressed: canClear ? () => unawaited(_clearAccount(
+            _LocalAccountClear.cancelLogin, userCode: pending.userCode)) : null,
           child: const Text('Отменить вход')),
       ] else ...[
         const Text('Войдите через Telegram, чтобы видеть свой профиль и баланс кабинета MTProxy.',

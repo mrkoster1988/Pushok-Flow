@@ -19,7 +19,8 @@ internal data class FlowAccountProfile(val id: String, val displayName: String, 
 }
 
 internal data class FlowAccountSession(val accessToken: String, val expiresAt: Long,
-    val profile: FlowAccountProfile? = null, val refreshedAt: Long? = null) {
+    val profile: FlowAccountProfile? = null, val refreshedAt: Long? = null,
+    val loginUserCode: String? = null) {
     override fun toString() = "FlowAccountSession(redacted)"
 }
 
@@ -110,15 +111,17 @@ internal object FlowAccountPolicy {
     fun telegram(code: String) = "tg://resolve?domain=mtproxy_pushok_bot&start=flow_${requireUserCode(code)}"
     fun browser(code: String) = "$ORIGIN/?flow=${requireUserCode(code)}"
 
-    fun record(value: FlowAccountRecord): Map<String, Any?> = mapOf("version" to 1,
+    fun record(value: FlowAccountRecord): Map<String, Any?> = mapOf("version" to 2,
         "pending" to value.pending?.let { mapOf("device_code" to it.deviceCode, "user_code" to it.userCode,
             "expires_at" to it.expiresAt, "next_poll_at" to it.nextPollAt, "interval" to it.interval) },
         "session" to value.session?.let { mapOf("access_token" to it.accessToken, "expires_at" to it.expiresAt,
-            "profile" to it.profile?.record(), "refreshed_at" to it.refreshedAt) })
+            "profile" to it.profile?.record(), "refreshed_at" to it.refreshedAt,
+            "login_user_code" to it.loginUserCode) })
 
     fun restore(value: Map<String, Any?>): FlowAccountRecord {
         keys(value, setOf("version", "pending", "session"))
-        if (number(value["version"]) != 1L || (value["pending"] != null && value["session"] != null)) invalid()
+        val version = number(value["version"])
+        if (version !in 1L..2L || (value["pending"] != null && value["session"] != null)) invalid()
         val pending = value["pending"]?.let { raw ->
             val item = map(raw)
             keys(item, setOf("device_code", "user_code", "expires_at", "next_poll_at", "interval"))
@@ -128,10 +131,12 @@ internal object FlowAccountPolicy {
         }
         val session = value["session"]?.let { raw ->
             val item = map(raw)
-            keys(item, setOf("access_token", "expires_at", "profile", "refreshed_at"))
+            keys(item, setOf("access_token", "expires_at", "profile", "refreshed_at") +
+                if (version == 2L) setOf("login_user_code") else emptySet())
             if ((item["profile"] == null) != (item["refreshed_at"] == null)) invalid()
             FlowAccountSession(requireAccessToken(text(item["access_token"], 68)), timestamp(item["expires_at"]),
-                item["profile"]?.let { profile(map(it)) }, item["refreshed_at"]?.let(::timestamp))
+                item["profile"]?.let { profile(map(it)) }, item["refreshed_at"]?.let(::timestamp),
+                if (version == 2L) item["login_user_code"]?.let { requireUserCode(text(it, 12)) } else null)
         }
         return FlowAccountRecord(pending, session)
     }

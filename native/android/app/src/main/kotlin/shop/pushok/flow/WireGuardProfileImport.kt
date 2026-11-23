@@ -7,14 +7,12 @@ import android.content.Intent
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.wireguard.config.Config
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayInputStream
-import java.io.Closeable
 import java.lang.ref.WeakReference
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Imports a chosen file or offline QR code into an already-protected editor draft. */
@@ -32,40 +30,15 @@ class WireGuardProfileImport(
         // Never reuse a code within this process: a cancelled old picker cannot complete
         // a newer request, including after Activity replacement. Exhaustion fails closed.
         private val nextCode = AtomicInteger(FIRST_REQUEST_CODE)
-        private val reading = AtomicBoolean(false)
-        private val io = Executors.newSingleThreadExecutor { task ->
-            Thread(task, "pushok-profile-import").apply { isDaemon = true }
-        }
-        private val cleanup = Executors.newSingleThreadExecutor { task ->
-            Thread(task, "pushok-profile-import-cancel").apply { isDaemon = true }
-        }
     }
 
-    private class Request(val code: Int, val source: Source, var result: MethodChannel.Result?) {
-        val cancelled = AtomicBoolean(false)
-        val signal = CancellationSignal()
+    private class Request(val code: Int, val source: Source, var result: MethodChannel.Result?,
+        val signal: CancellationSignal, val work: ProfileImportWork.Task) {
         var timeout: Runnable? = null
         var readStarted = false
-        private val resources = mutableListOf<Closeable>()
-
-        fun attach(resource: Closeable): Boolean = synchronized(resources) {
-            if (cancelled.get()) {
-                try { resource.close() } catch (_: Exception) { }
-                false
-            } else {
-                resources.add(resource)
-                true
-            }
-        }
-
-        fun closeResources() {
-            val open = synchronized(resources) {
-                resources.toList().also { resources.clear() }
-            }
-            // Closing the stream also wakes ordinary blocking pipe reads. Provider open
-            // cancellation and close run away from the platform thread.
-            open.asReversed().forEach { try { it.close() } catch (_: Exception) { } }
-        }
+        var deadlineMs = 0L
+        fun expired() = readStarted && SystemClock.elapsedRealtime() >= deadlineMs
+        fun shouldStop() = work.isCancelled || expired()
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -78,20 +51,28 @@ class WireGuardProfileImport(
             error(result, "PROFILE_IMPORT_UNAVAILABLE")
             return
         }
-        if (pending != null || reading.get()) {
+        if (pending != null) {
             error(result, "PROFILE_IMPORT_BUSY")
+            return
+        }
+        val signal = CancellationSignal()
+        val work = ProfileImportWork.reserve(source == Source.CAMERA, signal::cancel)
+        if (work == null) {
+            error(result, if (source == Source.CAMERA) "PROFILE_IMPORT_BUSY" else "PROFILE_IMPORT_SOURCE_BUSY")
             return
         }
         val code = nextCode.getAndUpdate { if (it <= LAST_REQUEST_CODE) it + 1 else it }
         if (code !in FIRST_REQUEST_CODE..LAST_REQUEST_CODE) {
+            work.cancel()
             error(result, "PROFILE_IMPORT_UNAVAILABLE")
             return
         }
         if (source == Source.CAMERA && !qrSessions.begin(code)) {
+            work.cancel()
             error(result, "PROFILE_IMPORT_BUSY")
             return
         }
-        val request = Request(code, source, result)
+        val request = Request(code, source, result, signal, work)
         pending = request
         val intent = if (source == Source.CAMERA) {
             Intent(activity, WireGuardQrActivity::class.java)
@@ -130,7 +111,7 @@ class WireGuardProfileImport(
                 val cameraError = data?.getStringExtra(WireGuardQrActivity.EXTRA_ERROR)
                 if (cameraError != null) {
                     val safe = cameraError.takeIf { it in ProfileFormatFailure.SAFE_CODES ||
-                        it in setOf("PROFILE_QR_CAMERA_DENIED", "PROFILE_QR_UNAVAILABLE") }
+                        it in setOf("PROFILE_QR_CAMERA_DENIED", "PROFILE_QR_UNAVAILABLE", "PROFILE_QR_MULTIPLE") }
                         ?: "PROFILE_IMPORT_INVALID"
                     finish(request, code = safe)
                     return true
@@ -156,90 +137,94 @@ class WireGuardProfileImport(
             finish(request, code = "PROFILE_IMPORT_INVALID")
             return true
         }
-        if (!reading.compareAndSet(false, true)) {
-            finish(request, code = "PROFILE_IMPORT_BUSY")
-            return true
-        }
         request.readStarted = true
-        request.timeout = Runnable {
-            if (pending === request) {
-                finish(request, code = "PROFILE_IMPORT_FAILED")
-                stopRead(request)
+        request.deadlineMs = SystemClock.elapsedRealtime() + READ_TIMEOUT_MS
+        request.timeout = object : Runnable {
+            override fun run() {
+                if (pending !== request) return
+                val remaining = request.deadlineMs - SystemClock.elapsedRealtime()
+                if (remaining > 0) {
+                    // Handler time pauses in deep sleep; recheck the elapsed budget
+                    // promptly after wake, without queueing multiple watchdogs.
+                    handler.postDelayed(this, minOf(remaining, 250L))
+                } else {
+                    stopRead(request)
+                    finish(request, code = "PROFILE_IMPORT_TIMEOUT")
+                }
             }
-        }.also { handler.postDelayed(it, READ_TIMEOUT_MS) }
+        }.also { handler.postDelayed(it, minOf(READ_TIMEOUT_MS, 250L)) }
         val owner = WeakReference(this)
         val documentResolver = resolver
         val platformHandler = handler
-        io.execute {
-            var payload: ProfileImportPayload.Draft? = null
-            var failure: String? = null
-            try {
-                if (request.cancelled.get()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
+        val accepted = request.work.start(operation = { work ->
+                if (request.shouldStop()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
                 val draft = if (request.source == Source.CAMERA) {
-                    ProfileQrDecoder.normalizePayload(cameraText) { request.cancelled.get() }
+                    ProfileQrDecoder.normalizePayload(cameraText) { request.shouldStop() }
                 } else {
                     val descriptor = documentResolver.openAssetFileDescriptor(uri!!, "r", request.signal)
                         ?: throw ProfileImportReader.Failure("PROFILE_IMPORT_FAILED")
-                    if (!request.attach(descriptor)) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
+                    if (!work.attach(descriptor) || request.shouldStop()) {
+                        throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
+                    }
                     val input = descriptor.createInputStream()
-                    if (!request.attach(input)) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
-                    if (request.source == Source.QR_IMAGE) ProfileQrImageReader.read(input) { request.cancelled.get() }
-                    else ProfileImportReader.read(input) { request.cancelled.get() }
+                    if (!work.attach(input)) throw ProfileImportReader.Failure("PROFILE_IMPORT_INTERRUPTED")
+                    if (request.source == Source.QR_IMAGE) ProfileQrImageReader.read(input) { request.shouldStop() }
+                    else ProfileImportReader.read(input) { request.shouldStop() }
                 }
                 // Classify before crossing the channel. A subscription remains a masked
                 // draft and requires explicit confirmation/import; no URL is fetched here.
                 // A profile still requires explicit Save and authoritative WG validation.
-                val parsedPayload = ProfileImportPayload.parse(draft) { request.cancelled.get() }
+                val parsedPayload = ProfileImportPayload.parse(draft) { request.shouldStop() }
                 if (parsedPayload is ProfileImportPayload.Profile &&
                     parsedPayload.protocol == ConnectionProfile.Kind.WIREGUARD) {
                     val parsed = Config.parse(ByteArrayInputStream(parsedPayload.text.toByteArray(StandardCharsets.UTF_8)))
                     if (parsed.peers.isEmpty()) throw ProfileImportReader.Failure("PROFILE_IMPORT_INVALID")
                 }
-                if (!request.cancelled.get()) payload = parsedPayload
-            } catch (error: ProfileFormatFailure) {
-                failure = error.code
-            } catch (error: ProfileImportReader.Failure) {
-                failure = error.code
-            } catch (_: com.wireguard.config.BadConfigException) {
-                failure = "PROFILE_IMPORT_INVALID"
-            } catch (_: Exception) {
-                failure = "PROFILE_IMPORT_FAILED"
-            } finally {
-                request.closeResources()
-                reading.set(false)
+                parsedPayload
+        }, completion = { outcome ->
+            val value = outcome.getOrNull()
+            val code = when (val failure = outcome.exceptionOrNull()) {
+                null -> null
+                is ProfileFormatFailure -> failure.code
+                is ProfileImportReader.Failure -> failure.code
+                is com.wireguard.config.BadConfigException -> "PROFILE_IMPORT_INVALID"
+                else -> "PROFILE_IMPORT_FAILED"
             }
-            val value = payload
-            val code = failure
             platformHandler.post {
                 val current = owner.get() ?: return@post
-                if (request.cancelled.get() || current.pending !== request) return@post
-                if (current.disposed || !current.isProtected()) {
+                if (request.work.isCancelled || current.pending !== request) return@post
+                if (request.expired()) {
+                    current.stopRead(request)
+                    current.finish(request, code = "PROFILE_IMPORT_TIMEOUT")
+                } else if (current.disposed || !current.isProtected()) {
                     current.finish(request, code = "PROFILE_IMPORT_INTERRUPTED")
                 } else {
                     current.finish(request, value, code)
                 }
             }
-        }
+        })
+        if (!accepted) finish(request, code = "PROFILE_IMPORT_BUSY")
         return true
     }
 
     /** Called only for an editor-owned outstanding import. */
     fun cancel() {
         val request = pending ?: return
-        finish(request)
         stopRead(request)
+        finish(request)
     }
 
     fun dispose() {
         disposed = true
         val request = pending ?: return
-        finish(request, code = "PROFILE_IMPORT_INTERRUPTED")
         stopRead(request)
+        finish(request, code = "PROFILE_IMPORT_INTERRUPTED")
     }
 
     private fun finish(request: Request, value: ProfileImportPayload.Draft? = null, code: String? = null) {
         if (pending !== request) return
         pending = null
+        if (!request.readStarted) request.work.cancel()
         if (request.source == Source.CAMERA) qrSessions.end(request.code)
         request.timeout?.let { handler.removeCallbacks(it) }
         request.timeout = null
@@ -249,16 +234,14 @@ class WireGuardProfileImport(
     }
 
     private fun stopRead(request: Request) {
-        request.cancelled.set(true)
-        if (request.readStarted) cleanup.execute {
-            request.closeResources()
-            try { request.signal.cancel() } catch (_: Exception) { }
-        }
+        request.work.cancel()
     }
 
     private fun error(result: MethodChannel.Result, code: String) {
         val message = when (code) {
-            "PROFILE_IMPORT_BUSY" -> "Импорт профиля уже выполняется"
+            "PROFILE_IMPORT_BUSY" -> "Импорт занят. Закройте текущий выбор или попробуйте QR камерой либо вставку текста"
+            "PROFILE_IMPORT_SOURCE_BUSY" -> "Источник файлов пока занят. Попробуйте QR камерой или вставьте текст профиля"
+            "PROFILE_IMPORT_TIMEOUT" -> "Источник не ответил за 20 секунд. Попробуйте другой файл, QR камерой или вставку текста"
             "PROFILE_IMPORT_TOO_LARGE" -> "Файл профиля больше 65 536 байт"
             "PROFILE_IMPORT_INVALID" -> "Нужен полный профиль WireGuard или ссылка VLESS в формате UTF-8"
             "INVALID_VLESS_CONFIG" -> "Проверьте ссылку VLESS: обязательные параметры отсутствуют или неверны"
@@ -276,7 +259,7 @@ class WireGuardProfileImport(
             "PROFILE_QR_CAMERA_DENIED" -> "Доступ к камере не разрешён"
             "PROFILE_QR_UNAVAILABLE" -> "Не удалось открыть камеру"
             "PROFILE_QR_NOT_FOUND" -> "QR-код не найден на изображении"
-            "PROFILE_QR_MULTIPLE" -> "Выберите изображение с одним QR-кодом"
+            "PROFILE_QR_MULTIPLE" -> "Нужен один полный QR-код. Несколько кодов и части составного кода не поддерживаются"
             "PROFILE_QR_IMAGE_TOO_LARGE" -> "Изображение слишком большое для чтения QR-кода"
             else -> "Не удалось прочитать файл профиля"
         }

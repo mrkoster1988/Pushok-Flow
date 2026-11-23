@@ -201,10 +201,11 @@ class WireGuardQrActivity : Activity() {
                     if (!resumed || finished || isFinishing || isDestroyed || activeEpoch != epoch ||
                         !WireGuardProfileImport.qrSessions.isActive(requestCode)) return
                     if (result.barcodeFormat != BarcodeFormat.QR_CODE) return
-                    val text = result.text
-                    if (text == null || text.length > ProfileImportReader.MAX_BYTES) {
-                        complete(error = "PROFILE_IMPORT_INVALID")
-                    } else complete(text = text)
+                    try {
+                        complete(text = ProfileQrCameraDecoder.readPayload(result.result))
+                    } catch (failure: ProfileImportReader.Failure) {
+                        complete(error = failure.code)
+                    }
                 }
                 override fun possibleResultPoints(points: MutableList<ResultPoint>?) = Unit
             })

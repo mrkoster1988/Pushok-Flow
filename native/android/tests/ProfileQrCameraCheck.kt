@@ -4,9 +4,16 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.DecodeHintType
 import com.google.zxing.EncodeHintType
 import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.ResultMetadataType
+import com.google.zxing.common.BitArray
 import com.google.zxing.common.BitMatrix
 import com.google.zxing.oned.Code128Writer
 import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.decoder.Mode
+import com.google.zxing.qrcode.decoder.Version
+import com.google.zxing.qrcode.encoder.ByteMatrix
+import com.google.zxing.qrcode.encoder.Encoder
 import com.journeyapps.barcodescanner.Decoder
 import com.journeyapps.barcodescanner.DefaultDecoderFactory
 
@@ -70,6 +77,9 @@ private fun reads(label: String, expected: String, source: PlanarYUVLuminanceSou
     check(result?.barcodeFormat == BarcodeFormat.QR_CODE && result.text == expected) {
         "Camera decoder failed: $label"
     }
+    check(ProfileQrCameraDecoder.readPayload(result) == expected) {
+        "Complete camera result rejected: $label"
+    }
 }
 
 private fun importOutcome(read: () -> String): Map<String, String> = try {
@@ -104,12 +114,81 @@ private fun cameraPhotoImportParity() {
             val read = target.decode(source) ?: target.decode(source)
             check(read?.barcodeFormat == BarcodeFormat.QR_CODE) { "Missing parity fixture: $label" }
             // Match production's raw camera result -> bounded normalization -> typed draft.
-            val camera = importOutcome { ProfileQrDecoder.normalizePayload(read!!.text) }
+            val camera = importOutcome {
+                ProfileQrDecoder.normalizePayload(ProfileQrCameraDecoder.readPayload(read!!))
+            }
             val pixels = IntArray(symbol.width * symbol.height) { index ->
                 if (symbol[index % symbol.width, index / symbol.width] != inverted) -0x1000000 else -1
             }
             val photo = importOutcome { ProfileQrDecoder.decodePixels(symbol.width, symbol.height, pixels) }
             check(camera == expected && photo == expected) { "Import parity failed: $label" }
+        }
+    }
+}
+
+/** Real structured-append bitstream: an incomplete segment can itself be a valid URL. */
+private fun structuredAppendSymbol(text: String, index: Int, total: Int): BitMatrix {
+    val version = Version.getVersionForNumber(4)
+    val ec = ErrorCorrectionLevel.L
+    val bytes = text.toByteArray(Charsets.US_ASCII)
+    val bits = BitArray().apply {
+        appendBits(Mode.STRUCTURED_APPEND.bits, 4)
+        appendBits(index, 4)
+        appendBits(total - 1, 4)
+        appendBits(91, 8)
+        appendBits(Mode.BYTE.bits, 4)
+        appendBits(bytes.size, Mode.BYTE.getCharacterCountBits(version))
+        bytes.forEach { appendBits(it.toInt() and 255, 8) }
+    }
+    val blocks = version.getECBlocksForLevel(ec)
+    val dataBytes = version.totalCodewords - blocks.totalECCodewords
+    Encoder::class.java.getDeclaredMethod("terminateBits", Integer.TYPE, BitArray::class.java)
+        .apply { isAccessible = true }.invoke(null, dataBytes, bits)
+    val encoded = Encoder::class.java.getDeclaredMethod("interleaveWithECBytes", BitArray::class.java,
+        Integer.TYPE, Integer.TYPE, Integer.TYPE).apply { isAccessible = true }
+        .invoke(null, bits, version.totalCodewords, dataBytes, blocks.numBlocks) as BitArray
+    val dimension = version.dimensionForVersion
+    val matrix = ByteMatrix(dimension, dimension)
+    Class.forName("com.google.zxing.qrcode.encoder.MatrixUtil")
+        .getDeclaredMethod("buildMatrix", BitArray::class.java, ErrorCorrectionLevel::class.java,
+            Version::class.java, Integer.TYPE, ByteMatrix::class.java)
+        .apply { isAccessible = true }.invoke(null, encoded, ec, version, 0, matrix)
+    val scale = 8
+    val quiet = 4
+    return BitMatrix((dimension + quiet * 2) * scale).also { symbol ->
+        for (y in 0 until dimension) for (x in 0 until dimension) {
+            if (matrix[x, y].toInt() == 1) {
+                symbol.setRegion((x + quiet) * scale, (y + quiet) * scale, scale, scale)
+            }
+        }
+    }
+}
+
+private fun structuredAppendCameraPhotoParity() {
+    val partialUrl = "https://example.invalid/sub/synthetic"
+    check(ProfileImportPayload.parse(partialUrl) is ProfileImportPayload.Subscription)
+    val expected = mapOf("errorCode" to "PROFILE_QR_MULTIPLE")
+    for ((index, total) in listOf(0 to 2, 1 to 2, 0 to 1)) {
+        val symbol = structuredAppendSymbol(partialUrl, index, total)
+        for (inverted in listOf(false, true)) {
+            val target = decoder()
+            val source = frame(symbol, inverted = inverted)
+            val result = target.decode(source) ?: target.decode(source)
+                ?: error("Real structured-append fixture was not decoded")
+            check(result.resultMetadata.containsKey(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE))
+            check(result.resultMetadata.containsKey(ResultMetadataType.STRUCTURED_APPEND_PARITY))
+            check(result.text == partialUrl)
+            // This reproduces the old boundary: validating text alone accepts a
+            // partial token URL. Production must inspect the real result first.
+            check(ProfileImportPayload.parse(result.text) is ProfileImportPayload.Subscription)
+            val camera = importOutcome {
+                ProfileQrDecoder.normalizePayload(ProfileQrCameraDecoder.readPayload(result))
+            }
+            val pixels = IntArray(symbol.width * symbol.height) { offset ->
+                if (symbol[offset % symbol.width, offset / symbol.width] != inverted) -0x1000000 else -1
+            }
+            val photo = importOutcome { ProfileQrDecoder.decodePixels(symbol.width, symbol.height, pixels) }
+            check(camera == expected && photo == expected) { "Incomplete QR accepted by an import route" }
         }
     }
 }
@@ -144,6 +223,7 @@ fun main() {
     repeat(4) { check(target.decode(barcode) == null) { "Non-QR format was accepted" } }
     reads("after non-QR frames", vless, ordinary, target)
     cameraPhotoImportParity()
+    structuredAppendCameraPhotoParity()
 
     println("Profile QR camera checks passed")
 }

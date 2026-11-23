@@ -144,7 +144,7 @@ fun main() {
         caller.submit { outputCall.cancel() }.get(2, TimeUnit.SECONDS)
         check(poll.get(2, TimeUnit.SECONDS) == "FLOW_INTERRUPTED")
         await(output.disconnectEntered, "asynchronous disconnect")
-        serial.submit { outputManager.execute("cancelLogin", noRemote, serialCommit) }.get(2, TimeUnit.SECONDS)
+        serial.submit { outputManager.execute("cancelLogin", noRemote, serialCommit, "2345ABCDEFGH") }.get(2, TimeUnit.SECONDS)
         check(outputStore.value == FlowAccountRecord() && output.release.count == 1L && output.disconnectRelease.count == 1L)
         check(output.firstDisconnectThread?.startsWith("pushok-account-abort") == true)
         output.releaseAll(); await(output.workerCleaned, "cancelled stream cleanup")
@@ -196,6 +196,45 @@ fun main() {
         late.releaseAll(); await(late.workerCleaned, "late response body cleanup")
         check(FlowAccountJson.parses.get() == 0 && lateStore.value == FlowAccountRecord())
         println("PASS: owner invalidation releases logout and discards late credential JSON before parsing")
+
+        // Token issuance is durably committed before /me. The user's displayed
+        // challenge must still cancel that session while /me ignores interrupt.
+        SystemClock.reset()
+        val issued = connection(status = 200)
+        val heldMe = connection(status = 200, blocked = "response")
+        val revoked = connection(status = 204)
+        val issueCall = FlowAccountCall { true }
+        val issueStore = pendingStore()
+        val issueManager = FlowAccountSessionManager(issueStore)
+        FlowAccountJson.decode = {
+            mapOf("status" to "authorized", "access_token" to fixtureToken, "token_type" to "Bearer",
+                "expires_in" to 43200, "scope" to listOf("profile:read", "wallet:read"))
+        }
+        val issueResult = serial.submit<String> { outcome {
+            issueManager.execute("pollLogin", FlowAccountClient(issueCall) { url ->
+                when {
+                    url.path.endsWith("/device/token") -> issued
+                    url.path.endsWith("/me") -> heldMe
+                    else -> error("Unexpected authorization exchange")
+                }
+            }, serialCommit)
+        } }
+        await(heldMe.entered, "profile request after durable token")
+        check(issueStore.value.session?.loginUserCode == "2345ABCDEFGH")
+        issueCall.cancel()
+        check(issueResult.get(2, TimeUnit.SECONDS) == "FLOW_INTERRUPTED")
+        val cleared = serial.submit<String> { outcome {
+            issueManager.execute("cancelLogin", FlowAccountClient(FlowAccountCall { true }) { url ->
+                check(url.path.endsWith("/logout") && issueStore.value == FlowAccountRecord())
+                revoked
+            }, serialCommit, "2345ABCDEFGH")
+        } }.get(2, TimeUnit.SECONDS)
+        check(cleared == "OK" && issueStore.value == FlowAccountRecord())
+        check(heldMe.release.count == 1L && revoked.getRequestProperty("Authorization") == "Bearer $fixtureToken")
+        heldMe.releaseAll(); await(heldMe.workerCleaned, "late profile cleanup")
+        check(heldMe.openedBodies.get() == 0 && issueStore.value == FlowAccountRecord())
+        FlowAccountJson.decode = { emptyMap() }
+        println("PASS: qualified cancel clears and revokes issued session before blocked profile returns")
 
         // The two exchanges in beginLogin share one command budget. The first
         // exchange consumes 19 seconds on the controlled clock; the second must
@@ -343,7 +382,7 @@ fun main() {
         check(saturated.all { it.release.count == 1L })
         saturated.forEach { it.releaseAll(); await(it.workerCleaned, "bounded slot cleanup") }
         println("PASS: two abandoned transports cap worker growth and reject a third without blocking state")
-        println("Flow account transport checks passed (8 groups; synthetic providers, no network)")
+        println("Flow account transport checks passed (9 groups; synthetic providers, no network)")
     } finally {
         fixtures.forEach(TransportConnection::releaseAll)
         FlowAccountJson.decode = { emptyMap() }

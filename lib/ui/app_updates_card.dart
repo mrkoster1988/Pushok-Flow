@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../models/app_release_history.dart';
 import '../platform/app_updates.dart';
 
 class AppUpdatesCard extends StatefulWidget {
@@ -273,6 +274,58 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
     };
   }
 
+  Widget _releaseNotes(AppReleaseNotes notes, {required String heading, required Key key}) =>
+    Column(key: key, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text(heading, style: const TextStyle(fontWeight: FontWeight.w700)),
+      if (notes.publishedOn != null) ...[
+        const SizedBox(height: 4),
+        Text('Опубликовано ${notes.publishedOn!.substring(8, 10)}.'
+          '${notes.publishedOn!.substring(5, 7)}.${notes.publishedOn!.substring(0, 4)}',
+          style: const TextStyle(color: PushokPalette.muted)),
+      ],
+      for (final change in notes.changes) Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('•', style: TextStyle(color: PushokPalette.teal)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(change)),
+        ]),
+      ),
+    ]);
+
+  List<Widget> _releaseHistory(UpdateStatus status) {
+    final currentNotes = bundledAppRelease(status.installedVersion, status.installedBuild) ??
+      (!status.hasNewerVersion && status.releaseNotes?.matches(
+        status.installedVersion, status.installedBuild) == true ? status.releaseNotes : null);
+    final history = bundledAppReleaseHistory
+      .where((notes) => notes.versionCode <= status.installedBuild).toList();
+    if (currentNotes == null && history.isEmpty) return const [];
+    return [
+      const SizedBox(height: 16),
+      const Divider(),
+      if (currentNotes != null) ...[
+        const SizedBox(height: 12),
+        _releaseNotes(currentNotes, heading: 'Что нового в установленной версии ${currentNotes.versionName}',
+          key: const Key('current_release_notes')),
+        const SizedBox(height: 8),
+      ],
+      if (history.isNotEmpty) ExpansionTile(
+        key: const Key('app_release_history'),
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: const Text('История обновлений'),
+        children: [
+          for (final notes in history) Padding(
+            padding: const EdgeInsets.only(top: 8, bottom: 16),
+            child: _releaseNotes(notes, heading: 'Версия ${notes.versionName}'
+              '${notes.matches(status.installedVersion, status.installedBuild) ? ' · установлена' : ''}',
+              key: ValueKey('history_release_${notes.versionCode}')),
+          ),
+        ],
+      ),
+    ];
+  }
+
   List<Widget> _body(UpdateStatus status) {
     final body = <Widget>[];
     final unavailableError = status.phase == UpdatePhase.unavailable &&
@@ -361,6 +414,17 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
         break;
       case UpdatePhase.error:
         break;
+    }
+
+    if (status.hasNewerVersion) {
+      final notes = status.releaseNotes?.matches(status.availableVersion!, status.availableBuild!) == true
+        ? status.releaseNotes : bundledAppRelease(status.availableVersion!, status.availableBuild!);
+      body.add(const SizedBox(height: 12));
+      body.add(notes == null
+        ? const Text('Описание изменений пока недоступно.',
+          key: Key('available_release_notes_missing'), style: TextStyle(color: PushokPalette.muted))
+        : _releaseNotes(notes, heading: 'Изменения в версии ${notes.versionName}',
+          key: const Key('available_release_notes')));
     }
 
     if (status.checkedAtMillis != null) {
@@ -480,6 +544,7 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
           const SizedBox(height: 12),
         ],
         ..._body(_status!),
+        ..._releaseHistory(_status!),
       ],
     ]),
   );

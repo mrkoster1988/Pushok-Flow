@@ -1,7 +1,9 @@
 package shop.pushok.flow
 
 import java.net.URI
-import java.net.URLDecoder
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 
 /** A link only opens a protected draft. It never authorizes fetching or saving. */
@@ -36,9 +38,43 @@ object SubscriptionLinks {
     }
 
     private fun decode(value: String): String {
-        // Form encoding is used by the public import link builder. URLDecoder is strict
-        // about percent escapes; the policy rejects decoded controls and credentials.
-        return URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+        // Decode only this form-encoded wrapper, exactly once. URLDecoder replaces
+        // malformed UTF-8 with U+FFFD, which silently changes a subscription token.
+        // Literal percent octets in the inner HTTPS URL arrive as %25 and survive.
+        val encoded = StandardCharsets.UTF_8.newEncoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .encode(CharBuffer.wrap(value))
+        val source = ByteArray(encoded.remaining())
+        encoded.get(source)
+        val output = ByteArray(source.size)
+        var cursor = 0
+        var count = 0
+        try {
+            while (cursor < source.size) {
+                val next = source[cursor++]
+                output[count++] = when (next) {
+                    '+'.code.toByte() -> ' '.code.toByte()
+                    '%'.code.toByte() -> {
+                        require(cursor + 1 < source.size)
+                        val high = (source[cursor++].toInt() and 255).toChar().digitToIntOrNull(16)
+                            ?: throw IllegalArgumentException()
+                        val low = (source[cursor++].toInt() and 255).toChar().digitToIntOrNull(16)
+                            ?: throw IllegalArgumentException()
+                        ((high shl 4) or low).toByte()
+                    }
+                    else -> next
+                }
+            }
+            return StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(output, 0, count)).toString()
+        } finally {
+            source.fill(0)
+            output.fill(0)
+            if (encoded.hasArray()) encoded.array().fill(0)
+        }
     }
 }
 

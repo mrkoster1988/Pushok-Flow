@@ -79,7 +79,9 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     'PROFILE_IMPORT_TOO_LARGE',
     'PROFILE_IMPORT_INVALID',
     'PROFILE_IMPORT_BUSY',
+    'PROFILE_IMPORT_SOURCE_BUSY',
     'PROFILE_IMPORT_INTERRUPTED',
+    'PROFILE_IMPORT_TIMEOUT',
     'PROFILE_IMPORT_UNAVAILABLE',
     'PROFILE_IMPORT_FAILED',
     'PROFILE_QR_CAMERA_DENIED',
@@ -456,9 +458,13 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         'PROFILE_IMPORT_BUSY' => file
             ? 'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.'
             : 'Импорт профиля уже открыт. Завершите его и попробуйте ещё раз.',
+        'PROFILE_IMPORT_SOURCE_BUSY' =>
+          'Источник файлов пока занят. Попробуйте QR камерой или вставьте текст профиля.',
         'PROFILE_IMPORT_INTERRUPTED' => file
             ? 'Импорт прерван. Выберите файл ещё раз.'
             : 'Импорт прерван. Сканируйте QR-код или выберите фото ещё раз.',
+        'PROFILE_IMPORT_TIMEOUT' =>
+          'Источник файла не ответил вовремя. Повторите импорт или выберите файл из другого приложения.',
         'PROFILE_IMPORT_UNAVAILABLE' => file
             ? 'Не удалось открыть выбор файла. Вставьте конфигурацию вручную.'
             : 'Импорт QR сейчас недоступен. Выберите файл или вставьте конфигурацию либо ссылку.',
@@ -469,7 +475,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         'PROFILE_QR_NOT_FOUND' =>
           'На изображении не найден QR-код. Выберите другое фото.',
         'PROFILE_QR_MULTIPLE' =>
-          'Выберите изображение с одним полным QR-кодом профиля. Несколько или составные QR-коды не поддерживаются.',
+          'Нужен один полный QR-код. Части составного кода и несколько кодов одновременно не поддерживаются.',
         'PROFILE_QR_IMAGE_TOO_LARGE' =>
           'Изображение слишком большое. Выберите уменьшенную копию или вставьте профиль.',
         _ => file

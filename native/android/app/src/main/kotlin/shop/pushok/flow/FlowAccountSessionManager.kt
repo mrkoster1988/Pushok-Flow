@@ -49,7 +49,8 @@ internal class FlowAccountSessionManager(private val store: FlowAccountPersisten
             throw FlowAccountFailure("FLOW_SESSION_EXPIRED")
         }
     }
-    fun execute(command: String, remote: FlowAccountRemote, commit: (() -> Unit) -> Unit) {
+    fun execute(command: String, remote: FlowAccountRemote, commit: (() -> Unit) -> Unit,
+        cancelUserCode: String? = null) {
         load(commit)
         if (command !in setOf("logout", "cancelLogin", "beginLogin")) expire(commit)
         when (command) {
@@ -65,19 +66,29 @@ internal class FlowAccountSessionManager(private val store: FlowAccountPersisten
                 save(FlowAccountRecord(pending = FlowAccountPolicy.device(response.json, now())), commit)
             }
             "pollLogin" -> poll(remote, commit)
-            "cancelLogin" -> if (record.pending != null) save(FlowAccountRecord(), commit)
-            "refresh" -> refresh(remote, commit)
-            "logout" -> {
-                val token = record.session?.accessToken
-                // Local logout is committed before the revoke request, and is never rolled back.
-                save(FlowAccountRecord(), commit)
-                if (token != null) try {
-                    val response = remote.request("POST", "/logout", token, emptyMap())
-                    if (response.status != 204 && response.status != 401) throw FlowAccountFailure("FLOW_LOGOUT_REMOTE_FAILED")
-                } catch (_: Exception) { throw FlowAccountFailure("FLOW_LOGOUT_REMOTE_FAILED") }
+            "cancelLogin" -> {
+                val code = cancelUserCode?.let(FlowAccountPolicy::requireUserCode)
+                    ?: throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED")
+                // The displayed challenge identifies the user's cancellation.
+                // It remains attached after token issuance and a lost /me reply,
+                // so cancellation can clear that login without touching another.
+                if (record.pending?.userCode != code && record.session?.loginUserCode != code) {
+                    if (record.pending != null || record.session != null) throw FlowAccountFailure("FLOW_INTERRUPTED")
+                } else clearAndRevoke(remote, commit)
             }
+            "refresh" -> refresh(remote, commit)
+            "logout" -> clearAndRevoke(remote, commit)
             else -> throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED")
         }
+    }
+    private fun clearAndRevoke(remote: FlowAccountRemote, commit: (() -> Unit) -> Unit) {
+        val token = record.session?.accessToken
+        // The local choice commits first and survives a failed or cancelled revoke.
+        save(FlowAccountRecord(), commit)
+        if (token != null) try {
+            val response = remote.request("POST", "/logout", token, emptyMap())
+            if (response.status != 204 && response.status != 401) throw FlowAccountFailure("FLOW_LOGOUT_REMOTE_FAILED")
+        } catch (_: Exception) { throw FlowAccountFailure("FLOW_LOGOUT_REMOTE_FAILED") }
     }
     private fun poll(remote: FlowAccountRemote, commit: (() -> Unit) -> Unit) {
         val pending = record.pending ?: return
@@ -103,7 +114,8 @@ internal class FlowAccountSessionManager(private val store: FlowAccountPersisten
             "pending" -> save(FlowAccountRecord(pending = FlowAccountPolicy.waiting(response.json, pending, now())), commit)
             "authorized" -> {
                 // A lost /me response must never discard an already-issued, durably protected credential.
-                save(FlowAccountRecord(session = FlowAccountPolicy.authorized(response.json, now())), commit)
+                save(FlowAccountRecord(session = FlowAccountPolicy.authorized(response.json, now())
+                    .copy(loginUserCode = pending.userCode)), commit)
                 refresh(remote, commit)
             }
             else -> throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED")

@@ -160,15 +160,16 @@ class FlowAccount {
   final bool isAndroid;
   static const _channel = MethodChannel('shop.pushok.flow/account');
 
-  Future<FlowAccountStatus> _status(String method) async {
+  Future<FlowAccountStatus> _status(String method, {Map<String, Object?>? arguments}) async {
     if (!isAndroid) throw MissingPluginException();
-    return FlowAccountStatus.fromPlatform(await _channel.invokeMethod<Object?>(method));
+    return FlowAccountStatus.fromPlatform(await _channel.invokeMethod<Object?>(method, arguments));
   }
 
   Future<FlowAccountStatus> status() => _status('status');
   Future<FlowAccountStatus> beginLogin() => _status('beginLogin');
   Future<FlowAccountStatus> pollLogin() => _status('pollLogin');
-  Future<FlowAccountStatus> cancelLogin() => _status('cancelLogin');
+  Future<FlowAccountStatus> cancelLogin(String userCode) =>
+      _status('cancelLogin', arguments: {'userCode': userCode});
   Future<FlowAccountStatus> refresh() => _status('refresh');
   Future<FlowAccountStatus> logout() => _status('logout');
   Future<void> openLogin() async {
@@ -196,6 +197,8 @@ String flowAccountErrorMessage(Object error) {
     'FLOW_LOGOUT_REMOTE_FAILED' =>
       'На этом устройстве вход завершён. Сервер не подтвердил отзыв сессии; она истечёт автоматически.',
     'FLOW_STORE_UNAVAILABLE' => 'Не удалось защитить данные аккаунта. Перезапустите приложение.',
+    'FLOW_INTERRUPTED' =>
+      'Состояние входа изменилось. Проверьте текущий аккаунт и повторите действие при необходимости.',
     'FLOW_BUSY' => 'Дождитесь завершения текущего действия с аккаунтом.',
     _ => 'Не удалось выполнить действие с аккаунтом. Повторите попытку.',
   };

@@ -278,6 +278,24 @@ private fun importClassificationChecks() {
     val limit = urlPrefix + "x".repeat(SubscriptionPolicy.MAX_URL_LENGTH - urlPrefix.length)
     check(ProfileImportPayload.parse(limit) is ProfileImportPayload.Subscription)
     rejected("SUBSCRIPTION_URL_INVALID") { ProfileImportPayload.parse(limit + "x") }
+    // The app wrapper is UTF-8 form encoding, while the inner HTTPS URL may
+    // intentionally contain opaque percent octets. Decode one layer only.
+    val opaque = "https://example.invalid/sub/%FF/%C3%28?token=a+b%2Bc"
+    val opaqueWrapped = "pushokflow://subscription?url=" + URLEncoder.encode(opaque, "UTF-8") +
+        "&name=" + URLEncoder.encode("Моя подписка + 🐈", "UTF-8")
+    check(SubscriptionLinks.parse(opaqueWrapped)?.url == opaque)
+    check(SubscriptionLinks.parse(opaqueWrapped)?.name == "Моя подписка + 🐈")
+    check(ProfileImportPayload.parse(opaque).text == opaque)
+    check(ProfileImportPayload.parse(opaqueWrapped).text == opaque)
+    for (bytes in listOf("%FF", "%C3%28", "%C0%AF", "%ED%A0%80", "%E2%82")) {
+        val badValue = "pushokflow://subscription?url=https%3A%2F%2Fexample.invalid%2Fsub%2F$bytes"
+        val badName = "pushokflow://subscription?url=" + URLEncoder.encode(opaque, "UTF-8") + "&name=$bytes"
+        for (bad in listOf(badValue, badName)) {
+            check(SubscriptionLinks.parse(bad) == null)
+            rejected("SUBSCRIPTION_URL_INVALID") { ProfileImportPayload.parse(bad) }
+        }
+    }
+    check(SubscriptionLinks.parse("pushokflow://subscription?%FF=https%3A%2F%2Fexample.invalid") == null)
     val telegram = "https://t.me/proxy?server=example.invalid&port=443&secret=SYNTHETIC"
     for ((raw, code) in listOf(
         "tg://proxy?server=example.invalid&port=443&secret=SYNTHETIC" to "PROFILE_TELEGRAM_LINK",

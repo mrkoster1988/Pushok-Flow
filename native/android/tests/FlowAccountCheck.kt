@@ -115,7 +115,7 @@ fun main() {
     val late = FlowAccountRemote { _, path, _, _ ->
         check(path == "/device/token")
         valid = false
-        race.execute("cancelLogin", remote, commit)
+        race.execute("cancelLogin", remote, commit, code)
         FlowAccountResponse(200, authorized)
     }
     failure("FLOW_INTERRUPTED") { race.execute("pollLogin", late, oldCommit) }
@@ -139,6 +139,98 @@ fun main() {
     val callCount = calls.size
     failure("FLOW_STORE_UNAVAILABLE") { brokenLogout.execute("refresh", remote, commit) }
     check(calls.size == callCount) // A poisoned store cannot reuse the pre-logout token.
+
+    // Token issuance can win before /me or before the UI receives its reply.
+    // Cancellation remains bound to the displayed public challenge across restart.
+    val issuingStore = AccountMemoryStore().apply { value = FlowAccountRecord(pending =
+        FlowAccountPolicy.device(device, now - 6000)) }
+    val issuing = FlowAccountSessionManager(issuingStore) { now }
+    failure("FLOW_INTERRUPTED") {
+        issuing.execute("pollLogin", FlowAccountRemote { _, path, _, _ ->
+            when (path) {
+                "/device/token" -> FlowAccountResponse(200, authorized)
+                "/me" -> {
+                    check(issuingStore.value.session?.loginUserCode == code)
+                    throw FlowAccountFailure("FLOW_INTERRUPTED")
+                }
+                else -> error("Unexpected endpoint")
+            }
+        }, commit)
+    }
+    check(FlowAccountPolicy.record(issuingStore.value)["version"] == 2)
+    var revokes = 0
+    val revoke = FlowAccountRemote { method, path, bearer, body ->
+        check(method == "POST" && path == "/logout" && bearer == token && body == emptyMap<String, Any?>())
+        revokes++
+        FlowAccountResponse(204)
+    }
+    val restartedIssue = FlowAccountSessionManager(issuingStore) { now }
+    restartedIssue.execute("cancelLogin", FlowAccountRemote { method, path, bearer, body ->
+        check(issuingStore.value == FlowAccountRecord()) // local clear precedes revoke
+        revoke.request(method, path, bearer, body)
+    }, commit, code)
+    check(restartedIssue.record == FlowAccountRecord() && revokes == 1)
+    restartedIssue.execute("cancelLogin", revoke, commit, code)
+    check(revokes == 1) // retry after a confirmed clear is idempotent
+
+    val completedStore = AccountMemoryStore().apply { value = cached }
+    check(cached.session?.profile != null && cached.session.loginUserCode == code)
+    FlowAccountSessionManager(completedStore) { now }.execute("cancelLogin", revoke, commit, code)
+    check(completedStore.value == FlowAccountRecord() && revokes == 2)
+
+    val anotherCode = "6789ABCDEFGH"
+    for (other in listOf(
+        FlowAccountRecord(pending = FlowAccountPolicy.device(device + ("user_code" to anotherCode), now)),
+        cached.copy(session = cached.session!!.copy(loginUserCode = anotherCode)),
+    )) {
+        val otherStore = AccountMemoryStore().apply { value = other }
+        val otherManager = FlowAccountSessionManager(otherStore) { now }
+        failure("FLOW_INTERRUPTED") { otherManager.execute("cancelLogin", revoke, commit, code) }
+        check(otherManager.record == other && otherStore.value == other && revokes == 2)
+    }
+
+    // v1 encrypted records retain their exact session and cached profile. A new
+    // v2 write adds a null origin; unrelated old sessions cannot match a cancel.
+    val oldSession = FlowAccountPolicy.map(FlowAccountPolicy.record(cached)["session"]) - "login_user_code"
+    val legacy = FlowAccountPolicy.restore(mapOf("version" to 1, "pending" to null, "session" to oldSession))
+    check(legacy.session == cached.session!!.copy(loginUserCode = null))
+    val migrated = FlowAccountPolicy.restore(FlowAccountPolicy.record(legacy))
+    check(migrated == legacy && migrated.session?.accessToken == token)
+    val legacyStore = AccountMemoryStore().apply { value = legacy }
+    failure("FLOW_INTERRUPTED") {
+        FlowAccountSessionManager(legacyStore) { now }.execute("cancelLogin", revoke, commit, code)
+    }
+    check(legacyStore.value == legacy && revokes == 2)
+    val v2Session = FlowAccountPolicy.map(FlowAccountPolicy.record(cached)["session"])
+    failure("FLOW_PROTOCOL_UNSUPPORTED") {
+        FlowAccountPolicy.restore(mapOf("version" to 2, "pending" to null,
+            "session" to (v2Session + ("login_user_code" to token))))
+    }
+    failure("FLOW_PROTOCOL_UNSUPPORTED") { restartedIssue.execute("cancelLogin", revoke, commit) }
+    check(revokes == 2)
+
+    val revokeFailureStore = AccountMemoryStore().apply { value = cached }
+    failure("FLOW_LOGOUT_REMOTE_FAILED") {
+        FlowAccountSessionManager(revokeFailureStore) { now }.execute("cancelLogin", FlowAccountRemote { _, path, _, _ ->
+            check(path == "/logout" && revokeFailureStore.value == FlowAccountRecord())
+            throw FlowAccountFailure("FLOW_NETWORK_ERROR")
+        }, commit, code)
+    }
+    check(revokeFailureStore.value == FlowAccountRecord())
+
+    // A /me reply that arrives after a matched cancel cannot restore credentials.
+    val lateProfileStore = AccountMemoryStore().apply { value = cached }
+    val lateProfile = FlowAccountSessionManager(lateProfileStore) { now }
+    var profileCurrent = true
+    failure("FLOW_INTERRUPTED") {
+        lateProfile.execute("refresh", FlowAccountRemote { _, path, _, _ ->
+            check(path == "/me")
+            profileCurrent = false
+            lateProfile.execute("cancelLogin", revoke, commit, code)
+            FlowAccountResponse(200, profile)
+        }, { change -> if (!profileCurrent) throw FlowAccountFailure("FLOW_INTERRUPTED"); change() })
+    }
+    check(lateProfileStore.value == FlowAccountRecord() && lateProfile.record == FlowAccountRecord())
 
     val expiredStore = AccountMemoryStore().apply { value = FlowAccountRecord(pending =
         FlowAccountPolicy.device(device, now - 301_000)) }

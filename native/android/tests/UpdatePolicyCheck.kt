@@ -24,7 +24,7 @@ private fun releaseMetadata(): Map<String, Any?> = mapOf(
     "draft" to false,
     "prerelease" to false,
     "published_at" to "2026-11-22T00:00:00Z",
-    // Unused release text is not a URL, source of app copy, or executable instruction.
+    // Unrecognized prose is not an APK URL, a changes section, or an executable instruction.
     "body" to "arbitrary remote text",
 )
 

@@ -17,8 +17,10 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/TunnelConnectionSess
   native/android/tests/TunnelConnectionSessionCheck.kt -include-runtime -d "$out/connection-session-tests.jar"
 java -jar "$out/connection-session-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
-  native/android/tests/UpdatePolicyCheck.kt -include-runtime -d "$out/update-tests.jar"
-java -jar "$out/update-tests.jar"
+  native/android/tests/UpdatePolicyCheck.kt native/android/tests/UpdateReleaseNotesCheck.kt \
+  -include-runtime -d "$out/update-tests.jar"
+java -cp "$out/update-tests.jar" shop.pushok.flow.UpdatePolicyCheckKt
+java -cp "$out/update-tests.jar" shop.pushok.flow.UpdateReleaseNotesCheckKt
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/tests/UpdateAbiPolicyCheck.kt -include-runtime -d "$out/update-abi-tests.jar"
 java -jar "$out/update-abi-tests.jar"
@@ -36,6 +38,13 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
   native/android/tests/FlowAccountCheck.kt -include-runtime -d "$out/account-tests.jar"
 java -jar "$out/account-tests.jar"
+
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccount.kt \
+  native/android/tests/account_bridge_stubs/*.kt \
+  native/android/tests/FlowAccountBridgeCheck.kt -include-runtime -d "$out/account-bridge-tests.jar"
+java -jar "$out/account-bridge-tests.jar"
 
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt \
@@ -85,6 +94,16 @@ kotlinc "${profile_import_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
   native/android/tests/ProfileQrImportCheck.kt -classpath "$core" -include-runtime -d "$out/qr-import-tests.jar"
 java -cp "$out/qr-import-tests.jar:$core" shop.pushok.flow.ProfileQrImportCheckKt
+
+kotlinc "${profile_import_core[@]}" \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrDecoder.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportWork.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardProfileImport.kt \
+  native/android/tests/profile_import_stubs/*.kt \
+  native/android/tests/ProfileImportExecutionCheck.kt -classpath "$core" \
+  -include-runtime -d "$out/profile-import-execution-tests.jar"
+java -cp "$out/profile-import-execution-tests.jar:$core" shop.pushok.flow.ProfileImportExecutionCheckKt
 embedded_aar="$out/zxing-android-embedded.aar"
 embedded_core="$out/zxing-android-embedded.jar"
 if [[ -n "${FLOW_ZXING_EMBEDDED_AAR:-}" ]]; then

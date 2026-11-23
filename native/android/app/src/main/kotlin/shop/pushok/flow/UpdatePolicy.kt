@@ -3,7 +3,12 @@ package shop.pushok.flow
 import java.net.URI
 import java.io.File
 import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
+import java.text.ParsePosition
+import java.text.SimpleDateFormat
+import java.util.Collections
 import java.util.Locale
+import java.util.TimeZone
 
 internal class UpdateFailure(val code: String) : Exception()
 
@@ -28,7 +33,122 @@ internal data class PublishedUpdateRelease(
     val id: Long,
     val versionName: String,
     val apks: List<PublishedUpdateApk> = emptyList(),
+    val changes: List<String> = emptyList(),
+    val publishedOn: String? = null,
 )
+
+/** Descriptive copy only. It never supplies an APK URL, signature or install decision. */
+internal data class UpdateReleaseNotes(
+    val versionName: String,
+    val versionCode: Long,
+    val apkSha256: String,
+    val changes: List<String>,
+    val publishedOn: String?,
+) {
+    fun metadata(): Map<String, Any?> = mapOf(
+        "versionName" to versionName, "versionCode" to versionCode,
+        "changes" to changes, "publishedOn" to publishedOn,
+    )
+    fun cacheFields(): Map<String, Any?> = metadata() + mapOf("schemaVersion" to 1, "apkSha256" to apkSha256)
+}
+
+/** Optional bounded release text, bound only after the normal manifest verification. */
+internal object UpdateReleaseNotesPolicy {
+    const val MAX_CHANGES = 8
+    const val MAX_CHANGE_CHARS = 600
+    private const val MAX_BODY_CHARS = 24_000
+    private const val MAX_TOTAL_CHARS = 4_000
+    private val fields = setOf("schemaVersion", "versionName", "versionCode", "apkSha256", "changes", "publishedOn")
+    private val headings = setOf("изменения", "что нового", "changes", "what's new")
+    private val markdownLink = Regex("\\[([^\\]\\r\\n]{1,256})]\\([^\\r\\n)]{1,2048}\\)")
+
+    private fun validText(text: String): Boolean = text.isNotBlank() && text.length <= MAX_CHANGE_CHARS &&
+        text.none { it.code < 32 || it.code == 127 || it.code in 0x202A..0x202E || it.code in 0x2066..0x2069 } &&
+        String(text.toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8) == text
+
+    private fun clean(text: String): String = markdownLink.replace(text) { it.groupValues[1] }
+        .replace("**", "").replace("__", "").replace("`", "").replace(Regex("[ \\t]+"), " ").trim()
+
+    /** Only the public human-written changes section is shown; footer/build instructions stay out. */
+    fun changes(raw: Any?): List<String> {
+        val body = raw as? String ?: return emptyList()
+        if (body.length > MAX_BODY_CHARS) return emptyList()
+        var inside = false
+        var fence: String? = null
+        val result = mutableListOf<String>()
+        for (line in body.lineSequence()) {
+            val trimmed = line.trim()
+            val openFence = fence
+            if (openFence != null) {
+                if (trimmed.startsWith(openFence) && trimmed.drop(openFence.length).all { it == openFence[0] || it.isWhitespace() }) fence = null
+                continue
+            }
+            if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+                if (inside) break
+                fence = trimmed.takeWhile { it == trimmed[0] }
+                continue
+            }
+            if (trimmed.startsWith("#")) {
+                if (inside) break
+                if (trimmed.startsWith("## ") && trimmed.drop(3).trim().lowercase(Locale.ROOT) in headings) inside = true
+                continue
+            }
+            if (!inside || trimmed.isEmpty()) continue
+            if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+                result.add(clean(trimmed.drop(2)))
+            } else if (line.firstOrNull()?.isWhitespace() == true && result.isNotEmpty()) {
+                result[result.lastIndex] = clean(result.last() + " " + trimmed)
+            } else {
+                // Stop at prose/code, never accidentally append another section as a change.
+                break
+            }
+            if (result.size > MAX_CHANGES || result.any { !validText(it) } ||
+                result.sumOf { it.length } > MAX_TOTAL_CHARS) return emptyList()
+        }
+        return Collections.unmodifiableList(ArrayList(result))
+    }
+
+    fun date(value: Any?): String? {
+        val text = value as? String ?: return null
+        if (!Regex("[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}").matches(text)) return null
+        val parser = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val position = ParsePosition(0)
+        return if (parser.parse(text, position) != null && position.index == text.length) text else null
+    }
+
+    fun verified(release: PublishedUpdateRelease, manifest: UpdateManifest): UpdateReleaseNotes? {
+        if (release.versionName != manifest.versionName || release.changes.isEmpty() ||
+            release.changes.size > MAX_CHANGES || release.changes.any { !validText(it) } ||
+            release.changes.sumOf { it.length } > MAX_TOTAL_CHARS) return null
+        return UpdateReleaseNotes(manifest.versionName, manifest.versionCode, manifest.sha256,
+            Collections.unmodifiableList(ArrayList(release.changes)), date(release.publishedOn))
+    }
+
+    fun restore(raw: Map<String, Any?>, manifest: UpdateManifest): UpdateReleaseNotes? {
+        val schema = (raw["schemaVersion"] as? Int)?.toLong() ?: raw["schemaVersion"] as? Long
+        val code = (raw["versionCode"] as? Int)?.toLong() ?: raw["versionCode"] as? Long
+        if (raw.keys != fields || schema != 1L || code != manifest.versionCode ||
+            raw["versionName"] != manifest.versionName || raw["apkSha256"] != manifest.sha256) return null
+        val changes = raw["changes"] as? List<*> ?: return null
+        if (changes.isEmpty() || changes.size > MAX_CHANGES || changes.any { it !is String || !validText(it) }) return null
+        val strings = changes.map { it as String }
+        if (strings.sumOf { it.length } > MAX_TOTAL_CHARS) return null
+        val published = raw["publishedOn"]
+        if (published != null && date(published) == null) return null
+        return UpdateReleaseNotes(manifest.versionName, manifest.versionCode, manifest.sha256,
+            Collections.unmodifiableList(ArrayList(strings)), published as? String)
+    }
+
+    fun visible(notes: UpdateReleaseNotes?, manifest: UpdateManifest?, installedVersion: String,
+        installedBuild: Long): UpdateReleaseNotes? = notes?.takeIf {
+        if (manifest != null) it.versionName == manifest.versionName && it.versionCode == manifest.versionCode &&
+            it.apkSha256 == manifest.sha256
+        else it.versionName == installedVersion && it.versionCode == installedBuild
+    }
+}
 
 internal data class UpdateState(
     val phase: String,
@@ -126,7 +246,9 @@ internal object UpdatePolicy {
             raw["prerelease"] != false ||
             !Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z").matches(published)) invalid()
         val apks = if (raw.containsKey("assets")) releaseApks(raw["assets"], version) else emptyList()
-        return PublishedUpdateRelease(id, version, apks)
+        val changes = UpdateReleaseNotesPolicy.changes(raw["body"])
+        return PublishedUpdateRelease(id, version, apks, changes,
+            if (changes.isEmpty()) null else UpdateReleaseNotesPolicy.date(published.take(10)))
     }
 
     private fun apkUrl(version: String, abi: String? = null): String =

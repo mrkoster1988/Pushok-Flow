@@ -61,7 +61,8 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
             change()
         }
     }
-    fun perform(owner: Any, command: String, callback: (Map<String, Any?>) -> Unit) {
+    fun perform(owner: Any, command: String, cancelUserCode: String? = null,
+        callback: (Map<String, Any?>) -> Unit) {
         val supersede = command in setOf("beginLogin", "cancelLogin", "logout")
         val selected: Pair<Long, FlowAccountCall?> = synchronized(lock) {
             if (busy && !supersede) { main.post { callback(metadata("FLOW_BUSY")) }; return }
@@ -81,9 +82,15 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
                 }
                 // Local cancel/logout must commit even if the user immediately leaves the Activity.
                 val commit = transaction(selectedEpoch, owner.takeUnless { command in setOf("cancelLogin", "logout") })
-                manager.execute(command, FlowAccountClient(call), commit)
+                manager.execute(command, FlowAccountClient(call), commit, cancelUserCode)
             } catch (failure: FlowAccountFailure) {
-                synchronized(lock) { if (epoch == selectedEpoch) error = failure.code.takeUnless { it == "FLOW_INTERRUPTED" } }
+                synchronized(lock) {
+                    // A qualified cancel mismatch is a refused clear, not a
+                    // successful sign-out; return the current record with that error.
+                    if (epoch == selectedEpoch) error = failure.code.takeUnless {
+                        it == "FLOW_INTERRUPTED" && command != "cancelLogin"
+                    }
+                }
             } catch (_: Exception) {
                 synchronized(lock) { if (epoch == selectedEpoch) error = "FLOW_NETWORK_ERROR" }
             } finally {
@@ -116,13 +123,26 @@ class FlowAccount(activity: Activity) {
         channel?.setMethodCallHandler(null)
         channel = MethodChannel(messenger, "shop.pushok.flow/account").also { value ->
             value.setMethodCallHandler { call, result ->
-                if (call.arguments != null) { result.error("FLOW_PROTOCOL_UNSUPPORTED", "Неизвестные параметры входа", null); return@setMethodCallHandler }
+                val cancelUserCode = try {
+                    if (call.method == "cancelLogin") {
+                        val arguments = call.arguments as? Map<*, *> ?: throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED")
+                        if (arguments.keys != setOf("userCode")) throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED")
+                        FlowAccountPolicy.requireUserCode(arguments["userCode"] as? String
+                            ?: throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED"))
+                    } else {
+                        if (call.arguments != null) throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED")
+                        null
+                    }
+                } catch (_: FlowAccountFailure) {
+                    result.error("FLOW_PROTOCOL_UNSUPPORTED", "Неизвестные параметры входа", null)
+                    return@setMethodCallHandler
+                }
                 when (call.method) {
                     "status" -> request(result) { done -> coordinator.status(done) }
                     "beginLogin", "pollLogin", "cancelLogin", "refresh", "logout" -> {
                         val launchEpoch = foregroundEpoch.get()
                         request(result, openAfter = call.method == "beginLogin", launchEpoch = launchEpoch) { done ->
-                            coordinator.perform(this, call.method, done)
+                            coordinator.perform(this, call.method, cancelUserCode, done)
                         }
                     }
                     "openLogin" -> openLogin(result)
@@ -157,6 +177,7 @@ class FlowAccount(activity: Activity) {
             if (openAfter && foreground.get() && foregroundEpoch.get() == launchEpoch &&
                 status["state"] == "pending" && status["errorCode"] == null) {
                 try { open(status, launchEpoch) }
+                catch (failure: FlowAccountFailure) { output = status + ("errorCode" to failure.code) }
                 catch (_: Exception) { output = status + ("errorCode" to "FLOW_LOGIN_OPEN_FAILED") }
             }
             result.success(output)
@@ -166,14 +187,19 @@ class FlowAccount(activity: Activity) {
         if (disposed.get()) { result.error("FLOW_INTERRUPTED", "Открытие прервано", null); return }
         val launchEpoch = foregroundEpoch.get()
         results.add(result)
-        coordinator.status { status ->
-            if (!results.remove(result) || disposed.get()) return@status
+        // Opening a confirmation is an action. Lease it through the same epoch
+        // as login/cancel/logout so a queued status callback cannot reopen a
+        // request after cancellation or replacement has already won.
+        coordinator.perform(this, "status") { status ->
+            if (!results.remove(result) || disposed.get()) return@perform
             try { open(status, launchEpoch); result.success(null) }
             catch (failure: FlowAccountFailure) { result.error(failure.code, "Не удалось открыть подтверждение", null) }
             catch (_: Exception) { result.error("FLOW_LOGIN_OPEN_FAILED", "Не удалось открыть подтверждение", null) }
         }
     }
     private fun open(status: Map<String, Any?>, launchEpoch: Long) {
+        (status["errorCode"] as? String)?.let { throw FlowAccountFailure(it) }
+        if (status["busy"] == true) throw FlowAccountFailure("FLOW_BUSY")
         val pending = status["pending"] as? Map<*, *> ?: throw FlowAccountFailure("FLOW_LOGIN_EXPIRED")
         val code = pending["userCode"] as? String ?: throw FlowAccountFailure("FLOW_LOGIN_EXPIRED")
         val expires = pending["expiresAt"] as? Long ?: throw FlowAccountFailure("FLOW_LOGIN_EXPIRED")
