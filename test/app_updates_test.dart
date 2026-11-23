@@ -907,18 +907,18 @@ void main() {
 
   testWidgets('Installed changes and the recent history are available without a network check', (tester) async {
     bridge.state = _status(phase: 'current', automatic: false, permission: true,
-      installedVersion: '0.57.0', installedBuild: 57);
+      installedVersion: '0.58.0', installedBuild: 58);
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.57.0'), findsOneWidget);
-      expect(find.text('Добавлена поддержка персональных WireGuard-подписок в совместимом формате Flow. Магазин должен поддерживать выдачу этого формата.'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.58.0'), findsOneWidget);
+      expect(find.text('Установленные рекомендуемые приложения для прямого доступа включаются по умолчанию при первом запуске маршрутов.'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
       expect(find.byKey(const ValueKey('history_release_53')), findsNothing);
       final history = find.byKey(const Key('app_release_history'));
       await tester.ensureVisible(history);
       await tester.tap(find.text('История обновлений'));
       await tester.pumpAndSettle();
-      for (final build in [57, 56, 55, 54, 53]) {
+      for (final build in [58, 57, 56, 55, 54]) {
         expect(find.byKey(ValueKey('history_release_$build')), findsOneWidget);
       }
       expect(bridge.count('checkForUpdates'), 0);
