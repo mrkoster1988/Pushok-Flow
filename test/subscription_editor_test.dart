@@ -7,6 +7,7 @@ import 'package:pushok_flow/design/pushok_theme.dart';
 import 'package:pushok_flow/platform/subscription_diagnostics.dart';
 import 'package:pushok_flow/platform/subscriptions.dart';
 import 'package:pushok_flow/ui/subscription_editor.dart';
+import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
 
 // Synthetic documentation addresses only; these widgets never make a request.
 const _oldUrl = 'https://198.51.100.53/sub/OLD_SYNTHETIC_TOKEN';
@@ -30,6 +31,11 @@ const _error = Key('subscription_editor_error');
 const _notice = Key('subscription_editor_notice');
 const _copyError = Key('copy_subscription_error');
 const _copyNotice = Key('subscription_error_copy_notice');
+const _openProfile = Key('open_imported_profile');
+const _discardProfile = Key('discard_imported_profile');
+const _profileField = Key('wireguard_profile_field');
+const _profileSave = Key('save_wireguard_profile');
+const _profileBack = Key('close_wireguard_profile');
 
 void _resume(WidgetTester tester) {
   if (tester.binding.lifecycleState == AppLifecycleState.paused) {
@@ -51,6 +57,7 @@ Future<void> _open(
   ValueChanged<bool?>? onResult,
   double textScale = 1,
   SubscriptionDiagnosticSource initialSource = SubscriptionDiagnosticSource.manualInput,
+  Widget Function(String, VoidCallback, VoidCallback)? profileEditorBuilder,
 }) async {
   _resume(tester);
   await tester.pumpWidget(MaterialApp(
@@ -67,6 +74,7 @@ Future<void> _open(
           builder: (_) => SubscriptionEditor(
             draft: draft, initialSource: initialSource, onSave: onSave, onScanQr: onScanQr,
             onImportQrImage: onImportQrImage, onCancelImport: onCancelImport,
+            profileEditorBuilder: profileEditorBuilder,
           ),
         );
         onResult?.call(result);
@@ -106,6 +114,261 @@ void _mockClipboard(Future<Object?> Function(MethodCall call) handler) {
 }
 
 void main() {
+  for (final source in [
+    ('camera', _camera, _vless), ('photo', _photo, _wireguard),
+    ('clipboard', _paste, _vless), ('manual', _save, _vless),
+  ]) {
+    testWidgets('Reverse profile ${source.$1} handoff stays private until a separate explicit save',
+        (tester) async {
+      var subscriptions = 0;
+      var builds = 0;
+      final profiles = <(String, String)>[];
+      final results = <bool?>[];
+      final writes = <String>[];
+      _mockClipboard((call) async {
+        if (call.method == 'Clipboard.getData') return {'text': source.$3};
+        if (call.method == 'Clipboard.setData') writes.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      await _open(tester,
+        onSave: (_, _) async { subscriptions++; },
+        onScanQr: () async => source.$3,
+        onImportQrImage: () async => source.$3,
+        onResult: results.add,
+        profileEditorBuilder: (config, close, completed) {
+          builds++;
+          return WireGuardProfileEditor(
+            key: const Key('subscription_profile_editor'),
+            initialConfig: config, onClose: close, onCompleted: completed,
+            onSave: (config, name) async => profiles.add((config, name)),
+          );
+        },
+      );
+      if (source.$1 == 'manual') {
+        await _tap(tester, _reveal);
+        await tester.enterText(find.byKey(_url), source.$3);
+      }
+      await _tap(tester, source.$2);
+      await tester.pumpAndSettle();
+      _expectMaskedDraft(tester, source.$1 == 'manual' ? source.$3 : _oldUrl);
+      expect(find.byKey(_openProfile), findsOneWidget);
+      expect(find.byKey(_copyError), findsNothing);
+      expect(builds, 0);
+      expect(profiles, isEmpty);
+      expect(subscriptions, 0);
+      expect(writes, isEmpty);
+      expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNull);
+      expect(find.byWidgetPredicate((widget) => widget is Text &&
+        ['SYNTHETIC_PROFILE_SECRET', 'PrivateKey', '198.51.100.53:443']
+          .any((secret) => (widget.data ?? widget.textSpan?.toPlainText() ?? '').contains(secret))),
+        findsNothing);
+      await _tap(tester, _openProfile);
+      await tester.pumpAndSettle();
+      final field = _field(tester, _profileField);
+      expect(field.controller!.text, source.$3);
+      expect(field.obscureText, isTrue);
+      expect(field.enableInteractiveSelection, isFalse);
+      expect(profiles, isEmpty);
+      expect(results, isEmpty);
+      await _tap(tester, _profileSave);
+      await tester.pumpAndSettle();
+      expect(profiles, [(source.$3, 'Мой профиль')]);
+      expect(subscriptions, 0);
+      expect(results, [true]);
+      expect(writes, isEmpty);
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final systemBack in [false, true]) {
+    testWidgets('Reverse profile ${systemBack ? 'system back' : 'back button'} restores the subscription draft and rejects old actions',
+        (tester) async {
+      var saves = 0;
+      final results = <bool?>[];
+      final childCallbacks = <(VoidCallback, VoidCallback)>[];
+      await _open(tester,
+        onSave: (_, _) async { saves++; },
+        onScanQr: () async => _vless,
+        onResult: results.add,
+        profileEditorBuilder: (config, close, completed) {
+          childCallbacks.add((close, completed));
+          return WireGuardProfileEditor(
+            initialConfig: config, onClose: close, onCompleted: completed,
+            onSave: (_, _) async { saves++; },
+          );
+        },
+      );
+      final oldSubscriptionSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+      final oldSubscriptionClose = tester.widget<IconButton>(find.byKey(_close)).onPressed!;
+      await _tap(tester, _camera);
+      final oldOpen = tester.widget<OutlinedButton>(find.byKey(_openProfile)).onPressed!;
+      await _tap(tester, _openProfile);
+      await tester.pumpAndSettle();
+      oldSubscriptionSave();
+      oldSubscriptionClose();
+      final oldSave = tester.widget<FilledButton>(find.byKey(_profileSave)).onPressed!;
+      final oldClose = tester.widget<IconButton>(find.byKey(_profileBack)).onPressed!;
+      if (systemBack) {
+        await tester.binding.handlePopRoute();
+      } else {
+        oldClose();
+      }
+      // Before the parent's next frame, the old child still exists but is closed.
+      oldSave();
+      oldClose();
+      oldOpen();
+      await tester.pumpAndSettle();
+      _expectMaskedDraft(tester, _oldUrl);
+      expect(find.byKey(_openProfile), findsOneWidget);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(saves, 0);
+      expect(results, isEmpty);
+      final firstChild = childCallbacks.first;
+      await _tap(tester, _openProfile);
+      await tester.pumpAndSettle();
+      firstChild.$1();
+      firstChild.$2();
+      await tester.pump();
+      expect(find.byType(WireGuardProfileEditor), findsOneWidget);
+      expect(results, isEmpty);
+      await _tap(tester, _profileBack);
+      await tester.pumpAndSettle();
+      _expectMaskedDraft(tester, _oldUrl);
+      await _tap(tester, _discardProfile);
+      oldOpen();
+      await tester.pumpAndSettle();
+      expect(find.byKey(_openProfile), findsNothing);
+      expect(tester.widget<FilledButton>(find.byKey(_save)).onPressed, isNotNull);
+      expect(saves, 0);
+      await _tap(tester, _close);
+      await tester.pumpAndSettle();
+      expect(results, [null]);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('Reverse profile offer invalidates captured actions on input import failure and lifecycle changes',
+      (tester) async {
+    final laterQr = Completer<String?>();
+    var reads = 0;
+    var builds = 0;
+    addTearDown(() => _resume(tester));
+    await _open(tester,
+      onSave: (_, _) async => fail('A subscription must not be saved'),
+      onScanQr: () async => _vless,
+      onImportQrImage: () => ++reads == 1 ? laterQr.future
+          : Future.error(PlatformException(code: 'PROFILE_QR_NOT_FOUND', message: _vless)),
+      profileEditorBuilder: (config, close, completed) {
+        builds++;
+        return WireGuardProfileEditor(initialConfig: config,
+          onClose: close, onCompleted: completed,
+          onSave: (_, _) async => fail('A profile must not be saved'));
+      },
+    );
+    await _tap(tester, _camera);
+    final beforeEdit = tester.widget<OutlinedButton>(find.byKey(_openProfile)).onPressed!;
+    _field(tester, _name).onChanged!('Changed');
+    beforeEdit();
+    await tester.pump();
+    expect(builds, 0);
+    expect(find.byKey(_openProfile), findsNothing);
+    await _tap(tester, _camera);
+    final beforeImport = tester.widget<OutlinedButton>(find.byKey(_openProfile)).onPressed!;
+    await _tap(tester, _photo);
+    beforeImport();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    laterQr.complete(_wireguard);
+    await tester.pumpAndSettle();
+    _expectMaskedDraft(tester, _oldUrl);
+    expect(tester.widget<OutlinedButton>(find.byKey(_openProfile)).onPressed, isNull);
+    beforeImport();
+    _resume(tester);
+    await tester.pump();
+    beforeImport();
+    expect(builds, 0);
+    final beforeBackground = tester.widget<OutlinedButton>(find.byKey(_openProfile)).onPressed!;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    beforeBackground();
+    _resume(tester);
+    beforeBackground();
+    await tester.pump();
+    expect(builds, 0);
+    final beforeFailure = tester.widget<OutlinedButton>(find.byKey(_openProfile)).onPressed!;
+    await _tap(tester, _photo);
+    await tester.pumpAndSettle();
+    beforeFailure();
+    await tester.pump();
+    expect(find.byKey(_error), findsOneWidget);
+    expect(find.byKey(_openProfile), findsNothing);
+    expect(builds, 0);
+    expect(find.textContaining('SYNTHETIC_PROFILE_SECRET'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Reverse profile cancellation and unsupported or oversized QR values clear the offer without changing the draft',
+      (tester) async {
+    String? value = _vless;
+    var builds = 0;
+    await _open(tester,
+      onSave: (_, _) async => fail('No save expected'),
+      onScanQr: () async => value,
+      profileEditorBuilder: (_, _, _) { builds++; return const SizedBox.shrink(); },
+    );
+    for (final invalid in <String?>[
+      null, 'vless://${'x' * 65537}', 'vmess://SYNTHETIC_UNSUPPORTED',
+      'trojan://SYNTHETIC_UNSUPPORTED', '[Interfaces]\nPrivateKey = SYNTHETIC_UNSUPPORTED',
+    ]) {
+      value = _vless;
+      await _tap(tester, _camera);
+      final oldOpen = tester.widget<OutlinedButton>(find.byKey(_openProfile)).onPressed!;
+      value = invalid;
+      await _tap(tester, _camera);
+      await tester.pumpAndSettle();
+      oldOpen();
+      await tester.pump();
+      _expectMaskedDraft(tester, _oldUrl);
+      expect(find.byKey(_openProfile), findsNothing);
+      expect(find.byKey(_error), invalid == null ? findsNothing : findsOneWidget);
+      expect(builds, 0);
+      expect(find.textContaining('SYNTHETIC_UNSUPPORTED'), findsNothing);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Reverse profile save blocks back and duplicate callbacks until native completion',
+      (tester) async {
+    final pending = Completer<void>();
+    var saves = 0;
+    final results = <bool?>[];
+    await _open(tester,
+      onSave: (_, _) async => fail('No subscription save expected'),
+      onScanQr: () async => _vless, onResult: results.add,
+      profileEditorBuilder: (config, close, completed) => WireGuardProfileEditor(
+        initialConfig: config, onClose: close, onCompleted: completed,
+        onSave: (_, _) { saves++; return pending.future; },
+      ),
+    );
+    await _tap(tester, _camera);
+    await _tap(tester, _openProfile);
+    final save = tester.widget<FilledButton>(find.byKey(_profileSave)).onPressed!;
+    final back = tester.widget<IconButton>(find.byKey(_profileBack)).onPressed!;
+    save();
+    back();
+    save();
+    await tester.pump();
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byType(WireGuardProfileEditor), findsOneWidget);
+    expect(saves, 1);
+    expect(results, isEmpty);
+    expect(tester.widget<IconButton>(find.byKey(_profileBack)).onPressed, isNull);
+    pending.complete();
+    await tester.pumpAndSettle();
+    expect(results, [true]);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final source in [('camera', _camera), ('photo', _photo)]) {
     testWidgets(source.$1 + ' fills only the masked subscription draft until explicit save',
         (tester) async {

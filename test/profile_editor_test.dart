@@ -60,6 +60,8 @@ Future<void> _openEditor(
   Future<void> Function()? onCancelImport,
   Future<void> Function(String, String)? onSaveSubscription,
   VoidCallback? onSubscriptionSaved,
+  VoidCallback? onClose,
+  VoidCallback? onCompleted,
   double textScale = 1,
 }) async {
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -89,6 +91,8 @@ Future<void> _openEditor(
               onCancelImport: onCancelImport,
               onSaveSubscription: onSaveSubscription,
               onSubscriptionSaved: onSubscriptionSaved,
+              onClose: onClose,
+              onCompleted: onCompleted,
               connectAfterSave: connectAfterSave,
             ),
           );
@@ -116,6 +120,121 @@ Future<void> _tapSave(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('Inline profile callbacks complete once without returning a String through the enclosing route',
+      (tester) async {
+    final saved = Completer<void>();
+    var saves = 0;
+    var closes = 0;
+    var completed = 0;
+    final results = <String?>[];
+    await _openEditor(tester,
+      initialConfig: _vless,
+      onSave: (_, _) { saves++; return saved.future; },
+      onClose: () { closes++; },
+      onCompleted: () { completed++; },
+      onResult: results.add,
+    );
+    final oldSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+    final oldBack = tester.widget<IconButton>(find.byKey(_close)).onPressed!;
+    expect(find.byTooltip('Вернуться к подписке'), findsOneWidget);
+    oldSave();
+    oldSave();
+    oldBack();
+    await tester.pump();
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(saves, 1);
+    expect(closes, 0);
+    expect(completed, 0);
+    expect(results, isEmpty);
+    saved.complete();
+    await tester.pump();
+    expect(completed, 1);
+    expect(results, isEmpty);
+    // The embedding parent owns removal. Even before it rebuilds, no old action
+    // may save again, return twice or close the parent's route.
+    oldSave();
+    oldBack();
+    await tester.pump();
+    expect(saves, 1);
+    expect(closes, 0);
+    expect(completed, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Inline profile return cancels import and invalidates closing-frame results and buttons',
+      (tester) async {
+    final qr = Completer<String?>();
+    var cancels = 0;
+    var closes = 0;
+    var saves = 0;
+    await _openEditor(tester,
+      initialConfig: _vless,
+      onSave: (_, _) async { saves++; },
+      onImportQrImage: () => qr.future,
+      onCancelImport: () async {
+        cancels++;
+        throw PlatformException(code: 'PRIVATE_CANCEL_FAILURE', message: _config);
+      },
+      onClose: () { closes++; },
+      onCompleted: () => fail('No save expected'),
+    );
+    final oldSave = tester.widget<FilledButton>(find.byKey(_save)).onPressed!;
+    final oldBack = tester.widget<IconButton>(find.byKey(_close)).onPressed!;
+    final oldReveal = tester.widget<IconButton>(find.byKey(_visibility)).onPressed!;
+    await _tapEditorKey(tester, _qrImage);
+    await tester.pump();
+    oldBack();
+    oldBack();
+    oldSave();
+    oldReveal();
+    qr.complete(_config);
+    await tester.pump();
+    expect(closes, 1);
+    expect(cancels, 1);
+    expect(saves, 0);
+    final field = tester.widget<TextField>(find.byKey(_field));
+    expect(field.controller!.text, _vless);
+    expect(field.obscureText, isTrue);
+    expect(find.textContaining('PRIVATE_CANCEL_FAILURE'), findsNothing);
+    expect(find.byKey(const Key('wireguard_profile_notice')), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(cancels, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Inline profile save failure preserves the draft and completes only after an explicit retry',
+      (tester) async {
+    var saves = 0;
+    var completed = 0;
+    await _openEditor(tester,
+      initialConfig: _vless,
+      onSave: (_, _) async {
+        if (++saves == 1) {
+          throw PlatformException(code: 'INVALID_VLESS_CONFIG',
+            message: 'PRIVATE_SERVER_MESSAGE', details: _vless);
+        }
+      },
+      onClose: () {},
+      onCompleted: () { completed++; },
+    );
+    await _tapSave(tester);
+    await tester.pumpAndSettle();
+    expect(saves, 1);
+    expect(completed, 0);
+    expect(tester.widget<TextField>(find.byKey(_field)).controller!.text, _vless);
+    expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
+    expect(find.textContaining('PRIVATE_SERVER_MESSAGE'), findsNothing);
+    expect(tester.widget<IconButton>(find.byKey(_close)).onPressed, isNotNull);
+    await _tapSave(tester);
+    await tester.pump();
+    expect(saves, 2);
+    expect(completed, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
   const subscriptionUrl = 'https://example.invalid/sub/PRIVATE%2FTOKEN?key=a%2Bb+c';
   const offerSubscription = Key('open_imported_subscription');
   const discardSubscription = Key('discard_imported_subscription');

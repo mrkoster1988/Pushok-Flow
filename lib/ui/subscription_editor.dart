@@ -11,12 +11,19 @@ import 'subscription_diagnostic_copy.dart';
 
 enum _SubscriptionQrSource { camera, image }
 
+/// Transient credentials stay in memory and are never part of UI feedback.
+class _ImportedProfileDraft {
+  const _ImportedProfileDraft(this.config);
+  final String config;
+}
+
 /// The caller owns a ProfilePrivacy lease for this route and its closing frame.
 class SubscriptionEditor extends StatefulWidget {
   const SubscriptionEditor({super.key, this.draft,
     this.initialSource = SubscriptionDiagnosticSource.manualInput,
     required this.onSave, this.onClose, this.onCompleted,
-    this.onScanQr, this.onImportQrImage, this.onCancelImport});
+    this.onScanQr, this.onImportQrImage, this.onCancelImport,
+    this.profileEditorBuilder});
   final SubscriptionDraft? draft;
   final SubscriptionDiagnosticSource initialSource;
   final Future<void> Function(String url, String name) onSave;
@@ -26,6 +33,9 @@ class SubscriptionEditor extends StatefulWidget {
   /// Inline import keeps the original profile draft in the same protected route.
   final VoidCallback? onClose;
   final VoidCallback? onCompleted;
+  /// Opens only after an explicit choice, within this same protected route.
+  final Widget Function(String config, VoidCallback onClose,
+      VoidCallback onCompleted)? profileEditorBuilder;
 
   @override
   State<SubscriptionEditor> createState() => _SubscriptionEditorState();
@@ -51,8 +61,12 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   String? _error;
   String? _notice;
   SubscriptionDiagnostic? _diagnostic;
+  _ImportedProfileDraft? _profileDraft;
+  _ImportedProfileDraft? _editingProfile;
+  int _profileActionEpoch = 0;
   late SubscriptionDiagnosticSource _inputSource;
-  bool get _busy => _saving || _pasting || _importing || _closing;
+  bool get _busy => _saving || _pasting || _importing || _closing ||
+      _editingProfile != null;
   bool get _canAct {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     return _foreground &&
@@ -77,6 +91,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   void dispose() {
     _cancelPendingImport();
     _inputEpoch++;
+    _profileActionEpoch++;
     WidgetsBinding.instance.removeObserver(this);
     _urlFocus.removeListener(_finishInputCleanup);
     _nameFocus.removeListener(_finishInputCleanup);
@@ -93,6 +108,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     final foreground = state == AppLifecycleState.resumed;
     setState(() {
       _foreground = foreground;
+      _profileActionEpoch++;
       if (!foreground) {
         _visible = false;
         _inputEpoch++;
@@ -126,16 +142,73 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     _error = null;
     _notice = null;
     _diagnostic = null;
+    _profileDraft = null;
+    _profileActionEpoch++;
   }
 
   void _setFailure(String? code, String message, {SubscriptionDiagnosticSource? source}) {
     setState(() {
+      _clearFeedback();
       _error = message;
       _notice = null;
       _diagnostic = SubscriptionDiagnostic.fromCode(code,
         operation: SubscriptionDiagnosticOperation.addSubscription,
         source: source ?? _inputSource);
     });
+  }
+
+  bool _isProfileCandidate(String text) {
+    if (text.length > 65536) return false;
+    final trimmed = text.trim();
+    final scheme = RegExp(r'^([A-Za-z][A-Za-z0-9+.-]*)://')
+        .firstMatch(trimmed)?.group(1)?.toLowerCase();
+    if (scheme != null) return scheme == 'vless';
+    return RegExp(r'^\[Interface\]\s*$', multiLine: true).hasMatch(trimmed);
+  }
+
+  bool _offerProfile(String config) {
+    if (widget.profileEditorBuilder == null || !_isProfileCandidate(config)) return false;
+    _clearInputSelection();
+    setState(() {
+      _clearFeedback();
+      _visible = false;
+      _profileDraft = _ImportedProfileDraft(config);
+      _notice = 'Найдено отдельное подключение. Открыть редактор профиля?';
+    });
+    return true;
+  }
+
+  void _openProfile(_ImportedProfileDraft draft, int epoch) {
+    if (!mounted || _busy || !_canAct || epoch != _profileActionEpoch ||
+        !identical(_profileDraft, draft) || widget.profileEditorBuilder == null) return;
+    _clearInputSelection();
+    // Reopening the same offer creates a new child session. A callback captured
+    // by the earlier child must not close or complete the newly opened editor.
+    setState(() {
+      _visible = false;
+      _editingProfile = _ImportedProfileDraft(draft.config);
+    });
+  }
+
+  void _discardProfile(_ImportedProfileDraft draft, int epoch) {
+    if (!mounted || _busy || !_canAct || epoch != _profileActionEpoch ||
+        !identical(_profileDraft, draft)) return;
+    setState(_clearFeedback);
+  }
+
+  void _complete() {
+    if (!mounted || _closing) return;
+    _closing = true;
+    _inputEpoch++;
+    _profileActionEpoch++;
+    _profileDraft = null;
+    _editingProfile = null;
+    _visible = false;
+    if (widget.onCompleted != null) {
+      widget.onCompleted!();
+    } else {
+      Navigator.of(context).pop<bool>(true);
+    }
   }
 
   Future<void> _paste() async {
@@ -145,10 +218,13 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     try {
       final value = await Clipboard.getData(Clipboard.kTextPlain);
       if (!mounted || _closing || !_canAct || epoch != _inputEpoch) return;
-      final text = value?.text?.trim();
+      final raw = value?.text;
+      final text = raw?.trim();
       if (text == null || text.isEmpty) {
         _setFailure('SUBSCRIPTION_CLIPBOARD_EMPTY', 'В буфере обмена нет ссылки подписки.',
           source: SubscriptionDiagnosticSource.clipboard);
+      } else if (_offerProfile(raw!)) {
+        return;
       } else if (!SubscriptionDraft.validUrl(text)) {
         _setFailure('SUBSCRIPTION_URL_INVALID', 'Скопируйте полную HTTPS-ссылку подписки.',
           source: SubscriptionDiagnosticSource.clipboard);
@@ -198,7 +274,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     });
     try {
       final value = await read();
-      if (!mounted || _closing || epoch != _importEpoch || value == null) return;
+      if (!mounted || _closing || epoch != _importEpoch || value == null ||
+          ModalRoute.of(context)?.isCurrent == false) return;
       final url = value.trim();
       final uri = url.length <= 4096 ? Uri.tryParse(url) : null;
       if (uri != null &&
@@ -210,9 +287,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
         return;
       }
       if (!SubscriptionDraft.validUrl(url)) {
-        final profile = url.length <= 65536 &&
-            (url.toLowerCase().startsWith('vless://') ||
-             RegExp(r'^\[Interface\]\s*$', multiLine: true).hasMatch(url));
+        if (_offerProfile(value)) return;
+        final profile = _isProfileCandidate(value);
         _setFailure(profile ? 'UNSUPPORTED_PROFILE' : 'SUBSCRIPTION_URL_INVALID', profile
             ? 'Это QR-код отдельного подключения. Добавьте его через '
               '«Серверы → Профили подключения → Добавить профиль». '
@@ -280,9 +356,10 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   };
 
   Future<void> _save() async {
-    if (!mounted || _busy || !_canAct) return;
+    if (!mounted || _busy || !_canAct || _profileDraft != null) return;
     final url = _url.text.trim();
     final name = _name.text.trim();
+    if (_offerProfile(_url.text)) return;
     if (!WireGuardProfiles.isValidName(name)) {
       _setFailure('PROFILE_NAME_INVALID', 'Укажите название: от 1 до 64 символов.');
       return;
@@ -296,11 +373,7 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
     try {
       await widget.onSave(url, name);
       if (!mounted || _closing) return;
-      if (widget.onCompleted != null) {
-        widget.onCompleted!();
-      } else {
-        Navigator.of(context).pop<bool>(true);
-      }
+      _complete();
     } catch (error) {
       if (mounted && !_closing) {
         _saving = false;
@@ -311,9 +384,12 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
   }
 
   void _closeEditor() {
-    if (!mounted || _saving || _pasting || _closing || !_canAct) return;
+    if (!mounted || _saving || _pasting || _closing ||
+        _editingProfile != null || !_canAct) return;
     _closing = true;
     _inputEpoch++;
+    _profileActionEpoch++;
+    _profileDraft = null;
     _visible = false;
     _cancelPendingImport();
     _clearInputSelection();
@@ -332,7 +408,23 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
 
   @override
   Widget build(BuildContext context) {
+    final editing = _editingProfile;
+    if (editing != null && widget.profileEditorBuilder != null) {
+      return widget.profileEditorBuilder!(editing.config, () {
+        if (!mounted || _closing || !_canAct ||
+            !identical(_editingProfile, editing)) return;
+        setState(() {
+          _editingProfile = null;
+          _profileActionEpoch++;
+        });
+      }, () {
+        if (!mounted || _closing || !identical(_editingProfile, editing)) return;
+        _complete();
+      });
+    }
     final diagnostic = _diagnostic;
+    final profile = _profileDraft;
+    final profileEpoch = _profileActionEpoch;
     final host = SubscriptionDraft.validUrl(_url.text.trim())
         ? Uri.parse(_url.text.trim()).host : null;
     return PopScope<Object?>(canPop: !_saving && !_closing && widget.onClose == null,
@@ -340,6 +432,8 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
         if (didPop) {
           _closing = true;
           _inputEpoch++;
+          _profileActionEpoch++;
+          _profileDraft = null;
           _visible = false;
           _cancelPendingImport();
         } else if (widget.onClose != null) {
@@ -449,9 +543,24 @@ class _SubscriptionEditorState extends State<SubscriptionEditor>
                     key: const Key('subscription_editor_notice'),
                     style: const TextStyle(color: PushokPalette.mint))),
                 ],
+                if (profile != null && widget.profileEditorBuilder != null) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(key: const Key('open_imported_profile'),
+                    onPressed: _busy || !_canAct ? null
+                        : () => _openProfile(profile, profileEpoch),
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('Добавить как профиль')),
+                  TextButton(key: const Key('discard_imported_profile'),
+                    onPressed: _busy || !_canAct ? null
+                        : () => _discardProfile(profile, profileEpoch),
+                    child: const Text('Отменить импорт профиля')),
+                  const SizedBox(height: 6),
+                  const Text('Черновик подписки сохранён. Профиль будет проверен при сохранении.',
+                    style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
+                ],
                 const SizedBox(height: 16),
                 FilledButton.icon(key: const Key('save_subscription'),
-                  onPressed: _busy || !_canAct ? null : _save,
+                  onPressed: _busy || !_canAct || profile != null ? null : _save,
                   icon: _saving ? const SizedBox(width: 18, height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.add_link),
                   label: Text(_saving ? 'Загружаем серверы…' : 'Добавить подписку')),

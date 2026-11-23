@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/main.dart';
+import 'package:pushok_flow/models/app_version.dart';
 import 'package:pushok_flow/ui/subscription_editor.dart';
 import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
 
@@ -11,9 +12,17 @@ const _manualId = '10000000-0000-4000-8000-000000000001';
 const _managedId = '10000000-0000-4000-8000-000000000002';
 const _subscriptionId = '10000000-0000-4000-8000-000000000003';
 const _otherSubscriptionId = '10000000-0000-4000-8000-000000000004';
+const _qrProfileId = '10000000-0000-4000-8000-000000000005';
 const _privateUrl = 'https://example.invalid/sub/PRIVATE_TOKEN';
 const _manualConfig = '[Interface]\nPrivateKey = UI_ONLY\nAddress = 10.0.0.2/32\n'
     '[Peer]\nPublicKey = UI_ONLY_PEER\n';
+const _qrVlessConfig = 'vless://01234567-89ab-4cde-8f01-23456789abcd@'
+    'qr.example.invalid:443?security=tls&type=tcp#QR_SYNTHETIC_PROFILE';
+const _qrWireguardConfig = '[Interface]\n'
+    'PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE=\n'
+    'Address = 10.54.0.2/32\n[Peer]\n'
+    'PublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI=\n'
+    'Endpoint = qr.example.invalid:51820\nAllowedIPs = 0.0.0.0/0\n';
 
 class _Bridge {
   bool connected = false;
@@ -28,6 +37,12 @@ class _Bridge {
   String? manualRefreshFailureCode;
   bool rememberManualRefreshFailure = true;
   Object? importFailure;
+  bool allowNewProfileSave = false;
+  Object? profileSaveFailure;
+  String? savedQrProfileName;
+  String? savedQrProfileConfig;
+  Map<String, Object?> qrPayload = {'kind': 'subscription', 'url': _privateUrl};
+  final profileSaves = <Map<String, Object?>>[];
   final refreshErrors = <String, String>{};
   final refreshedIds = <String>[];
   Object? subscriptionStatusError;
@@ -67,6 +82,7 @@ class _Bridge {
           {'id': _manualId, 'name': 'Мой сервер'},
           if (imported) {'id': _managedId, 'name': 'Из магазина',
             'subscriptionId': _subscriptionId, 'subscriptionName': 'Магазин'},
+          if (savedQrProfileName != null) {'id': _qrProfileId, 'name': savedQrProfileName},
         ],
         'activeProfileId': _manualId,
       };
@@ -79,8 +95,18 @@ class _Bridge {
       case 'loadWireGuardProfile': return _manualConfig;
       case 'scanWireGuardProfileQr':
       case 'importWireGuardProfileQrImage':
-        return {'kind': 'subscription', 'url': _privateUrl};
-      case 'saveWireGuardProfile': fail('Adding a subscription must not overwrite a profile');
+        return qrPayload;
+      case 'saveWireGuardProfile':
+        if (!allowNewProfileSave) fail('Adding a subscription must not overwrite a profile');
+        final arguments = Map<String, Object?>.from(call.arguments as Map);
+        expect(arguments.keys, unorderedEquals(['config', 'name', 'createNew']));
+        expect(arguments['createNew'], isTrue);
+        expect(leases, isNotEmpty);
+        profileSaves.add(arguments);
+        if (profileSaveFailure != null) throw profileSaveFailure!;
+        savedQrProfileName = arguments['name'] as String;
+        savedQrProfileConfig = arguments['config'] as String;
+        return null;
       case 'connectWireGuard': fail('A subscription must not connect automatically');
       default: return null;
     }
@@ -195,6 +221,28 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> tapControl(WidgetTester tester, String key) async {
+    final button = find.byKey(ValueKey(key));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> openQrProfile(WidgetTester tester, {String source = 'scan_subscription_qr'}) async {
+    await tapControl(tester, source);
+    expect(find.byKey(const Key('open_imported_profile')), findsOneWidget);
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
+    await tapControl(tester, 'open_imported_profile');
+    expect(find.byKey(const Key('subscription_profile_editor')), findsOneWidget);
+  }
+
+  void expectNoSubscriptionDownloadOrConnection(_Bridge bridge) {
+    for (final method in ['importSubscription', 'refreshSubscription', 'refreshDue',
+      'connectWireGuard', 'selectWireGuardProfile']) {
+      expect(bridge.calls, isNot(contains(method)), reason: method);
+    }
+  }
+
   void expectPrivateFieldsAbsent(String report) {
     for (final secret in [_privateUrl, 'PRIVATE_TOKEN', 'PRIVATE_PROVIDER_DETAILS',
       'UI_ONLY', 'example.invalid', 'other.invalid', 'Магазин', 'Другой магазин',
@@ -218,7 +266,7 @@ void main() {
     expect(copied.single, contains('Действие: Добавление подписки'));
     expect(copied.single, contains('Источник: Внешняя ссылка'));
     expect(copied.single, contains('Код: SUBSCRIPTION_AUTH_REQUIRED'));
-    expect(copied.single, contains('Версия: 0.55.0 (сборка 55)'));
+    expect(copied.single, contains('Версия: $appVersionName (сборка $appVersionCode)'));
     expectPrivateFieldsAbsent(copied.single);
     expect(bridge.imported, isFalse);
     expect(bridge.leases, isNotEmpty);
@@ -441,6 +489,175 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  for (final source in [
+    ('camera', 'scan_subscription_qr', 'scanWireGuardProfileQr', _qrVlessConfig),
+    ('photo', 'import_subscription_qr_image', 'importWireGuardProfileQrImage', _qrWireguardConfig),
+  ]) {
+    testWidgets('Reverse handoff from ${source.$1} saves a separate profile only after confirmation',
+        (tester) async {
+      final bridge = _Bridge()
+        ..pending = null
+        ..allowNewProfileSave = true
+        ..qrPayload = {'kind': 'profile', 'config': source.$4};
+      await _pump(tester, bridge);
+      await openServers(tester);
+      await tapControl(tester, 'add_subscription');
+      expect(bridge.leases, {'subscription-lease'});
+      await tapControl(tester, source.$2);
+      expect(bridge.calls.where((call) => call == source.$3), hasLength(1));
+      expect(find.byKey(const Key('open_imported_profile')), findsOneWidget);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(bridge.profileSaves, isEmpty);
+      expectNoSubscriptionDownloadOrConnection(bridge);
+
+      await tapControl(tester, 'open_imported_profile');
+      expect(find.byKey(const Key('subscription_profile_editor')), findsOneWidget);
+      final config = tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field')));
+      expect(config.controller!.text, source.$4);
+      expect(config.obscureText, isTrue);
+      expect(config.enableInteractiveSelection, isFalse);
+      expect(bridge.calls, isNot(contains('loadWireGuardProfile')));
+      expect(bridge.profileSaves, isEmpty);
+      expect(bridge.calls.where((call) => call == 'privacy:acquire'), hasLength(1));
+      expect(bridge.calls, isNot(contains('privacy:release')));
+      final name = 'Сервер из QR ${source.$1}';
+      await tester.enterText(find.byKey(const Key('wireguard_profile_name')), name);
+      final save = find.byKey(const Key('save_wireguard_profile'));
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      // The outer protected route owns the lease through its closing frames.
+      expect(bridge.leases, isNotEmpty);
+      await tester.pumpAndSettle();
+
+      expect(bridge.profileSaves, [{'config': source.$4, 'name': name, 'createNew': true}]);
+      expect(bridge.savedQrProfileConfig, source.$4);
+      expect(bridge.imported, isFalse);
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(find.byKey(const ValueKey('edit_wireguard_profile_$_qrProfileId')), findsOneWidget);
+      expect(find.byKey(const ValueKey('active_wireguard_profile_$_manualId')), findsOneWidget);
+      expect(find.byKey(const ValueKey('active_wireguard_profile_$_qrProfileId')), findsNothing);
+      expect(find.text('Профиль добавлен. Выберите сервер и подключитесь на главной.'), findsOneWidget);
+      expect(find.text('Подписка добавлена. Выберите сервер и подключитесь на главной.'), findsNothing);
+      expect(bridge.calls.where((call) => call == source.$3), hasLength(1));
+      expect(bridge.calls.where((call) => call == 'privacy:release'), hasLength(1));
+      expect(bridge.leases, isEmpty);
+      expectNoSubscriptionDownloadOrConnection(bridge);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('Reverse handoff back and discard preserve the subscription draft and one privacy lease',
+      (tester) async {
+    final bridge = _Bridge()
+      ..allowNewProfileSave = true
+      ..qrPayload = {'kind': 'profile', 'config': _qrVlessConfig};
+    await _pump(tester, bridge);
+    await tester.enterText(find.byKey(const Key('subscription_name')), 'Черновик подписки');
+    await openQrProfile(tester);
+    final oldSave = tester.widget<FilledButton>(find.byKey(const Key('save_wireguard_profile'))).onPressed!;
+    await tester.enterText(find.byKey(const Key('wireguard_profile_name')), 'Черновик профиля');
+    await tapControl(tester, 'close_wireguard_profile');
+    oldSave();
+    await tester.pump();
+
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
+    final url = tester.widget<TextField>(find.byKey(const Key('subscription_url')));
+    expect(url.controller!.text, _privateUrl);
+    expect(url.obscureText, isTrue);
+    expect(url.enableInteractiveSelection, isFalse);
+    expect(tester.widget<TextField>(find.byKey(const Key('subscription_name'))).controller!.text,
+      'Черновик подписки');
+    expect(find.byKey(const Key('open_imported_profile')), findsOneWidget);
+    expect(bridge.profileSaves, isEmpty);
+    expect(bridge.leases, {'subscription-lease'});
+    expect(bridge.calls.where((call) => call == 'privacy:acquire'), hasLength(1));
+    expect(bridge.calls, isNot(contains('privacy:release')));
+    await tapControl(tester, 'discard_imported_profile');
+    expect(find.byKey(const Key('open_imported_profile')), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(const Key('subscription_url'))).controller!.text,
+      _privateUrl);
+    final close = find.byKey(const Key('close_subscription_editor'));
+    await tester.ensureVisible(close);
+    await tester.tap(close);
+    expect(bridge.leases, isNotEmpty);
+    await tester.pumpAndSettle();
+    expect(bridge.leases, isEmpty);
+    expect(bridge.calls.where((call) => call == 'privacy:release'), hasLength(1));
+    expect(bridge.profileSaves, isEmpty);
+    expectNoSubscriptionDownloadOrConnection(bridge);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Reverse handoff rejects a queued save after backgrounding before the next frame',
+      (tester) async {
+    final bridge = _Bridge()
+      ..allowNewProfileSave = true
+      ..qrPayload = {'kind': 'profile', 'config': _qrVlessConfig};
+    await _pump(tester, bridge);
+    await openQrProfile(tester);
+    final oldSave = tester.widget<FilledButton>(find.byKey(const Key('save_wireguard_profile'))).onPressed!;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    // No rebuild has happened: a callback from the last foreground frame is stale.
+    oldSave();
+    await tester.pump();
+    expect(bridge.profileSaves, isEmpty);
+    expect(bridge.leases, {'subscription-lease'});
+    expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field'))).obscureText, isTrue);
+    expectNoSubscriptionDownloadOrConnection(bridge);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(bridge.profileSaves, isEmpty);
+    expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field'))).controller!.text,
+      _qrVlessConfig);
+    await tapControl(tester, 'save_wireguard_profile');
+    expect(bridge.profileSaves, hasLength(1));
+    expect(bridge.leases, isEmpty);
+    expectNoSubscriptionDownloadOrConnection(bridge);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final failure in ['PROFILE_LIMIT_REACHED', 'PROFILE_STORE_UNAVAILABLE']) {
+    testWidgets('Reverse handoff $failure preserves the profile draft for an explicit retry',
+        (tester) async {
+      final bridge = _Bridge()
+        ..allowNewProfileSave = true
+        ..qrPayload = {'kind': 'profile', 'config': _qrWireguardConfig}
+        ..profileSaveFailure = PlatformException(code: failure,
+          message: 'PRIVATE_SAVE_DETAILS', details: {'config': _qrWireguardConfig});
+      await _pump(tester, bridge);
+      await openQrProfile(tester, source: 'import_subscription_qr_image');
+      await tester.enterText(find.byKey(const Key('wireguard_profile_name')), 'Сохранить позже');
+      await tapControl(tester, 'save_wireguard_profile');
+      expect(bridge.profileSaves, hasLength(1));
+      expect(bridge.savedQrProfileConfig, isNull);
+      expect(find.byKey(const Key('subscription_profile_editor')), findsOneWidget);
+      expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
+      expect(find.textContaining('PRIVATE_SAVE_DETAILS'), findsNothing);
+      expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_field'))).controller!.text,
+        _qrWireguardConfig);
+      expect(tester.widget<TextField>(find.byKey(const Key('wireguard_profile_name'))).controller!.text,
+        'Сохранить позже');
+      expect(bridge.leases, {'subscription-lease'});
+      expect(bridge.calls, isNot(contains('privacy:release')));
+      expectNoSubscriptionDownloadOrConnection(bridge);
+      bridge.profileSaveFailure = null;
+      await tapControl(tester, 'save_wireguard_profile');
+      expect(bridge.profileSaves, hasLength(2));
+      expect(bridge.profileSaves.first, bridge.profileSaves.last);
+      expect(bridge.savedQrProfileConfig, _qrWireguardConfig);
+      expect(find.byKey(const ValueKey('active_wireguard_profile_$_manualId')), findsOneWidget);
+      expect(bridge.leases, isEmpty);
+      expectNoSubscriptionDownloadOrConnection(bridge);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   for (final source in [
     ('camera', 'scan_subscription_qr', 'scanWireGuardProfileQr'),

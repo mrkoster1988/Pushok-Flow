@@ -45,6 +45,8 @@ class WireGuardProfileEditor extends StatefulWidget {
     this.onSubscriptionSaved,
     this.connectAfterSave = false,
     this.initialError,
+    this.onClose,
+    this.onCompleted,
   });
 
   final String initialConfig;
@@ -58,6 +60,9 @@ class WireGuardProfileEditor extends StatefulWidget {
   final VoidCallback? onSubscriptionSaved;
   final bool connectAfterSave;
   final String? initialError;
+  /// Inline editors remain inside the caller's protected route.
+  final VoidCallback? onClose;
+  final VoidCallback? onCompleted;
 
   @override
   State<WireGuardProfileEditor> createState() => _WireGuardProfileEditorState();
@@ -113,6 +118,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   _ProfileImportSource? _importSource;
   bool _importCancelSent = false;
   int _importEpoch = 0;
+  int _inputEpoch = 0;
+  bool _closing = false;
   bool _resumed = true;
   String? _error;
   String? _notice;
@@ -123,11 +130,12 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   SubscriptionDiagnosticSource _subscriptionSource = SubscriptionDiagnosticSource.manualInput;
   bool _editingSubscription = false;
 
-  bool get _busy => _saving || _pasting || _importing || _editingSubscription;
+  bool get _busy => _saving || _pasting || _importing || _editingSubscription || _closing;
   bool get _canReveal {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     return _resumed &&
-        (lifecycle == null || lifecycle == AppLifecycleState.resumed);
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed) &&
+        ModalRoute.of(context)?.isCurrent != false;
   }
 
   @override
@@ -144,6 +152,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   @override
   void dispose() {
+    _inputEpoch++;
     _cancelPendingImport();
     WidgetsBinding.instance.removeObserver(this);
     _focusNode.dispose();
@@ -160,7 +169,9 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     final resumed = state == AppLifecycleState.resumed;
     setState(() {
       _resumed = resumed;
-      if (!resumed) _showConfig = false;
+      if (!resumed) {
+        _showConfig = false;
+      }
     });
     if (!resumed) _clearInputSelection();
   }
@@ -286,8 +297,32 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   void _closeEditor() {
     // An old profile button cannot close an inline subscription during save.
-    if (!mounted || _saving || _pasting || _editingSubscription) return;
-    Navigator.of(context).pop();
+    if (!mounted || _saving || _pasting || _editingSubscription ||
+        _closing || !_canReveal) return;
+    setState(_beginClosing);
+    if (widget.onClose != null) {
+      widget.onClose!();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _beginClosing() {
+    _closing = true;
+    _inputEpoch++;
+    _showConfig = false;
+    _cancelPendingImport();
+    _clearInputSelection();
+  }
+
+  void _complete([String? config]) {
+    if (!mounted || _closing) return;
+    setState(_beginClosing);
+    if (widget.onCompleted != null) {
+      widget.onCompleted!();
+    } else {
+      Navigator.of(context).pop<String>(config);
+    }
   }
 
   void _setImportFailure(String? code, _ProfileImportSource source,
@@ -330,6 +365,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
 
   Future<void> _paste() async {
     if (!mounted || _busy || !_canReveal) return;
+    final epoch = _inputEpoch;
     setState(() {
       _pasting = true;
       _error = null;
@@ -339,7 +375,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     try {
       // Clipboard access happens only after the user presses «Вставить».
       final data = await Clipboard.getData(Clipboard.kTextPlain);
-      if (!mounted || _saving) return;
+      if (!mounted || _saving || _closing || epoch != _inputEpoch ||
+          ModalRoute.of(context)?.isCurrent == false) return;
       final config = data?.text;
       if (config == null || config.trim().isEmpty) {
         setState(() => _error = 'В буфере обмена нет конфигурации.');
@@ -357,12 +394,12 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
       );
       setState(() { _error = null; _notice = null; });
     } catch (_) {
-      if (mounted) {
+      if (mounted && !_closing && epoch == _inputEpoch) {
         setState(() => _error =
             'Не удалось прочитать буфер обмена. Введите конфигурацию вручную.');
       }
     } finally {
-      if (mounted) setState(() => _pasting = false);
+      if (mounted && !_closing) setState(() => _pasting = false);
     }
   }
 
@@ -403,7 +440,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     });
     try {
       final config = await read();
-      if (!mounted || epoch != _importEpoch || config == null) return;
+      if (!mounted || _closing || epoch != _importEpoch || config == null ||
+          ModalRoute.of(context)?.isCurrent == false) return;
       if (_offerSubscription(config, source: switch (source) {
         _ProfileImportSource.file => SubscriptionDiagnosticSource.file,
         _ProfileImportSource.cameraQr => SubscriptionDiagnosticSource.cameraQr,
@@ -426,14 +464,14 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
             : 'QR-код прочитан. Сохраните профиль.';
       });
     } on PlatformException catch (error) {
-      if (!mounted || epoch != _importEpoch) return;
+      if (!mounted || _closing || epoch != _importEpoch) return;
       _setImportFailure(error.code, source);
     } catch (_) {
-      if (mounted && epoch == _importEpoch) {
+      if (mounted && !_closing && epoch == _importEpoch) {
         _setImportFailure(null, source);
       }
     } finally {
-      if (mounted && epoch == _importEpoch) {
+      if (mounted && !_closing && epoch == _importEpoch) {
         setState(() { _importing = false; _importSource = null; });
       }
     }
@@ -557,11 +595,11 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     });
     try {
       await widget.onSave(config, name);
-      if (!mounted) return;
+      if (!mounted || _closing) return;
       // An explicit completion can pop; PopScope only vetoes user back attempts.
-      Navigator.of(context).pop<String>(config);
+      _complete(config);
     } on PlatformException catch (error) {
-      if (!mounted) return;
+      if (!mounted || _closing) return;
       setState(() {
         _saving = false;
         // Platform messages/details can contain configuration data: use codes only.
@@ -589,7 +627,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         };
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || _closing) return;
       setState(() {
         _saving = false;
         _error = 'Не удалось сохранить профиль. Попробуйте ещё раз.';
@@ -620,20 +658,26 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
           await widget.onSaveSubscription!(url, name);
         },
         onClose: () {
-          if (mounted) setState(() => _editingSubscription = false);
+          if (mounted && !_closing && _canReveal) {
+            setState(() => _editingSubscription = false);
+          }
         },
         onCompleted: () {
-          if (!mounted || !_editingSubscription) return;
+          if (!mounted || _closing || !_editingSubscription) return;
           widget.onSubscriptionSaved?.call();
-          Navigator.of(context).pop<String>();
+          _complete();
         },
       );
     }
     final importFailure = _importFailure;
-    return PopScope<String>(
-      canPop: !_saving,
+    return PopScope<Object?>(
+      canPop: !_saving && !_closing && widget.onClose == null,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) _cancelPendingImport();
+        if (didPop) {
+          _beginClosing();
+        } else if (widget.onClose != null) {
+          _closeEditor();
+        }
       },
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -663,10 +707,10 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     ),
                     IconButton(
                       key: const Key('close_wireguard_profile'),
-                      tooltip: 'Закрыть',
-                      onPressed: _saving || _pasting
+                      tooltip: widget.onClose == null ? 'Закрыть' : 'Вернуться к подписке',
+                      onPressed: _saving || _pasting || _closing || !_canReveal
                           ? null : _closeEditor,
-                      icon: const Icon(Icons.close),
+                      icon: Icon(widget.onClose == null ? Icons.close : Icons.arrow_back),
                     ),
                   ]),
                   const SizedBox(height: 8),
@@ -681,7 +725,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     key: const Key('wireguard_profile_name'),
                     controller: _nameController,
                     focusNode: _nameFocusNode,
-                    enabled: !_busy,
+                    enabled: !_busy && _canReveal,
                     maxLines: 1,
                     keyboardType: TextInputType.text,
                     textInputAction: TextInputAction.done,
@@ -710,7 +754,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     key: const Key('wireguard_profile_field'),
                     controller: _controller,
                     focusNode: _focusNode,
-                    enabled: !_busy,
+                    enabled: !_busy && _canReveal,
                     // A masked field must be single-line. Keyboard edits there
                     // would remove every newline from a WireGuard configuration.
                     // Explicit paste assigns the controller without that formatter.

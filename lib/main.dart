@@ -665,6 +665,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     setState(() => _profileBusy = true);
     ProfilePrivacy? protection;
     bool? saved;
+    var profileSaved = false;
     try {
       try {
         protection = await ProfilePrivacy.acquire();
@@ -702,6 +703,19 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           onScanQr: WireGuardTunnel.scanProfileQr,
           onImportQrImage: WireGuardTunnel.importProfileQrImage,
           onCancelImport: WireGuardTunnel.cancelProfileImport,
+          profileEditorBuilder: (config, onClose, onCompleted) => WireGuardProfileEditor(
+            key: const Key('subscription_profile_editor'),
+            initialConfig: config,
+            initialName: (_profiles?.profiles.isEmpty ?? true)
+                ? 'Мой профиль' : 'Профиль ${_profiles!.profiles.length + 1}',
+            onImport: WireGuardTunnel.importProfile,
+            onScanQr: WireGuardTunnel.scanProfileQr,
+            onImportQrImage: WireGuardTunnel.importProfileQrImage,
+            onCancelImport: WireGuardTunnel.cancelProfileImport,
+            onClose: onClose,
+            onCompleted: () { profileSaved = true; onCompleted(); },
+            onSave: _saveProfileFromSubscriptionDraft,
+          ),
           onSave: _saveSubscriptionDraft),
       );
       unawaited(navigator.push<bool>(route));
@@ -723,7 +737,26 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       }
     }
     if (saved == true && mounted && _foreground) {
-      _showNotice('Подписка добавлена. Выберите сервер и подключитесь на главной.');
+      setState(() => tab = 2);
+      _showNotice(profileSaved
+          ? 'Профиль добавлен. Выберите сервер и подключитесь на главной.'
+          : 'Подписка добавлена. Выберите сервер и подключитесь на главной.');
+    }
+  }
+
+  Future<void> _saveProfileFromSubscriptionDraft(String config, String name) async {
+    if (!mounted || !_foreground || !_profileEditorOpen) {
+      throw PlatformException(code: 'PROFILE_SAVE_INTERRUPTED');
+    }
+    if (_ownsTunnel || connecting || _nativeBusy) {
+      throw PlatformException(code: 'VPN_ACTIVE');
+    }
+    // A handoff always creates a new manual profile. Native validation and its
+    // atomic catalog limit still apply; existing selection is left untouched.
+    await WireGuardTunnel.saveProfile(config, name: name, createNew: true);
+    if (mounted) {
+      _statusEpoch++;
+      setState(() => connectionError = null);
     }
   }
 
