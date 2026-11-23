@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -5,6 +7,13 @@ import '../design/pushok_theme.dart';
 import '../platform/subscription_diagnostics.dart';
 import '../platform/subscriptions.dart';
 import 'subscription_diagnostic_copy.dart';
+
+String _subscriptionDate(DateTime date, {bool includeTime = false}) {
+  final value = date.toLocal();
+  String two(int number) => number.toString().padLeft(2, '0');
+  final day = '${two(value.day)}.${two(value.month)}.${value.year}';
+  return includeTime ? '$day, ${two(value.hour)}:${two(value.minute)}' : day;
+}
 
 class SubscriptionsCard extends StatelessWidget {
   const SubscriptionsCard({
@@ -15,7 +24,7 @@ class SubscriptionsCard extends StatelessWidget {
     this.isCurrentErrorDiagnostic, this.isCurrentRefreshDiagnostic,
     this.onAdd, this.onRefreshList, this.onRefresh, this.onDelete,
     this.onAutomaticUpdatesChanged, this.onOpenAccount, this.onOpenPendingLink,
-    this.now,
+    this.now, this.clock,
   });
 
   final SubscriptionStatus? status;
@@ -37,15 +46,11 @@ class SubscriptionsCard extends StatelessWidget {
   final VoidCallback? onOpenAccount;
   final VoidCallback? onOpenPendingLink;
   final DateTime? now;
+  /// An injectable live clock; a fixed [now] remains a deterministic snapshot.
+  final DateTime Function()? clock;
 
   bool get _busy => busy || savingAutoUpdate || (status?.busy ?? false);
   bool get _canChange => mutationsEnabled && !_busy && !loading && status != null;
-
-  String _date(DateTime date) {
-    final value = date.toLocal();
-    String two(int number) => number.toString().padLeft(2, '0');
-    return '${two(value.day)}.${two(value.month)}.${value.year}';
-  }
 
   String _bytes(int amount) {
     if (amount < 1024) return '$amount Б';
@@ -63,23 +68,31 @@ class SubscriptionsCard extends StatelessWidget {
         'Вход и регистрация доступны в существующем кабинете MTProxy '
         '(${FlowSubscriptions.botUsername}).\n\n'
         'Для подключения Flow добавьте HTTPS-ссылку подписки своего провайдера '
-        'или панели с поддерживаемыми ссылками VLESS. '
+        'или панели с поддерживаемыми ссылками VLESS либо подпиской WireGuard в формате Flow. '
         'В форме «Добавить подписку» можно сканировать QR камерой или выбрать '
         '«QR из фото». Распознанная ссылка остаётся скрытой; серверы загружаются '
         'только после нажатия «Добавить подписку». '
         'Аккаунт MTProxy сам по себе не предоставляет серверы для Flow.\n\n'
         'Flow загружает список серверов и сохраняет его на устройстве. '
-        'Из смешанной подписки добавляются совместимые подключения VLESS: '
+        'Из смешанного списка VLESS добавляются совместимые подключения: '
         'TCP с TLS или REALITY, WebSocket и gRPC с TLS. '
         'Записи других протоколов и неподдерживаемых вариантов подключения '
         'пропускаются; их количество показано в карточке подписки. '
         'Если ответ повреждён или в нём нет совместимых серверов, '
         'прежний список сохраняется.\n\n'
+        'Для управляемого WireGuard нужна подписка в формате Flow от вашего сервиса. '
+        'Обычный QR WireGuard или файл .conf добавляется как отдельный профиль. '
+        'Сервис сообщает состояние и срок доступа WireGuard. По истечении срока '
+        'новые подключения недоступны, даже если настройки ещё сохранены на устройстве. '
+        'Ответ сервиса об истечении или отзыве доступа удаляет серверы этой подписки. '
+        'Flow не отключает уже работающий туннель автоматически; '
+        'фактический доступ контролирует сервер.\n\n'
         'Автообновление проверяет список при открытии приложения, когда подключение '
         'Flow отключено: не чаще раза в шесть часов после успешной проверки. '
         'Ошибка одного сервиса не мешает проверке остальных подписок. '
-        'После ошибки сохранённые настройки остаются доступны.\n\n'
+        'Сетевые ошибки и повреждённые ответы не заменяют сохранённый список.\n\n'
         'Срок и расход трафика отображаются, если сервис передал эти данные. '
+        'Для обычного списка VLESS срок остаётся информационной подсказкой. '
         'Они не заменяют информацию об оплате в магазине. '
         'Удаление подписки из Flow удаляет её локальные серверы; '
         'оплаченный доступ и автосписания в магазине этим не отменяются.'
@@ -90,8 +103,6 @@ class SubscriptionsCard extends StatelessWidget {
   }
 
   Widget _subscription(FlowSubscription entry) {
-    final expiry = entry.expiresAt;
-    final expired = expiry != null && !expiry.isAfter(now ?? DateTime.now());
     final refreshError = status?.refreshErrors[entry.id];
     final suppliedDiagnostic = refreshDiagnostics[entry.id];
     final matchingDiagnostic = refreshError != null && suppliedDiagnostic?.code == refreshError
@@ -111,7 +122,9 @@ class SubscriptionsCard extends StatelessWidget {
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
         ]),
         const SizedBox(height: 8),
-        Text('${entry.host} · Серверов: ${entry.profileCount}',
+        Text(entry.isWireGuard
+            ? '${entry.host} · Сохранено серверов: ${entry.profileCount}'
+            : '${entry.host} · Серверов: ${entry.profileCount}',
           style: const TextStyle(color: PushokPalette.muted)),
         if (entry.skippedProfileCount > 0) ...[
           const SizedBox(height: 8),
@@ -122,11 +135,9 @@ class SubscriptionsCard extends StatelessWidget {
               style: const TextStyle(color: PushokPalette.orange))),
         ],
         const SizedBox(height: 8),
-        Text(expiry == null ? 'Сервис не передал срок подписки.'
-            : expired ? 'По данным сервиса срок истёк ${_date(expiry)}.'
-                : 'Срок по данным сервиса: до ${_date(expiry)}.',
-          key: ValueKey('subscription_expiry_${entry.id}'),
-          style: TextStyle(color: expired ? PushokPalette.orange : PushokPalette.muted)),
+        _SubscriptionAccessDetails(
+          key: ValueKey('subscription_access_details_${entry.id}'),
+          entry: entry, now: now, clock: clock),
         if (entry.usedBytes != null) ...[
           const SizedBox(height: 6),
           Text(entry.totalBytes != null && entry.totalBytes! > 0
@@ -135,7 +146,8 @@ class SubscriptionsCard extends StatelessWidget {
             style: const TextStyle(color: PushokPalette.muted)),
         ],
         const SizedBox(height: 6),
-        Text('Серверы обновлены: ${_date(entry.updatedAt)}',
+        Text('${entry.isWireGuard ? 'Подписка проверена' : 'Серверы обновлены'}: '
+            '${_subscriptionDate(entry.updatedAt)}',
           style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
         if (refreshError != null) ...[
           const SizedBox(height: 10),
@@ -248,4 +260,104 @@ class SubscriptionsCard extends StatelessWidget {
       ],
     ],
   );
+}
+
+/// The deadline only refreshes visible metadata. It never fetches a feed,
+/// mutates profiles or changes a running tunnel.
+class _SubscriptionAccessDetails extends StatefulWidget {
+  const _SubscriptionAccessDetails({super.key, required this.entry, this.now, this.clock});
+  final FlowSubscription entry;
+  final DateTime? now;
+  final DateTime Function()? clock;
+
+  @override
+  State<_SubscriptionAccessDetails> createState() => _SubscriptionAccessDetailsState();
+}
+
+class _SubscriptionAccessDetailsState extends State<_SubscriptionAccessDetails>
+    with WidgetsBindingObserver {
+  Timer? _deadline;
+  bool _foreground = true;
+
+  DateTime get _now => widget.now ?? widget.clock?.call() ?? DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleDeadline();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SubscriptionAccessDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _scheduleDeadline();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+    _foreground = state == AppLifecycleState.resumed;
+    _deadline?.cancel();
+    if (_foreground) {
+      setState(() {});
+      _scheduleDeadline();
+    }
+  }
+
+  void _scheduleDeadline() {
+    _deadline?.cancel();
+    final entry = widget.entry;
+    final expiry = entry.expiresAt;
+    if (!_foreground || widget.now != null || !entry.isWireGuard ||
+        entry.state != SubscriptionAccessState.active || expiry == null) return;
+    final remaining = expiry.difference(_now);
+    if (remaining <= Duration.zero) return;
+    _deadline = Timer(remaining, () {
+      if (!mounted || !_foreground) return;
+      setState(() {});
+      _scheduleDeadline();
+    });
+  }
+
+  @override
+  void dispose() {
+    _deadline?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
+    final expiry = entry.expiresAt;
+    final now = _now;
+    final state = entry.effectiveState(now);
+    final expired = expiry != null && !expiry.isAfter(now);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (entry.isWireGuard) ...[
+        Semantics(liveRegion: true, child: Text(switch (state) {
+          SubscriptionAccessState.active => 'Доступ WireGuard активен.',
+          SubscriptionAccessState.expired =>
+            'Срок доступа WireGuard истёк. Новые подключения недоступны.',
+          SubscriptionAccessState.revoked =>
+            'Доступ WireGuard отозван сервисом. Новые подключения недоступны.',
+        }, key: ValueKey('subscription_access_state_${entry.id}'),
+          style: TextStyle(color: state == SubscriptionAccessState.active
+              ? PushokPalette.mint : PushokPalette.orange))),
+        const SizedBox(height: 6),
+      ],
+      Text(entry.isWireGuard && expiry != null
+          ? 'Срок WireGuard: до ${_subscriptionDate(expiry, includeTime: true)}.'
+          : expiry == null ? 'Сервис не передал срок подписки.'
+              : expired ? 'По данным сервиса срок истёк ${_subscriptionDate(expiry)}.'
+                  : 'Срок по данным сервиса: до ${_subscriptionDate(expiry)}.',
+        key: ValueKey('subscription_expiry_${entry.id}'),
+        style: TextStyle(color: entry.isWireGuard
+            ? state == SubscriptionAccessState.active ? PushokPalette.muted : PushokPalette.orange
+            : expired ? PushokPalette.orange : PushokPalette.muted)),
+    ]);
+  }
 }

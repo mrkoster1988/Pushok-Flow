@@ -298,7 +298,8 @@ class MainActivity : FlutterActivity() {
         if (error is SubscriptionFailure) return error.code
         val code = (error as? ProfileCatalogFailure)?.code
         return if (code in setOf("PROFILE_NAME_INVALID", "PROFILE_LIMIT_REACHED", "PROFILE_NOT_FOUND",
-                "PROFILE_STORE_UNAVAILABLE", "PROFILE_CHANGED", "PROFILE_MANAGED", "INVALID_CONFIG", "VPN_ACTIVE", "VPN_BUSY", "VPN_STATE_UNAVAILABLE")) code!! else fallback
+                "PROFILE_STORE_UNAVAILABLE", "PROFILE_CHANGED", "PROFILE_MANAGED", "SUBSCRIPTION_EXPIRED",
+                "SUBSCRIPTION_REVOKED", "INVALID_CONFIG", "VPN_ACTIVE", "VPN_BUSY", "VPN_STATE_UNAVAILABLE")) code!! else fallback
     }
 
     private fun mutateProfile(result: MethodChannel.Result, fallback: String, action: () -> Unit) {

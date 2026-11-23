@@ -79,31 +79,61 @@ expected = '71de5d89341b5fcf5dd89da7f44e84d825d0e084cdf3ec77c9abe26b0f0ceb13'
 if hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() != expected:
     raise SystemExit('The pinned ZXing core 3.5.4 checksum does not match')
 PY
+# Exercise the same upstream Config parser as the APK, including key/IP validation.
+# Only Android's SDK level is supplied by a JVM fixture; no grammar is replaced.
+wireguard_aar="$out/wireguard-tunnel.aar"
+wireguard_core="$out/wireguard-tunnel.jar"
+if [[ -n "${FLOW_WIREGUARD_TUNNEL_AAR:-}" ]]; then
+  cp "$FLOW_WIREGUARD_TUNNEL_AAR" "$wireguard_aar"
+else
+  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
+    https://repo.maven.apache.org/maven2/com/wireguard/android/tunnel/1.0.20260102/tunnel-1.0.20260102.aar \
+    -o "$wireguard_aar"
+fi
+python3 - "$wireguard_aar" "$wireguard_core" <<'WIREGUARD_CHECK'
+import hashlib
+from pathlib import Path
+import sys
+import zipfile
+archive = Path(sys.argv[1])
+if hashlib.sha256(archive.read_bytes()).hexdigest() != '2b9c16db026496123e4db695d26d03d1958a201096c7c4c89b21077dc70f3119':
+    raise SystemExit('Pinned WireGuard tunnel 1.0.20260102 checksum mismatch')
+with zipfile.ZipFile(archive) as bundle:
+    Path(sys.argv[2]).write_bytes(bundle.read('classes.jar'))
+WIREGUARD_CHECK
 profile_import_core=(
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionPolicy.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionFeed.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/ManagedWireGuardFeed.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardRouting.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportPayload.kt
+  native/android/tests/wireguard_runtime_stubs/AndroidBuild.kt
 )
 kotlinc "${profile_import_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrDecoder.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
-  native/android/tests/ProfileQrImportCheck.kt -classpath "$core" -include-runtime -d "$out/qr-import-tests.jar"
-java -cp "$out/qr-import-tests.jar:$core" shop.pushok.flow.ProfileQrImportCheckKt
+  native/android/tests/ProfileQrImportCheck.kt -classpath "$core:$wireguard_core" -include-runtime -d "$out/qr-import-tests.jar"
+java -cp "$out/qr-import-tests.jar:$core:$wireguard_core" shop.pushok.flow.ProfileQrImportCheckKt
 
+profile_import_android_stubs=()
+for fixture in native/android/tests/profile_import_stubs/*.kt; do
+  # The historical unused grammar stub must not shadow the real Config class.
+  if [[ "$fixture" != */WireGuardConfig.kt ]]; then profile_import_android_stubs+=("$fixture"); fi
+done
 kotlinc "${profile_import_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrDecoder.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrSession.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportWork.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardProfileImport.kt \
-  native/android/tests/profile_import_stubs/*.kt \
-  native/android/tests/ProfileImportExecutionCheck.kt -classpath "$core" \
+  "${profile_import_android_stubs[@]}" \
+  native/android/tests/ProfileImportExecutionCheck.kt -classpath "$core:$wireguard_core" \
   -include-runtime -d "$out/profile-import-execution-tests.jar"
-java -cp "$out/profile-import-execution-tests.jar:$core" shop.pushok.flow.ProfileImportExecutionCheckKt
+java -cp "$out/profile-import-execution-tests.jar:$core:$wireguard_core" shop.pushok.flow.ProfileImportExecutionCheckKt
 embedded_aar="$out/zxing-android-embedded.aar"
 embedded_core="$out/zxing-android-embedded.jar"
 if [[ -n "${FLOW_ZXING_EMBEDDED_AAR:-}" ]]; then
@@ -127,39 +157,46 @@ EMBEDDED_CHECK
 kotlinc "${profile_import_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrDecoder.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileQrCameraDecoder.kt \
-  native/android/tests/ProfileQrCameraCheck.kt -classpath "$core:$embedded_core" \
+  native/android/tests/ProfileQrCameraCheck.kt -classpath "$core:$embedded_core:$wireguard_core" \
   -include-runtime -d "$out/qr-camera-tests.jar"
-java -cp "$out/qr-camera-tests.jar:$core:$embedded_core" shop.pushok.flow.ProfileQrCameraCheckKt
+java -cp "$out/qr-camera-tests.jar:$core:$embedded_core:$wireguard_core" shop.pushok.flow.ProfileQrCameraCheckKt
 subscription_core=(
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionPolicy.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionFeed.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/ManagedWireGuardFeed.kt
+  native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardRouting.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt
+  native/android/tests/wireguard_runtime_stubs/AndroidBuild.kt
 )
 kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileOperationGate.kt \
-  native/android/tests/ProfileCatalogCheck.kt -include-runtime -d "$out/profile-catalog-tests.jar"
-java -jar "$out/profile-catalog-tests.jar"
+  native/android/tests/ProfileCatalogCheck.kt -classpath "$wireguard_core" -include-runtime -d "$out/profile-catalog-tests.jar"
+java -cp "$out/profile-catalog-tests.jar:$wireguard_core" shop.pushok.flow.ProfileCatalogCheckKt
 kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionDownloader.kt \
   native/android/tests/SubscriptionFeedCheck.kt \
+  native/android/tests/ManagedWireGuardFeedCheck.kt \
   native/android/tests/SubscriptionCatalogCheck.kt \
-  native/android/tests/SubscriptionTransportCheck.kt -include-runtime -d "$out/subscription-tests.jar"
-java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionFeedCheckKt
-java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionCatalogCheckKt
-java -cp "$out/subscription-tests.jar" shop.pushok.flow.SubscriptionTransportCheckKt
+  native/android/tests/ManagedSubscriptionCatalogCheck.kt \
+  native/android/tests/SubscriptionTransportCheck.kt -classpath "$wireguard_core" -include-runtime -d "$out/subscription-tests.jar"
+java -cp "$out/subscription-tests.jar:$wireguard_core" shop.pushok.flow.SubscriptionFeedCheckKt
+java -cp "$out/subscription-tests.jar:$wireguard_core" shop.pushok.flow.ManagedWireGuardFeedCheckKt
+java -cp "$out/subscription-tests.jar:$wireguard_core" shop.pushok.flow.SubscriptionCatalogCheckKt
+java -cp "$out/subscription-tests.jar:$wireguard_core" shop.pushok.flow.ManagedSubscriptionCatalogCheckKt
+java -cp "$out/subscription-tests.jar:$wireguard_core" shop.pushok.flow.SubscriptionTransportCheckKt
 kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionDownloader.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileSubscriptions.kt \
   native/android/tests/subscription_coordinator_stubs/*.kt \
-  native/android/tests/SubscriptionCoordinatorCheck.kt -include-runtime -d "$out/subscription-coordinator-tests.jar"
-java -jar "$out/subscription-coordinator-tests.jar"
+  native/android/tests/SubscriptionCoordinatorCheck.kt -classpath "$wireguard_core" -include-runtime -d "$out/subscription-coordinator-tests.jar"
+java -cp "$out/subscription-coordinator-tests.jar:$wireguard_core" shop.pushok.flow.SubscriptionCoordinatorCheckKt
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/RouteSettingsStore.kt \
   native/android/tests/RouteSettingsCheck.kt -include-runtime -d "$out/route-settings-tests.jar"
 java -jar "$out/route-settings-tests.jar"
@@ -242,8 +279,8 @@ java -cp "$out/account-store-tests.jar:$android_json" shop.pushok.flow.FlowAccou
 kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/SecureWireGuardStore.kt \
   native/android/tests/account_store_stubs/*.kt native/android/tests/SecureWireGuardStoreCheck.kt \
-  -classpath "$json_core" -include-runtime -d "$out/profile-store-tests.jar"
-java -cp "$out/profile-store-tests.jar:$android_json" shop.pushok.flow.SecureWireGuardStoreCheckKt
+  -classpath "$json_core:$wireguard_core" -include-runtime -d "$out/profile-store-tests.jar"
+java -cp "$out/profile-store-tests.jar:$android_json:$wireguard_core" shop.pushok.flow.SecureWireGuardStoreCheckKt
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/UpdateAutomationPolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/UpdateCoordinator.kt \

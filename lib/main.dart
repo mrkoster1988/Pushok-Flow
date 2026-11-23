@@ -208,6 +208,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'Выбранный профиль изменился. Проверьте выбор в «Серверах» и подключитесь снова.';
         case 'PROFILE_STORE_UNAVAILABLE':
           return 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.';
+        case 'SUBSCRIPTION_EXPIRED':
+        case 'SUBSCRIPTION_REVOKED':
+          return subscriptionErrorMessage(error);
         case 'ROUTES_STORE_UNAVAILABLE':
           return 'Не удалось записать исключения. Перезапустите приложение перед подключением.';
         case 'ROUTES_LOAD_FAILED':
@@ -565,7 +568,19 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       });
       if (!automatic && status.errorCode == null && status.refreshErrors.isEmpty &&
           mounted && _foreground && epoch == _subscriptionEpoch) {
-        _showNotice('Список серверов обновлён.');
+        FlowSubscription? changed;
+        for (final subscription in status.subscriptions) {
+          if (subscription.id == subscriptionId) changed = subscription;
+        }
+        _showNotice(operation == SubscriptionDiagnosticOperation.deleteSubscription
+            ? 'Подписка удалена с устройства.'
+            : switch (changed?.effectiveState(DateTime.now())) {
+                SubscriptionAccessState.expired =>
+                  'Срок подписки истёк. После продления обновите её в Flow.',
+                SubscriptionAccessState.revoked =>
+                  'Провайдер отозвал доступ. Обратитесь к нему для восстановления подписки.',
+                _ => 'Список серверов обновлён.',
+              });
       }
     } catch (error) {
       if (mounted && _foreground && epoch == _subscriptionEpoch) {
@@ -666,6 +681,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     ProfilePrivacy? protection;
     bool? saved;
     var profileSaved = false;
+    FlowSubscription? addedSubscription;
     try {
       try {
         protection = await ProfilePrivacy.acquire();
@@ -716,7 +732,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
             onCompleted: () { profileSaved = true; onCompleted(); },
             onSave: _saveProfileFromSubscriptionDraft,
           ),
-          onSave: _saveSubscriptionDraft),
+          onSave: (url, name) async {
+            addedSubscription = await _saveSubscriptionDraft(url, name);
+          }),
       );
       unawaited(navigator.push<bool>(route));
       saved = await route.completed;
@@ -740,7 +758,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       setState(() => tab = 2);
       _showNotice(profileSaved
           ? 'Профиль добавлен. Выберите сервер и подключитесь на главной.'
-          : 'Подписка добавлена. Выберите сервер и подключитесь на главной.');
+          : _subscriptionSavedNotice(addedSubscription));
     }
   }
 
@@ -760,13 +778,26 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _saveSubscriptionDraft(String url, String name) async {
+  String _subscriptionSavedNotice(FlowSubscription? subscription) {
+    return switch (subscription?.effectiveState(DateTime.now())) {
+      SubscriptionAccessState.expired =>
+        'Подписка добавлена, но её срок истёк. После продления обновите её в Flow.',
+      SubscriptionAccessState.revoked =>
+        'Подписка добавлена, но доступ отозван. Обратитесь к провайдеру.',
+      SubscriptionAccessState.active =>
+        'Подписка добавлена. Выберите сервер и подключитесь на главной.',
+      null => 'Подписка добавлена. Проверьте её состояние в списке подписок.',
+    };
+  }
+
+  Future<FlowSubscription?> _saveSubscriptionDraft(String url, String name) async {
     if (!mounted || !_foreground || _ownsTunnel || connecting || _nativeBusy) {
       throw PlatformException(code: 'VPN_ACTIVE');
     }
     // A slow read from before confirmation must not overwrite the imported list.
     _subscriptionEpoch++;
     _subscriptionPoll?.cancel();
+    final previousIds = _subscriptions?.subscriptions.map((item) => item.id).toSet();
     setState(() { _subscriptionsLoading = false; _subscriptionsBusy = true; });
     try {
       final status = await _subscriptionBridge.importSubscription(url, name);
@@ -774,6 +805,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         _acceptSubscriptions(status,
           operation: SubscriptionDiagnosticOperation.addSubscription);
       });
+      // The profile editor also works before subscription status is known.
+      // Do not attribute another existing subscription's access state to this import.
+      if (previousIds == null) return null;
+      final added = status.subscriptions.where((item) => !previousIds.contains(item.id)).toList();
+      return added.length == 1 ? added.single : null;
     } finally {
       if (mounted) setState(() => _subscriptionsBusy = false);
     }
@@ -994,6 +1030,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     ProfilePrivacy? protection;
     String? saved;
     var subscriptionSaved = false;
+    FlowSubscription? addedSubscription;
     int? saveIntentEpoch;
     try {
       try {
@@ -1056,7 +1093,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           onScanQr: WireGuardTunnel.scanProfileQr,
           onImportQrImage: WireGuardTunnel.importProfileQrImage,
           onCancelImport: WireGuardTunnel.cancelProfileImport,
-          onSaveSubscription: _saveSubscriptionDraft,
+          onSaveSubscription: (url, name) async {
+            addedSubscription = await _saveSubscriptionDraft(url, name);
+          },
           onSubscriptionSaved: () => subscriptionSaved = true,
           onSave: (config, name) async {
             if (!mounted || !_foreground) {
@@ -1104,7 +1143,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (subscriptionSaved) {
       if (_foreground) {
         setState(() => tab = 2);
-        _showNotice('Подписка добавлена. Выберите сервер и подключитесь на главной.');
+        _showNotice(_subscriptionSavedNotice(addedSubscription));
       }
       return;
     }
@@ -1134,6 +1173,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       }
       if (error.code == 'PROFILE_MANAGED') {
         return 'Этот сервер обновляется вместе с подпиской. Откройте раздел «Подписки».';
+      }
+      if (error.code == 'SUBSCRIPTION_EXPIRED' || error.code == 'SUBSCRIPTION_REVOKED') {
+        return subscriptionErrorMessage(error);
       }
       if (error.code == 'PROFILE_STORE_UNAVAILABLE') {
         return 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.';

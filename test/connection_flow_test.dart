@@ -1684,6 +1684,40 @@ void main() {
     });
   });
 
+  for (final entry in {
+    'SUBSCRIPTION_EXPIRED': 'Срок доступа WireGuard истёк. Обновите подписку после продления доступа.',
+    'SUBSCRIPTION_REVOKED': 'Доступ WireGuard отозван сервисом. Проверьте подписку в панели провайдера.',
+  }.entries) {
+    testWidgets('Managed access failure ${entry.key} stops loading and explains recovery', (tester) async {
+      bridge.savedProfile = _profile;
+      bridge.loadError = PlatformException(code: entry.key, message: 'SECRET_CONFIG', details: _profile);
+      await _withApp(tester, () async {
+        await tester.tap(find.byKey(const Key('pushok_connect_button')));
+        await tester.pumpAndSettle();
+        expect(bridge.named('connectWireGuard'), isEmpty);
+        expect(find.byType(WireGuardProfileEditor), findsNothing);
+        expect(find.text(entry.value), findsOneWidget);
+        expect(find.textContaining('SECRET_CONFIG'), findsNothing);
+        expect(bridge.savedProfile, _profile);
+        expect(tester.takeException(), isNull);
+      });
+    });
+
+    testWidgets('Managed access failure ${entry.key} remains visible after native connect fence', (tester) async {
+      bridge.savedProfile = _profile;
+      bridge.connectError = PlatformException(code: entry.key, message: 'SECRET_CONFIG', details: _profile);
+      await _withApp(tester, () async {
+        await tester.tap(find.byKey(const Key('pushok_connect_button')));
+        await tester.pumpAndSettle();
+        expect(bridge.named('connectWireGuard'), hasLength(1));
+        expect(bridge.connected, isFalse);
+        expect(find.text(entry.value), findsOneWidget);
+        expect(find.textContaining('SECRET_CONFIG'), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    });
+  }
+
   testWidgets('Unreadable existing profile never opens an empty replacement editor', (tester) async {
     bridge.savedProfile = _profile;
     bridge.loadError = PlatformException(code: 'PROFILE_LOAD_FAILED', message: 'SECRET_CONFIG');

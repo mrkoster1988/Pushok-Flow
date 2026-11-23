@@ -12,6 +12,11 @@ Map<String, Object?> _entry() => {
 Map<String, Object?> _status() => {
   'subscriptions': [_entry()], 'automaticUpdatesEnabled': true,
 };
+Map<String, Object?> _wireGuardEntry({String state = 'active'}) => {
+  ..._entry(), 'format': 'wireguard-v1', 'state': state,
+  'profileCount': state == 'active' ? 2 : 0,
+  'expiresAt': 1795464000000, 'skippedProfileCount': 0,
+};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +27,8 @@ void main() {
     expect(status.subscriptions.single.expiresAt, isNull);
     expect(status.subscriptions.single.host, 'example.invalid');
     expect(status.subscriptions.single.skippedProfileCount, 0);
+    expect(status.subscriptions.single.format, SubscriptionFormat.vless);
+    expect(status.subscriptions.single.state, SubscriptionAccessState.active);
     expect(status.busy, isFalse);
     expect(status.errorCode, isNull);
     expect(status.refreshErrors, isEmpty);
@@ -29,6 +36,112 @@ void main() {
     expect(() => status.subscriptions.clear(), throwsUnsupportedError);
     (source['subscriptions']! as List).clear();
     expect(status.subscriptions.length, 1);
+  });
+
+  test('Legacy expiry stays informational with absent or explicit legacy metadata', () {
+    for (final entry in [
+      {..._entry(), 'expiresAt': 1000},
+      {..._entry(), 'format': 'vless', 'state': 'active', 'expiresAt': 1000},
+    ]) {
+      final value = SubscriptionStatus.fromPlatform({
+        ..._status(), 'subscriptions': [entry],
+      }).subscriptions.single;
+      expect(value.isWireGuard, isFalse);
+      expect(value.effectiveState(DateTime.fromMillisecondsSinceEpoch(2000)),
+        SubscriptionAccessState.active);
+    }
+  });
+
+  test('WireGuard declared states and local expiry remain distinct without changing cached counts', () {
+    final deadline = DateTime.fromMillisecondsSinceEpoch(1795464000000);
+    final active = SubscriptionStatus.fromPlatform({
+      ..._status(), 'subscriptions': [_wireGuardEntry()],
+    }).subscriptions.single;
+    expect(active.format, SubscriptionFormat.wireGuardV1);
+    expect(active.state, SubscriptionAccessState.active);
+    expect(active.effectiveState(deadline.subtract(const Duration(milliseconds: 1))),
+      SubscriptionAccessState.active);
+    expect(active.effectiveState(deadline), SubscriptionAccessState.expired);
+    expect(active.effectiveState(deadline.add(const Duration(days: 1))),
+      SubscriptionAccessState.expired);
+    expect(active.state, SubscriptionAccessState.active);
+    expect(active.profileCount, 2);
+    for (final state in ['expired', 'revoked']) {
+      final status = SubscriptionStatus.fromPlatform({
+        ..._status(), 'subscriptions': [_wireGuardEntry(state: state)],
+      });
+      final value = status.subscriptions.single;
+      final expected = state == 'expired'
+          ? SubscriptionAccessState.expired : SubscriptionAccessState.revoked;
+      expect(value.state, expected);
+      expect(value.effectiveState(deadline.subtract(const Duration(days: 1))), expected);
+      expect(value.effectiveState(deadline.add(const Duration(days: 1))), expected);
+      expect(value.profileCount, 0);
+      expect(status.errorCode, isNull);
+      expect(status.refreshErrors, isEmpty);
+    }
+  });
+
+  test('WireGuard metadata requires the bounded declared contract and rejects private extensions', () {
+    final missingState = _wireGuardEntry()..remove('state');
+    final missingExpiry = _wireGuardEntry()..remove('expiresAt');
+    final invalidEntries = <Map<String, Object?>>[
+      missingState, missingExpiry,
+      for (final format in <Object?>[null, '', 'wireguard', 'wireguard-v2', 'VLESS', 1, true,
+        'PRIVATE_FORMAT_TOKEN', <String, Object?>{}])
+        {..._wireGuardEntry(), 'format': format},
+      for (final state in <Object?>[null, '', 'ACTIVE', 'disabled', 0, true,
+        'PRIVATE_STATE_TOKEN', <Object?>[]])
+        {..._wireGuardEntry(), 'state': state},
+      for (final expiry in <Object?>[null, 0, -1000, 1001, 1795464000000.0,
+        '1795464000000', true, 253402300800000, <Object?>[]])
+        {..._wireGuardEntry(), 'expiresAt': expiry},
+      {..._entry(), 'state': 'revoked'},
+      {..._entry(), 'format': 'vless', 'state': 'expired'},
+      {..._wireGuardEntry(), 'profileCount': 0},
+      {..._wireGuardEntry(state: 'expired'), 'profileCount': 1},
+      {..._wireGuardEntry(state: 'revoked'), 'profileCount': 1},
+      {..._wireGuardEntry(), 'skippedProfileCount': 1},
+      {..._wireGuardEntry(), 'usedBytes': 0},
+      {..._wireGuardEntry(), 'totalBytes': 1},
+      for (final field in ['revision', 'providerEntryId', 'deviceId', 'config', 'url', 'token'])
+        {..._wireGuardEntry(), field: 'PRIVATE_METADATA_TOKEN'},
+    ];
+    for (final entry in invalidEntries) {
+      try {
+        SubscriptionStatus.fromPlatform({..._status(), 'subscriptions': [entry]});
+        fail('Invalid WireGuard metadata was accepted');
+      } on FormatException catch (error) {
+        expect(error.source, isNull);
+        expect(error.toString(), isNot(contains('PRIVATE_')));
+      }
+    }
+  });
+
+  test('WireGuard expiry accepts exact positive second bounds for every declared state', () {
+    for (final state in ['active', 'expired', 'revoked']) {
+      for (final expiry in [1000, 253402300799000]) {
+        final value = SubscriptionStatus.fromPlatform({
+          ..._status(), 'subscriptions': [{..._wireGuardEntry(state: state), 'expiresAt': expiry}],
+        }).subscriptions.single;
+        expect(value.expiresAt!.millisecondsSinceEpoch, expiry);
+      }
+    }
+  });
+
+  test('Inactive access is not a provider download failure and fixed errors do not imply disconnect', () {
+    for (final code in ['SUBSCRIPTION_EXPIRED', 'SUBSCRIPTION_REVOKED']) {
+      expect(() => SubscriptionStatus.fromPlatform({
+        ..._status(), 'subscriptions': [_wireGuardEntry(state: 'expired')],
+        'refreshErrors': {_id: code},
+      }), throwsFormatException);
+      final message = subscriptionErrorMessage(PlatformException(code: code,
+        message: 'PRIVATE_PROVIDER_MESSAGE', details: 'PRIVATE_CONFIG'));
+      expect(message, contains('WireGuard'));
+      expect(message, contains(code == 'SUBSCRIPTION_EXPIRED' ? 'истёк' : 'отозван'));
+      expect(message, isNot(contains('отключён')));
+      expect(message, isNot(contains('PRIVATE_')));
+    }
   });
 
   test('Skipped connection counts preserve legacy metadata and valid bounds', () {

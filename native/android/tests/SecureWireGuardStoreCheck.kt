@@ -105,10 +105,15 @@ private fun encryptedRoundTripAndBackwardCompatibility() {
     check(recreated.subscriptionRecords().single().skippedProfileCount == 2)
     check(recreated.metadata()["activeProfileId"] == selected && recreated.load() == LINK)
     val json = decryptCatalog(context)
-    check(json.getInt("version") == 2)
+    check(json.getInt("version") == 3)
     check(json.getJSONArray("subscriptions").getJSONObject(0).getInt("skippedProfileCount") == 2)
 
     // An existing v2 record without this optional field remains readable with the same AAD/key.
+    json.put("version", 2)
+    json.getJSONArray("profiles").getJSONObject(0).remove("providerId")
+    for (field in listOf("format", "state", "revision")) {
+        json.getJSONArray("subscriptions").getJSONObject(0).remove(field)
+    }
     json.getJSONArray("subscriptions").getJSONObject(0).remove("skippedProfileCount")
     replaceCatalog(context, json)
     val oldCiphertext = preferences(context).getString(CATALOG_FIELD, null)
@@ -131,7 +136,7 @@ private fun encryptedRoundTripAndBackwardCompatibility() {
     check(manual.subscriptionRecords().isEmpty() && manual.load() == LINK)
     check(manual.metadata()["activeProfileId"] == selected)
     manual.save(LINK, name = "Manual")
-    check(decryptCatalog(context).getInt("version") == 2)
+    check(decryptCatalog(context).getInt("version") == 3)
     check(SecureWireGuardStore(context.recreated()).load() == LINK)
 }
 
@@ -153,13 +158,74 @@ private fun corruptCountsCannotSilentlyBecomeZero() {
     check(SecureWireGuardStore(context.recreated()).subscriptionRecords().single().skippedProfileCount == 0)
 }
 
+private fun managedCatalogRoundTripAndStrictV3() {
+    val context = Context()
+    val store = SecureWireGuardStore(context)
+    val privateKey = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+    val config = "[Interface]\nPrivateKey = $privateKey\nAddress = 10.77.0.2/32\n" +
+        "[Peer]\nPublicKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\n" +
+        "Endpoint = 203.0.113.10:51820\nAllowedIPs = 0.0.0.0/0\n"
+    val feed = SubscriptionFeed.Parsed(listOf(SubscriptionFeed.Entry("Устройство", config, "device-entry")),
+        null, 4_102_444_800_000, null, null, format = "wireguard-v1", state = "active", revision = 1)
+    val url = "https://example.com/managed-private-token"
+    val id = store.importSubscription("WireGuard", url, feed, 1)
+    val selected = store.metadata()["activeProfileId"]
+    check(SecureWireGuardStore(context.recreated()).load() == config)
+    val json = decryptCatalog(context)
+    check(json.getInt("version") == 3)
+    val stored = json.getJSONArray("subscriptions").getJSONObject(0)
+    check(stored.getString("format") == "wireguard-v1" && stored.getString("state") == "active")
+    check(stored.getLong("revision") == 1L)
+    check(json.getJSONArray("profiles").getJSONObject(0).getString("providerId") == "device-entry")
+    val public = singleMetadata(store).toString() + store.metadata().toString()
+    for (secret in listOf(privateKey, "managed-private-token", "device-entry", "[Interface]")) {
+        check(!public.contains(secret))
+        check(!preferences(context).getString(CATALOG_FIELD, null)!!.contains(secret))
+    }
+    val original = json.toString()
+    val corruptions = listOf<(JSONObject) -> Unit>(
+        { it.getJSONArray("subscriptions").getJSONObject(0).remove("format") },
+        { it.getJSONArray("subscriptions").getJSONObject(0).remove("state") },
+        { it.getJSONArray("subscriptions").getJSONObject(0).remove("revision") },
+        { it.getJSONArray("profiles").getJSONObject(0).remove("providerId") },
+        { it.getJSONArray("profiles").getJSONObject(0).put("providerId", JSONObject.NULL) },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("format", "vless") },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("state", "revoked") },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("state", "unknown") },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("revision", 0) },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("revision", "1") },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("revision", 1.5) },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("expiresAt", JSONObject.NULL) },
+        { it.getJSONArray("subscriptions").getJSONObject(0).put("expiresAt", 4_102_444_800_001) },
+    )
+    for (corrupt in corruptions) {
+        val changed = JSONObject(original)
+        corrupt(changed)
+        replaceCatalog(context, changed)
+        val encrypted = preferences(context).getString(CATALOG_FIELD, null)
+        expectCorruptCatalog { SecureWireGuardStore(context.recreated()).subscriptions() }
+        check(preferences(context).getString(CATALOG_FIELD, null) == encrypted)
+    }
+    replaceCatalog(context, JSONObject(original))
+    check(store.metadata()["activeProfileId"] == selected && store.load() == config)
+    val revoked = SubscriptionFeed.Parsed(emptyList(), null, 4_102_444_800_000, null, null,
+        format = "wireguard-v1", state = "revoked", revision = 2)
+    store.refreshSubscription(id, url, revoked, 2)
+    val restarted = SecureWireGuardStore(context.recreated())
+    check(restarted.load() == null && !restarted.exists())
+    check(restarted.subscriptionRecords().single().revision == 2L)
+    check(singleMetadata(restarted)["state"] == "revoked" && singleMetadata(restarted)["profileCount"] == 0)
+    check(decryptCatalog(context).getJSONArray("profiles").length() == 0)
+}
+
 fun main() {
     check(Security.getProvider("AndroidKeyStore") == null)
     Security.addProvider(SubscriptionStoreFixtureProvider())
     try {
         encryptedRoundTripAndBackwardCompatibility()
         corruptCountsCannotSilentlyBecomeZero()
+        managedCatalogRoundTripAndStrictV3()
         check(SubscriptionStoreFixtureKey.reads > 0)
-        println("Actual profile store: encrypted skipped-count round trip, v1/v2 compatibility, reset and corrupt-count rejection checks passed")
+        println("Actual profile store: encrypted managed state round trip, v1/v2/v3 compatibility, tombstones and corrupt-record rejection checks passed")
     } finally { Security.removeProvider("AndroidKeyStore") }
 }

@@ -99,7 +99,7 @@ class SubscriptionDownloader internal constructor(
                 current.connectTimeout = call.timeout()
                 current.readTimeout = call.timeout()
                 current.useCaches = false
-                current.setRequestProperty("Accept", "text/plain, application/octet-stream;q=0.9")
+                current.setRequestProperty("Accept", "text/plain, application/json, application/octet-stream;q=0.9")
                 current.setRequestProperty("Accept-Encoding", "identity")
                 current.setRequestProperty("Cache-Control", "no-cache")
                 current.setRequestProperty("User-Agent", "Pushok-Flow-Subscriptions")

@@ -7,15 +7,20 @@ import java.nio.charset.StandardCharsets
 import java.util.Collections
 import java.util.Locale
 
-/** A deliberately bounded VLESS subscription; no arbitrary JSON or remote nested imports. */
+/** Bounded legacy VLESS and explicit managed WireGuard feeds; no nested remote imports. */
 object SubscriptionFeed {
-    class Entry(val name: String, val config: String) {
+    const val LEGACY_FORMAT = "vless"
+    const val MANAGED_WIREGUARD_FORMAT = "wireguard-v1"
+    const val MAX_REVISION = 9_007_199_254_740_991L
+
+    class Entry(val name: String, val config: String, val providerId: String? = null) {
         override fun toString() = "SubscriptionFeed.Entry(<redacted>)"
     }
 
     class Parsed internal constructor(entries: List<Entry>, val title: String?,
         val expiresAt: Long?, val usedBytes: Long?, val totalBytes: Long?,
-        val skippedProfileCount: Int = 0) {
+        val skippedProfileCount: Int = 0, val format: String = LEGACY_FORMAT,
+        val state: String = "active", val revision: Long? = null) {
         val entries: List<Entry> = Collections.unmodifiableList(entries.toList())
         override fun toString() = "SubscriptionFeed.Parsed(<redacted>)"
     }
@@ -28,12 +33,17 @@ object SubscriptionFeed {
 
     fun parse(body: ByteArray, userInfo: String? = null, profileTitle: String? = null): Parsed {
         if (body.size > SubscriptionPolicy.MAX_BYTES) fail("SUBSCRIPTION_TOO_LARGE")
-        var text = strictUtf8(body).removePrefix("\uFEFF").trim()
+        val raw = strictUtf8(body).removePrefix("\uFEFF")
+        var text = raw.trim()
         if (text.isEmpty()) fail("SUBSCRIPTION_EMPTY")
+        if (text.startsWith('{')) return ManagedWireGuardFeed.parse(raw)
         if (!schemePrefix.containsMatchIn(text)) {
             if (text.startsWith('[') || text.startsWith('{')) fail("SUBSCRIPTION_UNSUPPORTED")
             val decoded = decodeBase64(text)
             text = try { strictUtf8(decoded).removePrefix("\uFEFF").trim() } finally { decoded.fill(0) }
+            // Managed access states must use their explicit wire format, never a
+            // legacy Base64 wrapper or a nested import guessed from its contents.
+            if (text.startsWith('{') || text.startsWith('[')) fail("SUBSCRIPTION_UNSUPPORTED")
         }
         if (text.isEmpty()) fail("SUBSCRIPTION_EMPTY")
         val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
@@ -105,6 +115,13 @@ object SubscriptionFeed {
     }
 
     internal fun identity(config: String) = Identity(VlessProfile.parse(config))
+
+    fun validProviderId(value: String): Boolean = value.length in 1..64 && value.all {
+        it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '_' || it == '-'
+    }
+
+    /** Recheck a native-only Parsed object before a catalog commit; constructors are not a trust boundary. */
+    internal fun validateManaged(feed: Parsed) = ManagedWireGuardFeed.validate(feed)
 
     private fun metadata(raw: String?): Map<String, Long> {
         if (raw == null || raw.length > 2048) return emptyMap()

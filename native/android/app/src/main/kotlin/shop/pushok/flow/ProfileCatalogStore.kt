@@ -4,12 +4,13 @@ import java.util.UUID
 
 /** No generated toString(): an accidental exception/log must never print a key. */
 class StoredWireGuardProfile(val id: String, val name: String, val config: String,
-    val subscriptionId: String? = null)
+    val subscriptionId: String? = null, val providerId: String? = null)
 
 class StoredSubscription(val id: String, val name: String, val url: String,
     val updatedAt: Long, val expiresAt: Long? = null,
     val usedBytes: Long? = null, val totalBytes: Long? = null,
-    val skippedProfileCount: Int = 0) {
+    val skippedProfileCount: Int = 0, val format: String = "vless",
+    val state: String = "active", val revision: Long? = null) {
     override fun toString() = "StoredSubscription(<redacted>)"
 }
 
@@ -43,6 +44,7 @@ class ProfileCatalogStore(
     private val storage: ProfileCatalogStorage,
     private val cipher: ProfileCatalogCipher,
     private val state: ProfileCatalogState,
+    private val nowMillis: () -> Long = { System.currentTimeMillis() },
     private val newId: () -> String = { UUID.randomUUID().toString() },
 ) {
     companion object {
@@ -87,17 +89,40 @@ class ProfileCatalogStore(
                 if (it.subscriptionId != null && catalog.subscriptions.none { sub -> sub.id == it.subscriptionId }) {
                     throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
                 }
+                val owner = catalog.subscriptions.firstOrNull { sub -> sub.id == it.subscriptionId }
+                if (owner?.format == SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) {
+                    if (it.providerId == null || !SubscriptionFeed.validProviderId(it.providerId)) {
+                        throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
+                    }
+                } else if (it.providerId != null) throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
             }
             catalog.subscriptions.forEach { sub ->
+                val owned = catalog.profiles.filter { it.subscriptionId == sub.id }
                 if (!validId(sub.id) || normalizedName(sub.name) != sub.name ||
                     sub.updatedAt !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS ||
                     sub.expiresAt?.let { it !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS } == true || sub.usedBytes?.let { it < 0 } == true ||
                     sub.totalBytes?.let { it <= 0 } == true ||
                     sub.skippedProfileCount !in 0..SubscriptionPolicy.MAX_FEED_ENTRIES ||
-                    sub.skippedProfileCount + catalog.profiles.count { it.subscriptionId == sub.id } >
-                        SubscriptionPolicy.MAX_FEED_ENTRIES ||
-                    catalog.profiles.none { it.subscriptionId == sub.id }) {
+                    sub.skippedProfileCount + owned.size > SubscriptionPolicy.MAX_FEED_ENTRIES) {
                     throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
+                }
+                when (sub.format) {
+                    SubscriptionFeed.LEGACY_FORMAT -> {
+                        if (sub.state != "active" || sub.revision != null || owned.isEmpty()) {
+                            throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
+                        }
+                    }
+                    SubscriptionFeed.MANAGED_WIREGUARD_FORMAT -> {
+                        if (sub.state !in setOf("active", "expired", "revoked") ||
+                            sub.revision == null || sub.revision !in 1..SubscriptionFeed.MAX_REVISION ||
+                            sub.expiresAt == null || sub.expiresAt <= 0 || sub.expiresAt % 1000 != 0L ||
+                            sub.usedBytes != null || sub.totalBytes != null || sub.skippedProfileCount != 0 ||
+                            (sub.state == "active") != owned.isNotEmpty() ||
+                            owned.map { it.providerId }.toSet().size != owned.size) {
+                            throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
+                        }
+                    }
+                    else -> throw ProfileCatalogFailure("PROFILE_LOAD_FAILED")
                 }
                 try {
                     if (SubscriptionPolicy.normalizeUrl(sub.url) != sub.url) throw IllegalArgumentException()
@@ -166,8 +191,10 @@ class ProfileCatalogStore(
     fun load(profileId: String? = null): String? = synchronized(state.lock) {
         val catalog = readCatalog()
         val id = profileId ?: catalog.activeProfileId ?: return@synchronized null
-        catalog.profiles.firstOrNull { it.id == id }?.config
+        val profile = catalog.profiles.firstOrNull { it.id == id }
             ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+        requireAvailable(catalog, profile)
+        profile.config
     }
 
     /** Called while the global tunnel-operation token is held, before changing the backend. */
@@ -176,6 +203,17 @@ class ProfileCatalogStore(
         val active = catalog.profiles.firstOrNull { it.id == catalog.activeProfileId }
         if (active == null || active.id != profileId || active.config != config) {
             throw ProfileCatalogFailure("PROFILE_CHANGED")
+        }
+        // Recheck after Android permission approval, immediately before backend mutation.
+        requireAvailable(catalog, active)
+    }
+
+    private fun requireAvailable(catalog: ProfileCatalog, profile: StoredWireGuardProfile) {
+        val owner = catalog.subscriptions.firstOrNull { it.id == profile.subscriptionId } ?: return
+        if (owner.format != SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) return
+        if (owner.state == "revoked") throw ProfileCatalogFailure("SUBSCRIPTION_REVOKED")
+        if (owner.state == "expired" || nowMillis() >= owner.expiresAt!!) {
+            throw ProfileCatalogFailure("SUBSCRIPTION_EXPIRED")
         }
     }
 
@@ -204,7 +242,9 @@ class ProfileCatalogStore(
 
     fun select(profileId: String) = synchronized(state.lock) {
         val catalog = readCatalog()
-        if (catalog.profiles.none { it.id == profileId }) throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+        val profile = catalog.profiles.firstOrNull { it.id == profileId }
+            ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+        requireAvailable(catalog, profile)
         if (catalog.activeProfileId != profileId) persist(ProfileCatalog(catalog.profiles, profileId, catalog.subscriptions))
     }
 
@@ -228,7 +268,8 @@ class ProfileCatalogStore(
                 "profileCount" to catalog.profiles.count { it.subscriptionId == sub.id },
                 "updatedAt" to sub.updatedAt, "expiresAt" to sub.expiresAt,
                 "usedBytes" to sub.usedBytes, "totalBytes" to sub.totalBytes,
-                "skippedProfileCount" to sub.skippedProfileCount)
+                "skippedProfileCount" to sub.skippedProfileCount,
+                "format" to sub.format, "state" to sub.state)
         })
     }
 
@@ -251,10 +292,11 @@ class ProfileCatalogStore(
                 throw ProfileCatalogFailure("PROFILE_LIMIT_REACHED")
             }
             val id = newId()
-            val entries = feed.entries.map { StoredWireGuardProfile(newId(), it.name, it.config, id) }
+            val entries = feed.entries.map { StoredWireGuardProfile(newId(), it.name, it.config, id, it.providerId) }
             val sub = StoredSubscription(id, normalizedName, normalizedUrl, now,
-                feed.expiresAt, feed.usedBytes, feed.totalBytes, feed.skippedProfileCount)
-            persist(ProfileCatalog(catalog.profiles + entries, catalog.activeProfileId ?: entries.first().id,
+                feed.expiresAt, feed.usedBytes, feed.totalBytes, feed.skippedProfileCount,
+                feed.format, feed.state, feed.revision)
+            persist(ProfileCatalog(catalog.profiles + entries, catalog.activeProfileId ?: entries.firstOrNull()?.id,
                 catalog.subscriptions + sub))
             id
         }
@@ -268,11 +310,23 @@ class ProfileCatalogStore(
             if (sub.url != expectedUrl) throw SubscriptionFailure("SUBSCRIPTION_CHANGED")
             validateFeed(feed, now)
             val existing = catalog.profiles.filter { it.subscriptionId == id }
+            // An established managed endpoint cannot bypass entitlement/revision rules by
+            // falling back to an ordinary legacy feed. Format changes require a new import.
+            if (sub.format != feed.format) throw SubscriptionFailure("SUBSCRIPTION_INVALID")
+            if (sub.format == SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) {
+                if (feed.revision!! < sub.revision!! ||
+                    (feed.revision == sub.revision && (feed.state != sub.state ||
+                        feed.expiresAt != sub.expiresAt || feed.entries.size != existing.size ||
+                        feed.entries.zip(existing).any { (entry, profile) ->
+                            entry.providerId != profile.providerId || entry.name != profile.name ||
+                                entry.config != profile.config
+                        }))) throw SubscriptionFailure("SUBSCRIPTION_INVALID")
+            }
             if (catalog.profiles.size - existing.size + feed.entries.size > MAX_PROFILES) {
                 throw ProfileCatalogFailure("PROFILE_LIMIT_REACHED")
             }
             val previousIds = mutableMapOf<SubscriptionFeed.Identity, StoredWireGuardProfile>()
-            for (profile in existing) {
+            for (profile in existing.filter { sub.format == SubscriptionFeed.LEGACY_FORMAT }) {
                 // Older catalogs could contain equivalent links with different export
                 // formatting. Collapse only the refreshed list, retaining the selected
                 // matching ID (otherwise the first existing one), never an arbitrary last.
@@ -282,17 +336,20 @@ class ProfileCatalogStore(
                     previousIds[identity] = profile
                 }
             }
+            val managedIds = existing.associateBy { it.providerId }
             val replacements = feed.entries.map { entry ->
-                val profileId = previousIds[SubscriptionFeed.identity(entry.config)]?.id ?: newId()
-                StoredWireGuardProfile(profileId, entry.name, entry.config, id)
+                val previous = if (feed.format == SubscriptionFeed.MANAGED_WIREGUARD_FORMAT)
+                    managedIds[entry.providerId] else previousIds[SubscriptionFeed.identity(entry.config)]
+                StoredWireGuardProfile(previous?.id ?: newId(), entry.name, entry.config, id, entry.providerId)
             }
             val insertion = catalog.profiles.indexOfFirst { it.subscriptionId == id }
             val profiles = catalog.profiles.filter { it.subscriptionId != id }.toMutableList()
             profiles.addAll(insertion.coerceIn(0, profiles.size), replacements)
             val active = catalog.activeProfileId?.takeIf { activeId -> profiles.any { it.id == activeId } }
-                ?: replacements.first().id
+                ?: replacements.firstOrNull()?.id ?: profiles.firstOrNull()?.id
             val refreshed = StoredSubscription(id, sub.name, sub.url, now,
-                feed.expiresAt, feed.usedBytes, feed.totalBytes, feed.skippedProfileCount)
+                feed.expiresAt, feed.usedBytes, feed.totalBytes, feed.skippedProfileCount,
+                feed.format, feed.state, feed.revision)
             persist(ProfileCatalog(profiles, active, catalog.subscriptions.map { if (it.id == id) refreshed else it }))
         }
 
@@ -307,6 +364,14 @@ class ProfileCatalogStore(
 
     private fun validateFeed(feed: SubscriptionFeed.Parsed, now: Long) {
         if (now !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS) throw SubscriptionFailure("SUBSCRIPTION_INVALID")
+        if (feed.format == SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) {
+            SubscriptionFeed.validateManaged(feed)
+            return
+        }
+        if (feed.format != SubscriptionFeed.LEGACY_FORMAT || feed.state != "active" ||
+            feed.revision != null || feed.entries.any { it.providerId != null }) {
+            throw SubscriptionFailure("SUBSCRIPTION_INVALID")
+        }
         if (feed.entries.isEmpty()) throw SubscriptionFailure("SUBSCRIPTION_EMPTY")
         if (feed.entries.size > MAX_PROFILES) throw SubscriptionFailure("SUBSCRIPTION_TOO_LARGE")
         if (feed.skippedProfileCount !in 0..SubscriptionPolicy.MAX_FEED_ENTRIES ||

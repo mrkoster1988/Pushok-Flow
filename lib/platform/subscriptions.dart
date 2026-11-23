@@ -2,6 +2,10 @@ import 'package:flutter/services.dart';
 
 import 'wireguard_profiles.dart';
 
+enum SubscriptionFormat { vless, wireGuardV1 }
+
+enum SubscriptionAccessState { active, expired, revoked }
+
 /// Public subscription metadata. The personal URL is deliberately absent.
 class FlowSubscription {
   const FlowSubscription({
@@ -14,6 +18,8 @@ class FlowSubscription {
     this.expiresAt,
     this.usedBytes,
     this.totalBytes,
+    this.format = SubscriptionFormat.vless,
+    this.state = SubscriptionAccessState.active,
   });
 
   final String id;
@@ -26,6 +32,19 @@ class FlowSubscription {
   final DateTime? expiresAt;
   final int? usedBytes;
   final int? totalBytes;
+  final SubscriptionFormat format;
+  /// The provider's declared state. A stored active lease may expire locally.
+  final SubscriptionAccessState state;
+
+  bool get isWireGuard => format == SubscriptionFormat.wireGuardV1;
+
+  SubscriptionAccessState effectiveState(DateTime now) {
+    // Legacy VLESS expiry is informational and never authorizes a new policy.
+    if (!isWireGuard) return SubscriptionAccessState.active;
+    if (state != SubscriptionAccessState.active) return state;
+    return expiresAt != null && !expiresAt!.isAfter(now)
+        ? SubscriptionAccessState.expired : SubscriptionAccessState.active;
+  }
 }
 
 class SubscriptionStatus {
@@ -81,7 +100,7 @@ class SubscriptionStatus {
       return value;
     }
     const keys = {'id', 'name', 'host', 'profileCount', 'skippedProfileCount', 'updatedAt',
-      'expiresAt', 'usedBytes', 'totalBytes'};
+      'expiresAt', 'usedBytes', 'totalBytes', 'format', 'state'};
     for (final entry in entries) {
       if (entry is! Map || entry.keys.any((key) => !keys.contains(key))) throw invalid;
       final id = entry['id'];
@@ -90,6 +109,17 @@ class SubscriptionStatus {
       final count = entry['profileCount'];
       final skippedCount = entry.containsKey('skippedProfileCount')
           ? entry['skippedProfileCount'] : 0;
+      final format = switch (entry.containsKey('format') ? entry['format'] : 'vless') {
+        'vless' => SubscriptionFormat.vless,
+        'wireguard-v1' => SubscriptionFormat.wireGuardV1,
+        _ => throw invalid,
+      };
+      final state = switch (entry.containsKey('state') ? entry['state'] : 'active') {
+        'active' => SubscriptionAccessState.active,
+        'expired' => SubscriptionAccessState.expired,
+        'revoked' => SubscriptionAccessState.revoked,
+        _ => throw invalid,
+      };
       if (id is! String || !_id.hasMatch(id) || !seen.add(id) ||
           name is! String || !WireGuardProfiles.isValidName(name) ||
           host is! String || host.isEmpty || host.length > 253 ||
@@ -98,8 +128,20 @@ class SubscriptionStatus {
           skippedCount is! int || skippedCount < 0 || skippedCount > 200) {
         throw invalid;
       }
+      if (format == SubscriptionFormat.wireGuardV1) {
+        final expiry = entry['expiresAt'];
+        if (!entry.containsKey('state') || expiry is! int || expiry <= 0 ||
+            expiry > 253402300799000 || expiry % 1000 != 0 ||
+            skippedCount != 0 || entry['usedBytes'] != null || entry['totalBytes'] != null ||
+            (state == SubscriptionAccessState.active ? count == 0 : count != 0)) {
+          throw invalid;
+        }
+      } else if (state != SubscriptionAccessState.active) {
+        throw invalid;
+      }
       subscriptions.add(FlowSubscription(id: id, name: name, host: host,
         profileCount: count, skippedProfileCount: skippedCount,
+        format: format, state: state,
         updatedAt: date(entry['updatedAt'], mandatory: true)!,
         expiresAt: date(entry['expiresAt']), usedBytes: bytes(entry['usedBytes']),
         totalBytes: bytes(entry['totalBytes'])));
@@ -209,7 +251,7 @@ String subscriptionErrorMessage(Object error) {
     'SUBSCRIPTION_EMPTY' =>
       'В подписке нет подключений. Уточните срок доступа в магазине.',
     'SUBSCRIPTION_UNSUPPORTED' =>
-      'В подписке нет поддерживаемых подключений. Нужны ссылки VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS.',
+      'В подписке нет поддерживаемых подключений. Поддерживаются VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS, а также подписки WireGuard в формате Flow.',
     'UNSUPPORTED_TRANSPORT' ||
     'UNSUPPORTED_SECURITY' || 'UNSUPPORTED_PROFILE_OPTION' =>
       'Подписка содержит неподдерживаемые подключения. Нужны ссылки VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS.',
@@ -234,8 +276,12 @@ String subscriptionErrorMessage(Object error) {
       'Не удалось загрузить подписку. Сохранённые серверы остаются на устройстве.',
     'SUBSCRIPTION_TLS_ERROR' =>
       'Не удалось проверить защищённое соединение с сервером подписки. Уточните у поставщика HTTPS-адрес и сертификат.',
+    'SUBSCRIPTION_EXPIRED' =>
+      'Срок доступа WireGuard истёк. Обновите подписку после продления доступа.',
+    'SUBSCRIPTION_REVOKED' =>
+      'Доступ WireGuard отозван сервисом. Проверьте подписку в панели провайдера.',
     'SUBSCRIPTION_HTTP_ERROR' || 'SUBSCRIPTION_ACCESS_DENIED' ||
-    'SUBSCRIPTION_AUTH_REQUIRED' || 'SUBSCRIPTION_EXPIRED' =>
+    'SUBSCRIPTION_AUTH_REQUIRED' =>
       'Сервис не предоставил список серверов. Проверьте подписку в магазине.',
     'SUBSCRIPTION_REDIRECT_BLOCKED' =>
       'Сервис перенаправил ссылку на неподдерживаемый адрес. Получите актуальную HTTPS-ссылку.',

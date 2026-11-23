@@ -34,6 +34,21 @@ class _UnprintableFailure implements Exception {
 }
 
 void main() {
+  test('Managed access failures copy only the allowlisted state and fixed guidance', () {
+    for (final code in ['SUBSCRIPTION_EXPIRED', 'SUBSCRIPTION_REVOKED']) {
+      final report = _report(PlatformException(code: code,
+        message: _privateUrl, details: {'deviceId': _privateId,
+          'config': _privateConfig, 'name': _privateName, 'revision': 999}));
+      expect(report.code, code);
+      expect(report.clipboardText, contains('Код: $code\n'));
+      expect(report.message, contains('WireGuard'));
+      expect(report.message, contains(code == 'SUBSCRIPTION_EXPIRED' ? 'истёк' : 'отозван'));
+      for (final secret in [_privateUrl, _privateId, _privateName, _privateConfig, '999']) {
+        expect(report.clipboardText, isNot(contains(secret)));
+      }
+    }
+  });
+
   test('Known failures export a fixed snapshot and never native private context', () {
     final details = <String, Object?>{
       'url': _privateUrl,

@@ -486,7 +486,7 @@ class BootstrapScriptTests(unittest.TestCase):
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportWork.kt", "ProfileImportReader.kt", "ProfileImportPayload.kt", "ProfileQrDecoder.kt",
             "ProfileQrCameraDecoder.kt", "ProfileQrImageReader.kt", "ProfileQrSession.kt", "WireGuardQrActivity.kt",
-            "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "SubscriptionPolicy.kt", "SubscriptionFeed.kt",
+            "ProfileCatalogStore.kt", "ProfileOperationGate.kt", "SubscriptionPolicy.kt", "SubscriptionFeed.kt", "ManagedWireGuardFeed.kt",
             "SubscriptionLinks.kt", "BoundedNetworkCall.kt", "SubscriptionDownloader.kt", "ProfileSubscriptions.kt", "RouteSettingsStore.kt", "RouteAppAvailability.kt",
             "RouteRecommendationPolicy.kt", "RouteRecommendationStore.kt", "RecommendationAutomation.kt", "RouteRecommendations.kt",
         )

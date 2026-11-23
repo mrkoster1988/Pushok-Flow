@@ -66,15 +66,20 @@ class SecureWireGuardStore(context: Context) {
             val profiles = JSONArray()
             catalog.profiles.forEach { profiles.put(JSONObject().put("id", it.id)
                 .put("name", it.name).put("config", it.config)
-                .put("subscriptionId", it.subscriptionId ?: JSONObject.NULL)) }
+                .put("subscriptionId", it.subscriptionId ?: JSONObject.NULL)
+                .put("providerId", it.providerId ?: JSONObject.NULL)) }
             val subscriptions = JSONArray()
             catalog.subscriptions.forEach { subscriptions.put(JSONObject().put("id", it.id)
                 .put("name", it.name).put("url", it.url).put("updatedAt", it.updatedAt)
                 .put("expiresAt", it.expiresAt ?: JSONObject.NULL)
                 .put("usedBytes", it.usedBytes ?: JSONObject.NULL)
                 .put("totalBytes", it.totalBytes ?: JSONObject.NULL)
-                .put("skippedProfileCount", it.skippedProfileCount)) }
-            val json = JSONObject().put("version", 2).put("profiles", profiles).put("subscriptions", subscriptions)
+                .put("skippedProfileCount", it.skippedProfileCount)
+                .put("format", it.format).put("state", it.state)
+                .put("revision", it.revision ?: JSONObject.NULL)) }
+            // Keep the existing key/AAD; a new schema prevents older APKs from silently
+            // reading managed entitlement records as ordinary VLESS subscriptions.
+            val json = JSONObject().put("version", 3).put("profiles", profiles).put("subscriptions", subscriptions)
                 .put("activeProfileId", catalog.activeProfileId ?: JSONObject.NULL)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key(create = true))
@@ -90,7 +95,7 @@ class SecureWireGuardStore(context: Context) {
         override fun decrypt(encrypted: String): ProfileCatalog {
             val json = JSONObject(decryptText(encrypted, catalog = true))
             val version = json.opt("version")
-            require(version in listOf(1, 2) && json.has("activeProfileId")) { "PROFILE_LOAD_FAILED" }
+            require(version in listOf(1, 2, 3) && json.has("activeProfileId")) { "PROFILE_LOAD_FAILED" }
             val values = json.opt("profiles") as? JSONArray ?: error("PROFILE_LOAD_FAILED")
             require(values.length() <= ProfileCatalogStore.MAX_PROFILES) { "PROFILE_LOAD_FAILED" }
             val profiles = (0 until values.length()).map { index ->
@@ -98,7 +103,8 @@ class SecureWireGuardStore(context: Context) {
                 StoredWireGuardProfile(item.opt("id") as? String ?: error("PROFILE_LOAD_FAILED"),
                     item.opt("name") as? String ?: error("PROFILE_LOAD_FAILED"),
                     item.opt("config") as? String ?: error("PROFILE_LOAD_FAILED"),
-                    if (version == 2) nullableString(item, "subscriptionId") else null)
+                    if (version != 1) nullableString(item, "subscriptionId") else null,
+                    if (version == 3) nullableString(item, "providerId") else null)
             }
             val active = json.opt("activeProfileId")
             require(active == JSONObject.NULL || active is String) { "PROFILE_LOAD_FAILED" }
@@ -112,7 +118,10 @@ class SecureWireGuardStore(context: Context) {
                         item.opt("url") as? String ?: error("PROFILE_LOAD_FAILED"),
                         nullableLong(item, "updatedAt") ?: error("PROFILE_LOAD_FAILED"),
                         nullableLong(item, "expiresAt"), nullableLong(item, "usedBytes"), nullableLong(item, "totalBytes"),
-                        skippedProfileCount(item))
+                        skippedProfileCount(item),
+                        if (version == 3) item.opt("format") as? String ?: error("PROFILE_LOAD_FAILED") else "vless",
+                        if (version == 3) item.opt("state") as? String ?: error("PROFILE_LOAD_FAILED") else "active",
+                        if (version == 3) nullableLong(item, "revision") else null)
                 }
             }
             return ProfileCatalog(profiles, active as? String, subscriptions)

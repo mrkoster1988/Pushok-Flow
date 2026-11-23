@@ -27,6 +27,9 @@ const _qrWireguardConfig = '[Interface]\n'
 class _Bridge {
   bool connected = false;
   bool imported = false;
+  String subscriptionFormat = 'vless';
+  String subscriptionState = 'active';
+  int? subscriptionExpiry;
   bool protectionAvailable = true;
   bool automaticUpdatesEnabled = true;
   bool subscriptionsBusy = false;
@@ -60,8 +63,9 @@ class _Bridge {
     'subscriptions': [
       if (imported) {
         'id': _subscriptionId, 'name': 'Магазин', 'host': 'example.invalid',
-        'profileCount': 1, 'updatedAt': 1795377600000,
-        'expiresAt': null, 'usedBytes': null, 'totalBytes': null,
+        'profileCount': subscriptionState == 'active' ? 1 : 0, 'updatedAt': 1795377600000,
+        'expiresAt': subscriptionExpiry, 'usedBytes': null, 'totalBytes': null,
+        'format': subscriptionFormat, 'state': subscriptionState,
       },
       if (secondImported) {
         'id': _otherSubscriptionId, 'name': 'Другой магазин', 'host': 'other.invalid',
@@ -80,7 +84,7 @@ class _Bridge {
       case 'listWireGuardProfiles': return {
         'profiles': [
           {'id': _manualId, 'name': 'Мой сервер'},
-          if (imported) {'id': _managedId, 'name': 'Из магазина',
+          if (imported && subscriptionState == 'active') {'id': _managedId, 'name': 'Из магазина',
             'subscriptionId': _subscriptionId, 'subscriptionName': 'Магазин'},
           if (savedQrProfileName != null) {'id': _qrProfileId, 'name': savedQrProfileName},
         ],
@@ -227,6 +231,93 @@ void main() {
     await tester.tap(button);
     await tester.pumpAndSettle();
   }
+
+  for (final state in ['expired', 'revoked']) {
+    testWidgets('Adding managed $state retains the subscription without offering a connection', (tester) async {
+      final bridge = _Bridge()
+        ..subscriptionFormat = 'wireguard-v1'
+        ..subscriptionState = state
+        ..subscriptionExpiry = 1790000000000;
+      await _pump(tester, bridge);
+      await tapControl(tester, 'save_subscription');
+      expect(find.byType(SubscriptionEditor), findsNothing);
+      expect(find.text(state == 'expired'
+          ? 'Подписка добавлена, но её срок истёк. После продления обновите её в Flow.'
+          : 'Подписка добавлена, но доступ отозван. Обратитесь к провайдеру.'), findsOneWidget);
+      expect(find.text('Подписка добавлена. Выберите сервер и подключитесь на главной.'), findsNothing);
+      expect(find.byKey(const ValueKey('refresh_subscription_$_subscriptionId')), findsOneWidget);
+      expect(find.byKey(const ValueKey('active_wireguard_profile_$_manualId')), findsOneWidget);
+      expect(bridge.calls, isNot(contains('connectWireGuard')));
+      expect(bridge.calls, isNot(contains('saveWireGuardProfile')));
+      expect(bridge.leases, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('Refreshing into managed $state does not report available servers', (tester) async {
+      final bridge = _Bridge()
+        ..pending = null
+        ..imported = true
+        ..automaticUpdatesEnabled = false
+        ..subscriptionFormat = 'wireguard-v1'
+        ..subscriptionExpiry = 4102444800000;
+      await _pump(tester, bridge);
+      await openServers(tester);
+      bridge.subscriptionState = state;
+      await tapControl(tester, 'refresh_subscription_$_subscriptionId');
+      expect(find.text(state == 'expired'
+          ? 'Срок подписки истёк. После продления обновите её в Flow.'
+          : 'Провайдер отозвал доступ. Обратитесь к нему для восстановления подписки.'), findsOneWidget);
+      expect(find.text('Список серверов обновлён.'), findsNothing);
+      expect(find.byKey(const ValueKey('subscription_refresh_error_$_subscriptionId')), findsNothing);
+      expect(bridge.calls, isNot(contains('connectWireGuard')));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('Inline managed import with unknown subscription status does not borrow an existing active state',
+      (tester) async {
+    final bridge = _Bridge()
+      ..pending = null
+      ..secondImported = true
+      ..automaticUpdatesEnabled = false
+      ..subscriptionFormat = 'wireguard-v1'
+      ..subscriptionState = 'revoked'
+      ..subscriptionExpiry = 4102444800000
+      ..subscriptionStatusError = PlatformException(code: 'SUBSCRIPTION_STORE_FAILED');
+    await _pump(tester, bridge);
+    // Native appends the imported subscription after an existing active one.
+    // The failed initial status means Flutter cannot identify it by a baseline diff.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('shop.pushok.flow/subscriptions'), (call) async {
+      final result = await bridge.subscription(call);
+      if (call.method != 'importSubscription') return result;
+      final status = Map<String, Object?>.from(result! as Map);
+      return {...status, 'subscriptions': (status['subscriptions']! as List).reversed.toList()};
+    });
+    await openServers(tester);
+    expect(find.byKey(const Key('subscriptions_error')), findsOneWidget);
+    await tapControl(tester, 'edit_wireguard_profile_$_manualId');
+    await tapControl(tester, 'scan_wireguard_profile_qr');
+    await tapControl(tester, 'open_imported_subscription');
+    await tester.enterText(find.byKey(const Key('subscription_name')), 'Магазин');
+    await tapControl(tester, 'save_subscription');
+
+    expect(find.byType(SubscriptionEditor), findsNothing);
+    expect(find.byType(WireGuardProfileEditor), findsNothing);
+    expect(find.text('Подписка добавлена. Проверьте её состояние в списке подписок.'), findsOneWidget);
+    expect(find.text('Подписка добавлена. Выберите сервер и подключитесь на главной.'), findsNothing);
+    expect(find.byKey(const ValueKey('refresh_subscription_$_subscriptionId')), findsOneWidget);
+    expect(find.byKey(const ValueKey('refresh_subscription_$_otherSubscriptionId')), findsOneWidget);
+    expect(find.byKey(const ValueKey('active_wireguard_profile_$_manualId')), findsOneWidget);
+    expect(bridge.calls.where((call) => call == 'importSubscription').length, 1);
+    expect(bridge.calls, isNot(contains('connectWireGuard')));
+    expect(bridge.calls, isNot(contains('saveWireGuardProfile')));
+    expect(bridge.leases, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   Future<void> openQrProfile(WidgetTester tester, {String source = 'scan_subscription_qr'}) async {
     await tapControl(tester, source);

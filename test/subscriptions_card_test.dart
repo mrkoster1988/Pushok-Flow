@@ -33,6 +33,19 @@ SubscriptionStatus _failureStatus({String code = 'SUBSCRIPTION_NETWORK_ERROR'}) 
       'refreshErrors': {_id: code},
     });
 
+SubscriptionStatus _wireGuardStatus({String state = 'active',
+    int expiresAt = 1795464000000, bool busy = false}) =>
+    SubscriptionStatus.fromPlatform({
+      'automaticUpdatesEnabled': true, 'busy': busy,
+      'subscriptions': [{
+        'id': _id, 'name': 'Мой WireGuard', 'host': 'example.invalid',
+        'format': 'wireguard-v1', 'state': state,
+        'profileCount': state == 'active' ? 2 : 0,
+        'updatedAt': 1795377600000, 'expiresAt': expiresAt,
+        'skippedProfileCount': 0, 'usedBytes': null, 'totalBytes': null,
+      }],
+    });
+
 void _clipboard(Future<Object?> Function(MethodCall call) handler) {
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMethodCallHandler(SystemChannels.platform, handler);
@@ -56,6 +69,154 @@ Future<void> _tap(WidgetTester tester, String key) async {
 }
 
 void main() {
+  for (final state in ['active', 'expired', 'revoked']) {
+    testWidgets('WireGuard $state is visible metadata with refresh and delete, not a failed refresh',
+        (tester) async {
+      var refreshes = 0;
+      var deletes = 0;
+      await _pump(tester, SubscriptionsCard(status: _wireGuardStatus(state: state),
+        now: DateTime.fromMillisecondsSinceEpoch(1795377600000),
+        mutationsEnabled: true,
+        onRefresh: (_) { refreshes++; }, onDelete: (_) { deletes++; }));
+      final access = tester.widget<Text>(find.byKey(const ValueKey('subscription_access_state_$_id')));
+      expect(access.data, contains(switch (state) {
+        'active' => 'Доступ WireGuard активен.',
+        'expired' => 'Срок доступа WireGuard истёк.',
+        _ => 'Доступ WireGuard отозван сервисом.',
+      }));
+      expect(access.style!.color, state == 'active' ? PushokPalette.mint : PushokPalette.orange);
+      expect(find.text('example.invalid · Сохранено серверов: ${state == 'active' ? 2 : 0}'),
+        findsOneWidget);
+      final expiry = tester.widget<Text>(find.byKey(const ValueKey('subscription_expiry_$_id'))).data!;
+      expect(expiry, startsWith('Срок WireGuard: до '));
+      expect(expiry, matches(RegExp(r'\d{2}:\d{2}')));
+      expect(find.textContaining('Подписка проверена:'), findsOneWidget);
+      expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
+      expect(find.byKey(const ValueKey('subscription_refresh_error_$_id')), findsNothing);
+      expect(find.text('Скопировать ошибку'), findsNothing);
+      expect(refreshes, 0);
+      expect(deletes, 0);
+      await _tap(tester, 'refresh_subscription_$_id');
+      await _tap(tester, 'delete_subscription_$_id');
+      expect(refreshes, 1);
+      expect(deletes, 1);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('Locally expired WireGuard keeps the stored count without advertising available access',
+      (tester) async {
+    final status = _wireGuardStatus(expiresAt: 1795291200000);
+    await _pump(tester, SubscriptionsCard(status: status,
+      now: DateTime.fromMillisecondsSinceEpoch(1795377600000)));
+    expect(status.subscriptions.single.state, SubscriptionAccessState.active);
+    expect(status.subscriptions.single.profileCount, 2);
+    expect(find.text('example.invalid · Сохранено серверов: 2'), findsOneWidget);
+    expect(find.text('Срок доступа WireGuard истёк. Новые подключения недоступны.'), findsOneWidget);
+    expect(find.text('Доступ WireGuard активен.'), findsNothing);
+    expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
+    expect(find.textContaining('туннель отключён'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('WireGuard deadline changes the open card without downloading or changing its cached metadata',
+      (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    var now = DateTime.fromMillisecondsSinceEpoch(1795377600000);
+    final expiry = now.add(const Duration(seconds: 2));
+    final status = _wireGuardStatus(expiresAt: expiry.millisecondsSinceEpoch);
+    var refreshes = 0;
+    await _pump(tester, SubscriptionsCard(status: status, clock: () => now,
+      mutationsEnabled: true, onRefresh: (_) { refreshes++; }));
+    expect(find.text('Доступ WireGuard активен.'), findsOneWidget);
+    now = now.add(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Доступ WireGuard активен.'), findsOneWidget);
+    now = expiry;
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Срок доступа WireGuard истёк. Новые подключения недоступны.'), findsOneWidget);
+    expect(status.subscriptions.single.state, SubscriptionAccessState.active);
+    expect(status.subscriptions.single.profileCount, 2);
+    expect(refreshes, 0);
+    await tester.pump(const Duration(hours: 1));
+    expect(refreshes, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('WireGuard deadlines pause in background and resume from the current clock',
+      (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    addTearDown(() => tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+    var now = DateTime.fromMillisecondsSinceEpoch(1795377600000);
+    final expiry = now.add(const Duration(seconds: 10));
+    var refreshes = 0;
+    await _pump(tester, SubscriptionsCard(
+      status: _wireGuardStatus(expiresAt: expiry.millisecondsSinceEpoch), clock: () => now,
+      onRefresh: (_) { refreshes++; }));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    now = expiry.add(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 11));
+    expect(refreshes, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(find.text('Срок доступа WireGuard истёк. Новые подключения недоступны.'), findsOneWidget);
+    expect(refreshes, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A replaced or disposed WireGuard deadline cannot override the new provider state',
+      (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    var now = DateTime.fromMillisecondsSinceEpoch(1795377600000);
+    final expiry = now.add(const Duration(seconds: 10));
+    await _pump(tester, SubscriptionsCard(
+      status: _wireGuardStatus(expiresAt: expiry.millisecondsSinceEpoch), clock: () => now));
+    await _pump(tester, SubscriptionsCard(
+      status: _wireGuardStatus(state: 'revoked', expiresAt: expiry.millisecondsSinceEpoch),
+      clock: () => now));
+    now = expiry;
+    await tester.pump(const Duration(seconds: 10));
+    expect(find.text('Доступ WireGuard отозван сервисом. Новые подключения недоступны.'), findsOneWidget);
+    expect(find.textContaining('Срок доступа WireGuard истёк.'), findsNothing);
+    await _pump(tester, SubscriptionsCard(status: _wireGuardStatus(
+      expiresAt: now.add(const Duration(seconds: 10)).millisecondsSinceEpoch), clock: () => now));
+    await tester.pumpWidget(const SizedBox.shrink());
+    now = now.add(const Duration(seconds: 20));
+    await tester.pump(const Duration(seconds: 20));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('WireGuard inactive access respects the unchanged tunnel and busy mutation gates',
+      (tester) async {
+    for (final gate in [(busy: true, enabled: true), (busy: false, enabled: false)]) {
+      await _pump(tester, SubscriptionsCard(status: _wireGuardStatus(state: 'revoked', busy: gate.busy),
+        mutationsEnabled: gate.enabled, onRefresh: (_) {}, onDelete: (_) {},
+        onOpenAccount: () {}));
+      for (final key in ['refresh_subscription_$_id', 'delete_subscription_$_id']) {
+        expect(tester.widget<OutlinedButton>(find.byKey(ValueKey(key))).onPressed, isNull);
+      }
+      expect(tester.widget<OutlinedButton>(find.byKey(const Key('manage_pushok_subscription'))).onPressed,
+        isNotNull);
+    }
+  });
+
+  testWidgets('WireGuard status and its actions fit a narrow phone with large text', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var refreshes = 0;
+    await _pump(tester, SubscriptionsCard(status: _wireGuardStatus(state: 'expired'),
+      mutationsEnabled: true, onRefresh: (_) { refreshes++; }), textScale: 2);
+    await tester.ensureVisible(find.byKey(const ValueKey('subscription_access_state_$_id')));
+    await tester.pump();
+    expect(tester.getSize(find.byKey(const ValueKey('subscription_access_state_$_id'))).width,
+      lessThanOrEqualTo(360));
+    await _tap(tester, 'refresh_subscription_$_id');
+    expect(refreshes, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Unknown expiry does not claim paid active access', (tester) async {
     await _pump(tester, SubscriptionsCard(status: _status(), mutationsEnabled: true,
       onAdd: () {}, onOpenAccount: () {}));
@@ -321,12 +482,15 @@ void main() {
       (tester) async {
     await _pump(tester, SubscriptionsCard(status: _status()));
     await _tap(tester, 'subscriptions_info');
-    expect(find.textContaining('Из смешанной подписки добавляются совместимые подключения VLESS'),
+    expect(find.textContaining('Из смешанного списка VLESS добавляются совместимые подключения'),
       findsOneWidget);
     expect(find.textContaining('Записи других протоколов и неподдерживаемых вариантов подключения'),
       findsOneWidget);
     expect(find.textContaining('Если ответ повреждён или в нём нет совместимых серверов, прежний список сохраняется.'),
       findsOneWidget);
+    expect(find.textContaining('Для управляемого WireGuard нужна подписка в формате Flow'), findsOneWidget);
+    expect(find.textContaining('Flow не отключает уже работающий туннель автоматически'), findsOneWidget);
+    expect(find.textContaining('Для обычного списка VLESS срок остаётся информационной подсказкой.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
