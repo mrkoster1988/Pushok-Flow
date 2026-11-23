@@ -266,7 +266,17 @@ class ProfileCatalogStore(
             if (catalog.profiles.size - existing.size + feed.entries.size > MAX_PROFILES) {
                 throw ProfileCatalogFailure("PROFILE_LIMIT_REACHED")
             }
-            val previousIds = existing.associateBy { SubscriptionFeed.identity(it.config) }
+            val previousIds = mutableMapOf<SubscriptionFeed.Identity, StoredWireGuardProfile>()
+            for (profile in existing) {
+                // Older catalogs could contain equivalent links with different export
+                // formatting. Collapse only the refreshed list, retaining the selected
+                // matching ID (otherwise the first existing one), never an arbitrary last.
+                val identity = try { SubscriptionFeed.identity(profile.config) }
+                    catch (_: ProfileFormatFailure) { continue }
+                if (identity !in previousIds || profile.id == catalog.activeProfileId) {
+                    previousIds[identity] = profile
+                }
+            }
             val replacements = feed.entries.map { entry ->
                 val profileId = previousIds[SubscriptionFeed.identity(entry.config)]?.id ?: newId()
                 StoredWireGuardProfile(profileId, entry.name, entry.config, id)
@@ -294,13 +304,13 @@ class ProfileCatalogStore(
         if (now !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS) throw SubscriptionFailure("SUBSCRIPTION_INVALID")
         if (feed.entries.isEmpty()) throw SubscriptionFailure("SUBSCRIPTION_EMPTY")
         if (feed.entries.size > MAX_PROFILES) throw SubscriptionFailure("SUBSCRIPTION_TOO_LARGE")
-        if (feed.entries.map { SubscriptionFeed.identity(it.config) }.toSet().size != feed.entries.size) {
-            throw SubscriptionFailure("SUBSCRIPTION_INVALID")
-        }
         feed.entries.forEach {
             normalizedName(it.name)
             try { VlessProfile.parse(it.config) }
             catch (_: ProfileFormatFailure) { throw SubscriptionFailure("SUBSCRIPTION_INVALID") }
+        }
+        if (feed.entries.map { SubscriptionFeed.identity(it.config) }.toSet().size != feed.entries.size) {
+            throw SubscriptionFailure("SUBSCRIPTION_INVALID")
         }
     }
 }

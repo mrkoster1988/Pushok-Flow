@@ -196,6 +196,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'В ссылке VLESS есть параметры, которые пока не поддерживаются. Откройте подсказку ⓘ в редакторе профиля.';
         case 'PROFILE_LOAD_FAILED':
           return 'Не удалось открыть сохранённый профиль. Откройте «Серверы» и повторите проверку.';
+        case 'PROFILE_READ_TIMEOUT':
+          return 'Не удалось вовремя прочитать профили. Повторите подключение.';
         case 'PROFILE_CHANGED':
         case 'PROFILE_NOT_FOUND':
           return 'Выбранный профиль изменился. Проверьте выбор в «Серверах» и подключитесь снова.';
@@ -219,12 +221,18 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         : 'Не удалось установить туннель. Проверьте профиль и доступность сервера.';
   }
 
+  Future<T> _withProfileReadDeadline<T>(Future<T> read) => read.timeout(
+    const Duration(seconds: 5),
+    onTimeout: () => throw PlatformException(code: 'PROFILE_READ_TIMEOUT'),
+  );
+
   Future<void> _toggleTunnel({String? profile}) async {
     if (!_canToggleTunnel) return;
     final tunnelIntent = ++_tunnelIntentEpoch;
     final disconnecting = _ownsTunnel;
     final requestEpoch = _profileRequestEpoch;
     var needsProfile = false;
+    var nativeOperationStarted = false;
     _statusEpoch++;
     setState(() {
       connecting = true;
@@ -234,6 +242,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     _notifyInformation();
     try {
       if (disconnecting) {
+        nativeOperationStarted = true;
         await WireGuardTunnel.disconnect();
         if (mounted) setState(() {
           _ownsTunnel = false;
@@ -244,18 +253,22 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         // Only this explicit action transfers a saved configuration into Dart.
         // Native code verifies this ID and content again under its operation
         // lease, so a different Activity cannot switch profiles in between.
-        final catalog = await WireGuardTunnel.listProfiles();
+        final catalog = await _withProfileReadDeadline(WireGuardTunnel.listProfiles());
         if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
         final active = catalog.activeProfile;
         if (active == null) {
           needsProfile = true;
           setState(() { _profiles = catalog; _profilesError = null; });
         } else {
-          final config = profile ?? await WireGuardTunnel.loadProfile(profileId: active.id);
+          final config = profile ?? await _withProfileReadDeadline(
+            WireGuardTunnel.loadProfile(profileId: active.id));
           if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
           if (config == null || config.trim().isEmpty) {
             throw PlatformException(code: 'PROFILE_NOT_FOUND');
           }
+          // Native connection and Android consent own their completion. Only the
+          // preceding read-only preparation has a Dart deadline.
+          nativeOperationStarted = true;
           final ok = await WireGuardTunnel.connect(config, expectedProfileId: active.id);
           if (!mounted) return;
           setState(() {
@@ -273,7 +286,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         }
       }
     } catch (error) {
-      if (mounted) {
+      // A failed preparation from before app switching is no longer a current
+      // intent. Android consent may legitimately pause a native operation.
+      if (mounted && (nativeOperationStarted ||
+          (_foreground && requestEpoch == _profileRequestEpoch))) {
         final message = _connectionMessage(error, disconnecting: disconnecting);
         setState(() => connectionError = message);
         final routeFailureCode = !disconnecting && error is PlatformException ? error.code : null;
@@ -1246,7 +1262,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         builder: (sheetContext) => ValueListenableBuilder<int>(
           valueListenable: _informationRevision,
           builder: (context, revision, child) => AppInformationSheet(
-            version: '0.50.0',
+            version: '0.51.0',
             isAndroid: _isAndroid,
             diagnostics: _diagnostics,
             refreshing: _statusRefreshing,

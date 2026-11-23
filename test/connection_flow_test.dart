@@ -1579,4 +1579,149 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  for (final read in ['catalog', 'configuration']) {
+    for (final lateFailure in [false, true]) {
+      testWidgets('Connect $read deadline permits current-profile retry and ignores late ${lateFailure ? 'failure' : 'success'}',
+          (tester) async {
+        bridge.savedProfile = _profile;
+        final oldCatalog = bridge.catalog;
+        final catalog = Completer<Object?>();
+        final configuration = Completer<String?>();
+        final secondConfig = _profile.replaceAll('vpn.example', 'current.example');
+        void finishOldRead() {
+          if (read == 'catalog' && !catalog.isCompleted) {
+            if (lateFailure) {
+              catalog.completeError(PlatformException(code: 'PROFILE_LOAD_FAILED',
+                message: 'PRIVATE_LATE_CATALOG'));
+            } else {
+              catalog.complete(oldCatalog);
+            }
+          } else if (read == 'configuration' && !configuration.isCompleted) {
+            if (lateFailure) {
+              configuration.completeError(PlatformException(code: 'PROFILE_LOAD_FAILED',
+                message: 'PRIVATE_LATE_CONFIGURATION'));
+            } else {
+              configuration.complete(_profile);
+            }
+          }
+        }
+        try {
+          await _withApp(tester, () async {
+            if (read == 'catalog') {
+              bridge.catalogGate = catalog;
+            } else {
+              bridge.loadGate = configuration;
+            }
+            final button = find.byKey(const Key('pushok_connect_button'));
+            await tester.tap(button);
+            await tester.pump();
+            expect(tester.widget<InkWell>(button).onTap, isNull);
+            expect(bridge.named('connectWireGuard'), isEmpty);
+            // The old request remains unresolved; later independent reads see
+            // the current selection, as after a subscription catalog refresh.
+            bridge.catalogGate = null;
+            bridge.loadGate = null;
+            bridge.profiles[_secondProfileId] = {'name': 'Актуальный', 'config': secondConfig};
+            bridge.activeProfileId = _secondProfileId;
+            await tester.pump(const Duration(seconds: 6));
+            await tester.pumpAndSettle();
+            expect(tester.widget<InkWell>(button).onTap, isNotNull);
+            expect(find.text('Не удалось вовремя прочитать профили. Повторите подключение.'), findsOneWidget);
+            expect(bridge.named('connectWireGuard'), isEmpty);
+            expect(bridge.named('acquire'), isEmpty);
+            expect(find.byType(WireGuardProfileEditor), findsNothing);
+            await tester.tap(button);
+            await tester.pumpAndSettle();
+            final request = bridge.named('connectWireGuard').single.arguments as Map;
+            expect(request['expectedProfileId'], _secondProfileId);
+            expect(request['config'], secondConfig);
+            finishOldRead();
+            await tester.pumpAndSettle();
+            expect(bridge.named('connectWireGuard'), hasLength(1));
+            expect(find.text('Туннель включён'), findsOneWidget);
+            expect(find.byType(WireGuardProfileEditor), findsNothing);
+            expect(find.textContaining('PRIVATE_LATE_'), findsNothing);
+            expect(tester.takeException(), isNull);
+          });
+        } finally {
+          finishOldRead();
+        }
+      });
+    }
+
+    testWidgets('Connect $read deadline after app switching does not revive an obsolete intent',
+        (tester) async {
+      bridge.savedProfile = _profile;
+      final catalog = Completer<Object?>();
+      final configuration = Completer<String?>();
+      try {
+        await _withApp(tester, () async {
+          if (read == 'catalog') {
+            bridge.catalogGate = catalog;
+          } else {
+            bridge.loadGate = configuration;
+          }
+          final button = find.byKey(const Key('pushok_connect_button'));
+          await tester.tap(button);
+          await tester.pump();
+          tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+          tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+          bridge.catalogGate = null;
+          bridge.loadGate = null;
+          await tester.pump(const Duration(seconds: 6));
+          await tester.pumpAndSettle();
+          expect(tester.widget<InkWell>(button).onTap, isNotNull);
+          expect(find.text('Не удалось вовремя прочитать профили. Повторите подключение.'), findsNothing);
+          expect(bridge.named('connectWireGuard'), isEmpty);
+          expect(bridge.named('acquire'), isEmpty);
+          expect(find.byType(WireGuardProfileEditor), findsNothing);
+          if (read == 'catalog') {
+            catalog.completeError(PlatformException(code: 'PROFILE_LOAD_FAILED', message: 'PRIVATE_OLD_READ'));
+          } else {
+            configuration.completeError(PlatformException(code: 'PROFILE_LOAD_FAILED', message: 'PRIVATE_OLD_READ'));
+          }
+          await tester.pumpAndSettle();
+          expect(find.textContaining('PRIVATE_OLD_READ'), findsNothing);
+          expect(bridge.named('connectWireGuard'), isEmpty);
+          await tester.tap(button);
+          await tester.pumpAndSettle();
+          expect(bridge.named('connectWireGuard'), hasLength(1));
+          expect(find.text('Туннель включён'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        });
+      } finally {
+        if (read == 'catalog' && !catalog.isCompleted) catalog.complete(bridge.catalog);
+        if (read == 'configuration' && !configuration.isCompleted) configuration.complete(_profile);
+      }
+    });
+  }
+
+  testWidgets('Native connect and Android consent can outlast the profile-read deadline', (tester) async {
+    bridge.savedProfile = _profile;
+    final native = Completer<void>();
+    bridge.connectGate = native;
+    try {
+      await _withApp(tester, () async {
+        final button = find.byKey(const Key('pushok_connect_button'));
+        await tester.tap(button);
+        await tester.pump();
+        expect(bridge.named('connectWireGuard'), hasLength(1));
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pump(const Duration(seconds: 12));
+        await tester.pump();
+        expect(tester.widget<InkWell>(button).onTap, isNull);
+        expect(find.text('Не удалось вовремя прочитать профили. Повторите подключение.'), findsNothing);
+        expect(bridge.named('disconnectWireGuard'), isEmpty);
+        native.complete();
+        await tester.pumpAndSettle();
+        expect(find.text('Туннель включён'), findsOneWidget);
+        expect(bridge.named('connectWireGuard'), hasLength(1));
+        expect(tester.takeException(), isNull);
+      });
+    } finally {
+      if (!native.isCompleted) native.complete();
+    }
+  });
 }

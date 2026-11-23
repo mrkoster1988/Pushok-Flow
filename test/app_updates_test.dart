@@ -907,18 +907,18 @@ void main() {
 
   testWidgets('Installed changes and the recent history are available without a network check', (tester) async {
     bridge.state = _status(phase: 'current', automatic: false, permission: true,
-      installedVersion: '0.50.0', installedBuild: 50);
+      installedVersion: '0.51.0', installedBuild: 51);
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.50.0'), findsOneWidget);
-      expect(find.text('Ошибка одной подписки больше не прерывает автоматическое обновление остальных.'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.51.0'), findsOneWidget);
+      expect(find.text('Выбранный сервер подписки больше не сбрасывается при перестановке параметров VLESS-ссылки или изменении регистра адреса.'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
       expect(find.byKey(const ValueKey('history_release_47')), findsNothing);
       final history = find.byKey(const Key('app_release_history'));
       await tester.ensureVisible(history);
       await tester.tap(find.text('История обновлений'));
       await tester.pumpAndSettle();
-      for (final build in [50, 49, 48, 47, 46]) {
+      for (final build in [51, 50, 49, 48, 47]) {
         expect(find.byKey(ValueKey('history_release_$build')), findsOneWidget);
       }
       expect(bridge.count('checkForUpdates'), 0);
@@ -954,7 +954,7 @@ void main() {
   testWidgets('Missing or mismatched notes do not borrow installed changes for a newer version', (tester) async {
     bridge.state = _status(phase: 'available', automatic: false, permission: true,
       installedVersion: '0.48.0', installedBuild: 48,
-      availableVersion: '0.51.0', availableBuild: 51,
+      availableVersion: '0.52.0', availableBuild: 52,
       releaseNotes: _notes(version: '0.48.0', build: 48, changes: ['Неверная версия описания.']));
     await _withCard(tester, () async {
       expect(find.byKey(const Key('available_release_notes_missing')), findsOneWidget);
@@ -1020,7 +1020,7 @@ void main() {
       await tester.ensureVisible(find.byKey(const Key('app_release_history')));
       await tester.tap(find.text('История обновлений'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const ValueKey('history_release_46')));
+      await tester.ensureVisible(find.byKey(const ValueKey('history_release_47')));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(bridge.count('downloadUpdate'), 0);

@@ -14,7 +14,88 @@ private fun fails(code: String, block: () -> Any?) {
     }
 }
 
+private fun equivalentLinksAndEffectiveSettings() {
+    val plain = "vless://01234567-89ab-4cde-8f01-23456789abcd@edge.example.invalid:443?security=tls&type=tcp"
+    val aliases = listOf(
+        plain + "#Changed-label",
+        plain.replace("security=tls&type=tcp", "type=tcp&security=tls"),
+        plain.replace("vless://01234567-89ab-4cde-8f01-23456789abcd@edge.example.invalid:443",
+            "VLESS://01234567-89AB-4CDE-8F01-23456789ABCD@EDGE.EXAMPLE.INVALID:00443"),
+        plain.replace("type=tcp", "type=raw"),
+        plain.replace("&type=tcp", ""),
+        plain + "&encryption=none&allowInsecure=0&fp=chrome&sni=EDGE.EXAMPLE.INVALID&headerType=none&flow=&alpn=",
+        plain.replace("security=tls", "security=%74ls"),
+    )
+    val identity = SubscriptionFeed.identity(plain)
+    check(identity.toString() == "SubscriptionFeed.Identity(<redacted>)")
+    for (alias in aliases) {
+        check(SubscriptionFeed.identity(alias) == identity)
+        check(SubscriptionFeed.identity(alias).hashCode() == identity.hashCode())
+        fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse((plain + "\n" + alias).toByteArray()) }
+        check(SubscriptionFeed.parse(alias.toByteArray()).entries.single().config == alias)
+    }
+    for (changed in listOf(
+        plain.replace("23456789abcd", "23456789abce"),
+        plain.replace("edge.example.invalid", "other.example.invalid"),
+        plain.replace(":443?", ":444?"),
+        plain + "&sni=other.example.invalid",
+        plain + "&fp=firefox",
+        plain + "&flow=xtls-rprx-vision",
+        plain + "&alpn=h2",
+        plain.replace("type=tcp", "type=ws"),
+        plain.replace("type=tcp", "type=grpc&serviceName=Flow"),
+    )) {
+        check(SubscriptionFeed.identity(changed) != identity)
+        check(SubscriptionFeed.parse((plain + "\n" + changed).toByteArray()).entries.size == 2)
+    }
+    val ordered = plain + "&alpn=h2%2Chttp%2F1.1"
+    check(SubscriptionFeed.identity(ordered) !=
+        SubscriptionFeed.identity(plain + "&alpn=http%2F1.1%2Ch2"))
+
+    val key = "B".repeat(42) + "A"
+    val reality = plain.replace("security=tls", "security=reality") +
+        "&fp=chrome&pbk=$key&sid=abcd&spx=%2Fcrawl&flow=xtls-rprx-vision"
+    val realityAlias = reality.replace("type=tcp", "type=raw")
+        .replace("pbk=$key", "pbk=$key%3D").replace("sid=abcd", "sid=ABCD") + "&support-x25519mlkem768=true"
+    check(SubscriptionFeed.identity(reality) == SubscriptionFeed.identity(realityAlias))
+    fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse((reality + "\n" + realityAlias).toByteArray()) }
+    check(SubscriptionFeed.identity(reality) != identity)
+    for (changed in listOf(
+        reality.replace(key, "C".repeat(42) + "A"),
+        reality.replace("sid=abcd", "sid=abce"),
+        reality.replace("spx=%2Fcrawl", "spx=%2FCrawl"),
+    )) check(SubscriptionFeed.identity(reality) != SubscriptionFeed.identity(changed))
+    val defaultReality = reality.substringBefore("&sid=")
+    check(SubscriptionFeed.identity(defaultReality) == SubscriptionFeed.identity(defaultReality + "&sid=&spx="))
+    check(!SubscriptionFeed.identity(reality).toString().contains(key))
+
+    val ws = plain.replace("type=tcp", "type=ws&path=%2Fsocket%3Ftoken%3DPrivate&host=front.example.invalid:443")
+    val wsAlias = ws.replace("host=front.example.invalid", "host=FRONT.EXAMPLE.INVALID")
+        .replace("path=%2Fsocket", "path=%2fsocket")
+    check(SubscriptionFeed.identity(ws) == SubscriptionFeed.identity(wsAlias))
+    fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse((ws + "\n" + wsAlias).toByteArray()) }
+    for (changed in listOf(ws.replace("socket", "Socket"), ws.replace("token%3DPrivate", "token%3Dprivate"),
+        ws.replace("front.example.invalid", "another.example.invalid"), ws.replace("&host=front.example.invalid:443", ""))) {
+        check(SubscriptionFeed.identity(ws) != SubscriptionFeed.identity(changed))
+    }
+    // Encoded path characters survive one import decode; never normalize request bytes again.
+    check(SubscriptionFeed.identity(ws.replace("socket", "socket%252Fpart")) !=
+        SubscriptionFeed.identity(ws.replace("socket", "socket%2Fpart")))
+
+    val grpc = plain.replace("type=tcp", "type=grpc&serviceName=FlowService&authority=front.example.invalid:443")
+    val grpcAlias = grpc.replace("authority=front.example.invalid", "authority=FRONT.EXAMPLE.INVALID") + "&mode=gun"
+    check(SubscriptionFeed.identity(grpc) == SubscriptionFeed.identity(grpcAlias))
+    fails("SUBSCRIPTION_INVALID") { SubscriptionFeed.parse((grpc + "\n" + grpcAlias).toByteArray()) }
+    for (changed in listOf(grpc.replace("FlowService", "flowService"), grpc + "&mode=multi",
+        grpc.replace("front.example.invalid", "another.example.invalid"),
+        grpc.replace("&authority=front.example.invalid:443", ""))) {
+        check(SubscriptionFeed.identity(grpc) != SubscriptionFeed.identity(changed))
+    }
+    check(!SubscriptionFeed.identity(ws).toString().contains("Private"))
+}
+
 fun main() {
+    equivalentLinksAndEffectiveSettings()
     val first = "$LINK#%D0%94%D0%BE%D0%BC%20%F0%9F%90%88"
     val second = LINK.replace("000000000001", "000000000002") + "#Office+backup"
     val text = "$first\r\n\n$second\n"

@@ -48,7 +48,109 @@ private fun rejectsSubscription(code: String, block: () -> Any?) {
 private fun profiles(store: ProfileCatalogStore): List<Map<*, *>> =
     (store.metadata()["profiles"] as List<*>).map { it as Map<*, *> }
 
+private fun equivalentSubscriptionLinksKeepSelection() {
+    val fixture = SubFixture()
+    val store = fixture.store()
+    store.save("manual-preserved", name = "Личный")
+    val manual = store.metadata()["activeProfileId"] as String
+    val original = "vless://01234567-89ab-4cde-8f01-23456789abcd@edge.example.invalid:443?security=tls&type=tcp#Chosen"
+    val rewritten = "VLESS://01234567-89AB-4CDE-8F01-23456789ABCD@EDGE.EXAMPLE.INVALID:00443?fp=chrome&sni=edge.example.invalid&encryption=none&allowInsecure=false&headerType=none&flow=&alpn=&type=raw&security=%74ls#Renamed"
+    val own = store.importSubscription("Основная", "https://example.com/main",
+        SubscriptionFeed.parse((uri(1) + "\n" + original).toByteArray()), 1)
+    val other = store.importSubscription("Резерв", "https://example.com/other", feed(9), 1)
+    val originalProfiles = profiles(store)
+    val selected = originalProfiles.single { it["name"] == "Chosen" }["id"] as String
+    val unchanged = originalProfiles.single { it["subscriptionId"] == own && it["name"] != "Chosen" }["id"] as String
+    val otherId = originalProfiles.single { it["subscriptionId"] == other }["id"] as String
+    store.select(selected)
+    store.refreshSubscription(own, "https://example.com/main",
+        SubscriptionFeed.parse((uri(1) + "\n" + rewritten).toByteArray()), 2)
+    check(store.metadata()["activeProfileId"] == selected) {
+        "Reformatting the selected server silently selected another subscription server"
+    }
+    check(store.load(selected) == rewritten && store.load() == rewritten)
+    check(profiles(store).single { it["id"] == selected }["name"] == "Renamed")
+    check(store.load(unchanged) == uri(1) && store.load(manual) == "manual-preserved")
+    check(store.load(otherId) == uri(9))
+    check(store.subscriptionRecords().single { it.id == other }.updatedAt == 1L)
+    // Equality here never loosens the exact-config connection fence.
+    rejectsSubscription("PROFILE_CHANGED") { store.validateActive(selected, original) }
+    store.validateActive(selected, rewritten)
+    val rotated = rewritten.replace("01234567-89AB-4CDE-8F01-23456789ABCD",
+        "01234567-89AB-4CDE-8F01-23456789ABCE")
+    store.refreshSubscription(own, "https://example.com/main",
+        SubscriptionFeed.parse((uri(1) + "\n" + rotated).toByteArray()), 3)
+    check(profiles(store).none { it["id"] == selected })
+    check(store.metadata()["activeProfileId"] == unchanged && store.load() == uri(1))
+    check(store.load(manual) == "manual-preserved" && store.load(otherId) == uri(9))
+}
+
+private fun legacyAliasesKeepTheSelectedIdAndRemainRefreshable() {
+    val original = uri(2, "Original")
+    val alias = original.replace("security=tls&type=tcp", "type=raw&security=tls").replace("#Original", "#Alias")
+    val rewritten = original.replace("security=tls&type=tcp", "encryption=none&security=tls").replace("#Original", "#Current")
+    val owner = subId(500)
+    val first = subId(501)
+    val second = subId(502)
+    val manual = subId(503)
+    val otherOwner = subId(504)
+    val other = subId(505)
+    for (selected in listOf(first, second, manual)) {
+        val fixture = SubFixture()
+        fixture.cipher.values["legacy-aliases"] = ProfileCatalog(listOf(
+            StoredWireGuardProfile(manual, "Личный", "manual-preserved"),
+            StoredWireGuardProfile(first, "Original", original, owner),
+            StoredWireGuardProfile(second, "Alias", alias, owner),
+            StoredWireGuardProfile(other, "Other", uri(9), otherOwner),
+        ), selected, listOf(
+            StoredSubscription(owner, "Основная", "https://example.com/main", 1),
+            StoredSubscription(otherOwner, "Резерв", "https://example.com/other", 1),
+        ))
+        fixture.storage.disk = EncryptedProfileRecords("legacy-aliases", null)
+        fixture.storage.memory = fixture.storage.disk
+        val store = fixture.store()
+        check(store.metadata()["activeProfileId"] == selected && profiles(store).size == 4)
+        val writes = fixture.storage.writes
+        val duplicate = SubscriptionFeed.Parsed(listOf(
+            SubscriptionFeed.Entry("First", original), SubscriptionFeed.Entry("Second", alias)
+        ), null, null, null, null)
+        rejectsSubscription("SUBSCRIPTION_INVALID") {
+            store.refreshSubscription(owner, "https://example.com/main", duplicate, 2)
+        }
+        check(fixture.storage.writes == writes && store.metadata()["activeProfileId"] == selected)
+        store.refreshSubscription(owner, "https://example.com/main",
+            SubscriptionFeed.parse((uri(1) + "\n" + rewritten).toByteArray()), 3)
+        val kept = if (selected == second) second else first
+        check(profiles(store).single { it["name"] == "Current" }["id"] == kept)
+        check(profiles(store).none { it["id"] == if (kept == first) second else first })
+        check(store.metadata()["activeProfileId"] == selected)
+        check(store.load(kept) == rewritten && store.load(manual) == "manual-preserved" && store.load(other) == uri(9))
+        check(store.subscriptionRecords().single { it.id == otherOwner }.updatedAt == 1L)
+    }
+
+    // An old managed entry need not parse with today's importer to be safely replaced.
+    for (oldConfig in listOf("vless://legacy-invalid", uri(2).replace("type=tcp", "type=xhttp"))) {
+        val fixture = SubFixture()
+        fixture.cipher.values["legacy-unreadable"] = ProfileCatalog(listOf(
+            StoredWireGuardProfile(first, "Legacy", oldConfig, owner)
+        ), first, listOf(StoredSubscription(owner, "Основная", "https://example.com/main", 1)))
+        fixture.storage.disk = EncryptedProfileRecords("legacy-unreadable", null)
+        fixture.storage.memory = fixture.storage.disk
+        val store = fixture.store()
+        check(store.load() == oldConfig)
+        val invalid = SubscriptionFeed.Parsed(listOf(SubscriptionFeed.Entry("Invalid", oldConfig)), null, null, null, null)
+        rejectsSubscription("SUBSCRIPTION_INVALID") {
+            store.refreshSubscription(owner, "https://example.com/main", invalid, 2)
+        }
+        check(fixture.storage.writes == 0 && store.load() == oldConfig)
+        store.refreshSubscription(owner, "https://example.com/main", feed(2), 3)
+        check(store.load() == uri(2) && store.metadata()["activeProfileId"] != first)
+    }
+}
+
 fun main() {
+    equivalentSubscriptionLinksKeepSelection()
+    legacyAliasesKeepTheSelectedIdAndRemainRefreshable()
     val fixture = SubFixture()
     val store = fixture.store()
     store.save("manual-secret", name = "Мой сервер")

@@ -42,7 +42,7 @@ object SubscriptionFeed {
             Entry(safeName(rawName) ?: "Сервер ${index + 1}", line)
         }
         if (entries.isEmpty()) fail("SUBSCRIPTION_EMPTY")
-        // Same endpoint with different labels is still one credential entry.
+        // Different labels or export formatting cannot create another effective connection.
         if (entries.map { identity(it.config) }.distinct().size != entries.size) fail("SUBSCRIPTION_INVALID")
         val info = metadata(userInfo)
         return Parsed(entries, title(profileTitle), info["expire"]
@@ -54,7 +54,25 @@ object SubscriptionFeed {
             info["total"]?.takeIf { it > 0 })
     }
 
-    internal fun identity(config: String): String = config.substringBefore('#')
+    /**
+     * Compare the exact settings consumed by XrayConfig, after the existing parser
+     * resolves defaults and supported aliases. Keep list ordering, nulls and each
+     * field boundary; do not turn credentials/paths into a concatenated log value.
+     * This key is transient: the original incoming link remains the stored config.
+     */
+    internal class Identity(profile: VlessProfile.Parsed) {
+        private val fields = listOf(profile.uuid, profile.host, profile.port,
+            profile.security, profile.serverName, profile.fingerprint, profile.flow,
+            profile.realityPublicKey, profile.realityShortId, profile.spiderX,
+            profile.alpn.toList(), profile.transport, profile.wsPath, profile.wsHost,
+            profile.grpcServiceName, profile.grpcAuthority, profile.grpcMultiMode)
+
+        override fun equals(other: Any?) = other is Identity && fields == other.fields
+        override fun hashCode() = fields.hashCode()
+        override fun toString() = "SubscriptionFeed.Identity(<redacted>)"
+    }
+
+    internal fun identity(config: String) = Identity(VlessProfile.parse(config))
 
     private fun metadata(raw: String?): Map<String, Long> {
         if (raw == null || raw.length > 2048) return emptyMap()

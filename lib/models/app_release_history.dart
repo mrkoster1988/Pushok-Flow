@@ -62,6 +62,11 @@ bool _isPlainReleaseText(String text) {
 /// Bundled descriptions stay readable offline. Keep the five most recent
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
+  AppReleaseNotes(versionName: '0.51.0', versionCode: 51, changes: [
+    'Выбранный сервер подписки больше не сбрасывается при перестановке параметров VLESS-ссылки или изменении регистра адреса.',
+    'Некорректное обновление с повторяющимися подключениями не заменяет сохранённые серверы.',
+    'Ожидание чтения профиля перед подключением ограничено. Если чтение не завершилось, можно повторить попытку; запоздавший ответ не запускает подключение.',
+  ]),
   AppReleaseNotes(versionName: '0.50.0', versionCode: 50, changes: [
     'Ошибка одной подписки больше не прерывает автоматическое обновление остальных.',
     'Причина неудачного обновления показана у соответствующей подписки. Повторить проверку можно отдельно.',
@@ -84,11 +89,6 @@ const bundledAppReleaseHistory = <AppReleaseNotes>[
     'VLESS использует выбранную сеть Android при переходе между Wi-Fi и мобильным интернетом.',
     'При потере сети отображается ожидание; подключение можно остановить.',
     'Улучшена обработка смены сети на Android 7 и с Private DNS.',
-  ]),
-  AppReleaseNotes(versionName: '0.46.0', versionCode: 46, changes: [
-    'Ожидание запросов аккаунта и подписок ограничено по времени; отмена позволяет начать следующее действие.',
-    'Исправлена работа DNS IPv6 в VLESS.',
-    'Поздние ответы не меняют состояние после отключения или нового подключения.',
   ]),
 ];
 
