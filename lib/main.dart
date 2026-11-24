@@ -20,6 +20,7 @@ import 'ui/subscription_editor.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/account_card.dart';
 import 'ui/flow_connection_vitals.dart';
+import 'ui/flow_settings_menu.dart';
 import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
 import 'ui/route_recommendations_card.dart';
@@ -1480,39 +1481,74 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
   }
 
+  void _openSettings() {
+    if (!_foreground || _profileEditorOpen || _routeConfirmationOpen ||
+        _informationOpen || connecting) return;
+    setState(() { _settingsOpen = true; _settingsLanding = true; });
+  }
+
+  void _backFromSettings() {
+    if (_profileEditorOpen || _routeConfirmationOpen || _informationOpen) return;
+    if (_settingsLanding) {
+      setState(() { _settingsOpen = false; _settingsLanding = false; tab = 0; });
+    } else {
+      _recommendationEpoch++;
+      _recommendationPoll?.cancel();
+      setState(() { _settingsLanding = true; });
+    }
+  }
+
+  String _settingsTitle() => switch (tab) {
+    1 => 'Маршруты',
+    2 => 'Серверы и подписки',
+    3 => 'Pushok ИИ',
+    4 => 'Аккаунт и обновления',
+    5 => 'Справка',
+    _ => 'Настройки',
+  };
+
+  Widget _settingsContent() {
+    if (_settingsLanding) return FlowSettingsMenu(onSelect: _selectTab);
+    return switch (tab) {
+      1 => routes(),
+      2 => servers(),
+      3 => assistant(),
+      4 => profile(),
+      5 => FlowHelpPage(
+        onDiagnostics: connecting || _profileBusy || _profileEditorOpen
+            ? null : _openInformation),
+      _ => FlowSettingsMenu(onSelect: _selectTab),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pushok Flow', style: TextStyle(fontWeight: FontWeight.w700)),
-        actions: [IconButton(
-          key: const Key('open_app_information'),
-          icon: const Icon(Icons.info_outline),
-          tooltip: 'Информация и диагностика',
-          onPressed: connecting || _profileBusy || _profileEditorOpen
-              ? null : _openInformation,
-        )],
+        leading: _settingsOpen ? IconButton(
+          key: const Key('flow_settings_back'),
+          tooltip: _settingsLanding ? 'На главную' : 'Назад к настройкам',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _backFromSettings,
+        ) : null,
+        title: Text(_settingsOpen
+            ? (_settingsLanding ? 'Настройки' : _settingsTitle())
+            : 'Pushok Flow',
+          style: const TextStyle(fontWeight: FontWeight.w700)),
+        actions: !_settingsOpen ? [IconButton(
+          key: const Key('flow_settings_button'),
+          icon: const Icon(Icons.settings_outlined),
+          tooltip: 'Настройки',
+          onPressed: _openSettings,
+        )] : [],
       ),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
-        child: [home(), routes(), servers(), assistant(), profile()][tab],
+        child: _settingsOpen ? _settingsContent() : home(),
       ))),
-      bottomNavigationBar: NavigationBar(
-        backgroundColor: PushokFlowApp.bg,
-        indicatorColor: PushokFlowApp.panel,
-        selectedIndex: tab,
-        onDestinationSelected: _selectTab,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Главная'),
-          NavigationDestination(icon: Icon(Icons.alt_route_outlined), label: 'Маршруты'),
-          NavigationDestination(icon: Icon(Icons.dns_outlined), label: 'Серверы'),
-          NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), label: 'Pushok ИИ'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'Профиль'),
-        ],
-      ),
     );
   }
+
 
   Widget home() => LayoutBuilder(builder: (context, constraints) => ListView(children: [
     const SizedBox(height: 6),
