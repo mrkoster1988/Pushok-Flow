@@ -89,7 +89,7 @@ internal class FlowShopBridgeClient(
             isCurrent()
             if (status != 200) throw FlowShopFailure(when (status) {
                 401, 403 -> "SHOP_LOGIN_REQUIRED"
-                409 -> "SHOP_DEVICE_BOUND"
+                409 -> readConflict(remote, started, isCurrent)
                 429 -> "SHOP_RATE_LIMITED"
                 404, 405, 501, 503 -> "SHOP_SERVICE_UNAVAILABLE"
                 in 500..599 -> "SHOP_NETWORK_ERROR"
@@ -127,6 +127,40 @@ internal class FlowShopBridgeClient(
         finally {
             data.fill(0)
             try { connection?.disconnect() } catch (_: Exception) { }
+        }
+    }
+
+    /** Only a bounded, whitelisted HTTP 409 reason may reach Flutter. */
+    private fun readConflict(remote: HttpsURLConnection, started: Long,
+                             isCurrent: () -> Unit): String {
+        val fallback = "SHOP_CONFLICT"
+        if (remote.contentType?.substringBefore(';')?.trim()?.lowercase() != "application/json" ||
+            remote.contentLengthLong > 1024L ||
+            remote.contentEncoding?.let { it.isNotBlank() && it != "identity" } == true) {
+            return fallback
+        }
+        return try {
+            val input = remote.errorStream ?: return fallback
+            val output = ByteArrayOutputStream()
+            input.use { stream ->
+                val buffer = ByteArray(256)
+                while (true) {
+                    isCurrent()
+                    remote.readTimeout = budget(started)
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    if (count > 1024 - output.size()) return fallback
+                    output.write(buffer, 0, count)
+                }
+            }
+            val bytes = output.toByteArray()
+            try {
+                if (bytes.isEmpty()) fallback
+                else FlowShopBridgePolicy.conflictCode(FlowAccountJson.parse(bytes))
+            } finally { bytes.fill(0) }
+        } catch (error: Exception) {
+            isCurrent()
+            fallback
         }
     }
 
