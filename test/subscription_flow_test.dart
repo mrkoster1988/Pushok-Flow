@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/main.dart';
+import 'flow_navigation_helper.dart';
 import 'package:pushok_flow/models/app_version.dart';
 import 'package:pushok_flow/ui/subscription_editor.dart';
 import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
@@ -214,7 +215,7 @@ Future<void> _pump(WidgetTester tester, _Bridge bridge, {List<String>? copied}) 
 
 void main() {
   Future<void> openServers(WidgetTester tester) async {
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
   }
 
@@ -479,7 +480,7 @@ void main() {
       ..imported = true
       ..refreshReply = reply;
     await _pump(tester, bridge, copied: copied);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pump(); // The in-flight refresh intentionally keeps its progress indicator active.
     bridge.subscriptionErrorCode = 'SUBSCRIPTION_INTERRUPTED';
     final automatic = find.byKey(const Key('automatic_subscription_updates'));
@@ -537,7 +538,7 @@ void main() {
       ..refreshReply = refresh
       ..automaticUpdatesReply = setting;
     await _pump(tester, bridge, copied: copied);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pump();
     final automatic = find.byKey(const Key('automatic_subscription_updates'));
     await tester.ensureVisible(automatic);
@@ -626,7 +627,7 @@ void main() {
       expect(bridge.imported, isFalse);
       expect(find.byType(SubscriptionEditor), findsNothing);
       expect(find.byType(WireGuardProfileEditor), findsNothing);
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(find.text('Серверы и подписки'), findsWidgets);
       expect(find.byKey(const ValueKey('edit_wireguard_profile_$_qrProfileId')), findsOneWidget);
       expect(find.byKey(const ValueKey('active_wireguard_profile_$_manualId')), findsOneWidget);
       expect(find.byKey(const ValueKey('active_wireguard_profile_$_qrProfileId')), findsNothing);
@@ -758,7 +759,7 @@ void main() {
         (tester) async {
       final bridge = _Bridge()..pending = null;
       await _pump(tester, bridge);
-      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+      await flowNavigate(tester, 'Серверы');
       await tester.pumpAndSettle();
       final add = find.byKey(const Key('add_subscription'));
       await tester.ensureVisible(add);
@@ -813,7 +814,7 @@ void main() {
         (tester) async {
       final bridge = _Bridge()..pending = null;
       await _pump(tester, bridge);
-      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+      await flowNavigate(tester, 'Серверы');
       await tester.pumpAndSettle();
       final edit = find.byKey(const ValueKey('edit_wireguard_profile_$_manualId'));
       await tester.ensureVisible(edit);
@@ -863,7 +864,7 @@ void main() {
       (tester) async {
     final bridge = _Bridge()..pending = null;
     await _pump(tester, bridge);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
     final edit = find.byKey(const ValueKey('edit_wireguard_profile_$_manualId'));
     await tester.ensureVisible(edit);
@@ -941,12 +942,12 @@ void main() {
     await tester.pumpAndSettle();
     reply.complete({'url': _privateUrl, 'name': 'Магазин'});
     await tester.pumpAndSettle();
-    expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 0);
+    expect(find.byKey(const Key('flow_home_screen')), findsOneWidget);
     expect(find.byType(SubscriptionEditor), findsNothing);
     expect(bridge.leases, isEmpty);
     expect(bridge.calls, isNot(contains('importSubscription')));
     expect(bridge.calls, isNot(contains('refreshDue')));
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('pending_subscription_link')), findsOneWidget);
     expect(find.textContaining('PRIVATE_TOKEN'), findsNothing);
@@ -986,7 +987,7 @@ void main() {
         older.complete({'url': _privateUrl, 'name': 'Старая подписка'});
         await tester.pumpAndSettle();
         expect(find.byType(SubscriptionEditor), findsNothing);
-        await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+        await flowNavigate(tester, 'Серверы');
         await tester.pumpAndSettle();
         // Finishing an old request must not release the newer request's read guard.
         expect(bridge.calls.where((call) => call == 'takePendingLink').length, 2);
@@ -1029,7 +1030,7 @@ void main() {
     final oldStatus = bridge.subscriptions;
     await _pump(tester, bridge);
     expect(bridge.calls.where((call) => call == 'refreshDue').length, 1);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pump();
     final control = find.byKey(const Key('automatic_subscription_updates'));
     expect(tester.widget<SwitchListTile>(control).onChanged, isNotNull);
@@ -1075,7 +1076,7 @@ void main() {
     bridge.subscriptionsBusy = false;
     refresh.complete(bridge.subscriptions);
     await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('subscriptions_refresh_warning')), findsOneWidget);
     expect(find.byKey(const ValueKey('subscription_refresh_error_$_subscriptionId')), findsOneWidget);
@@ -1112,7 +1113,7 @@ void main() {
     bridge.subscriptionErrorCode = 'VPN_ACTIVE';
     refresh.completeError(PlatformException(code: 'VPN_ACTIVE', message: 'PRIVATE_DETAILS'));
     await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('subscriptions_error')), findsOneWidget);
     expect(find.text('Для обновления серверов отключите подключение Flow.'), findsOneWidget);
@@ -1136,7 +1137,7 @@ void main() {
       _otherSubscriptionId: 'SUBSCRIPTION_AUTH_REQUIRED',
     });
     await _pump(tester, bridge);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
     final retry = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
     await tester.ensureVisible(retry);
@@ -1160,7 +1161,7 @@ void main() {
       ..automaticUpdatesEnabled = false
       ..manualRefreshFailureCode = 'SUBSCRIPTION_AUTH_REQUIRED';
     await _pump(tester, bridge);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
     final refresh = find.byKey(const ValueKey('refresh_subscription_$_subscriptionId'));
@@ -1182,7 +1183,7 @@ void main() {
   testWidgets('Profile opens the existing MTProxy account and Pushok hub as distinct destinations', (tester) async {
     final bridge = _Bridge()..pending = null;
     await _pump(tester, bridge);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Профиль')));
+    await flowNavigate(tester, 'Профиль');
     await tester.pumpAndSettle();
     expect(find.textContaining('@pushok_app'), findsOneWidget);
     expect(find.text('Открыть кабинет MTProxy'), findsOneWidget);
@@ -1206,7 +1207,7 @@ void main() {
       ..pending = null
       ..subscriptionStatusError = MissingPluginException('PRIVATE_NATIVE_DETAILS');
     await _pump(tester, bridge);
-    await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Серверы')));
+    await flowNavigate(tester, 'Серверы');
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('subscriptions_error')), findsOneWidget);
     expect(find.textContaining('PRIVATE_NATIVE_DETAILS'), findsNothing);
