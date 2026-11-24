@@ -8,8 +8,11 @@ class ApprovedVisualContract(unittest.TestCase):
             self.assertIn(token, theme)
     def test_home_preserves_working_connection(self):
         source = (ROOT/'lib/main.dart').read_text()
-        for token in ("Key('pushok_connect_button')", '_toggleTunnel', 'WireGuardTunnel.connect', 'PushokNeonBackdrop', "Key('open_flow_settings')", "Key('home_get_config')"):
+        for token in ("Key('pushok_connect_button')", '_toggleTunnel', 'WireGuardTunnel.connect', 'PushokNeonBackdrop', "Key('open_flow_settings')"):
             self.assertIn(token, source)
+        account = (ROOT/'lib/ui/account_card.dart').read_text()
+        self.assertIn("Key('home_get_config')", account)
+        self.assertIn("Key('home_authorize_button')", account)
     def test_design_contract(self):
         doc=(ROOT/'docs/DESIGN-SYSTEM.md').read_text()
         self.assertIn('42860.png',doc)
