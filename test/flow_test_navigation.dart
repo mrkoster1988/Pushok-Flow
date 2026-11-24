@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 
 // Navigate the real one-home application using the gear, never the removed
 // five-item bottom tab bar. No native account or VPN interaction is bypassed.
