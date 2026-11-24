@@ -525,9 +525,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         ? status?.pending != null ? 'FLOW_LOGIN_EXPIRED' : 'FLOW_SESSION_EXPIRED'
         : status?.errorCode;
     final error = _error ?? (errorCode == null ? null : flowAccountErrorMessage(errorCode));
-    final profile = status?.profile;
     final authLabel = connected
-        ? 'Авторизован: ${profile!.displayName}'
+        ? 'Вход выполнен'
         : recoveryAvailable ? 'Восстановить вход'
         : pending != null ? 'Открыть подтверждение входа'
         : 'Войти через Telegram';
