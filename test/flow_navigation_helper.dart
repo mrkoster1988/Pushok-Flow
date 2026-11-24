@@ -11,23 +11,34 @@ Future<void> flowNavigate(WidgetTester tester, String destination) async {
     'Pushok ИИ': 'settings_assistant',
     'Профиль': 'settings_profile',
   };
-
+  const titles = <String, String>{
+    'Справка': 'Справка',
+    'Маршруты': 'Маршруты',
+    'Серверы': 'Серверы и подписки',
+    'Pushok ИИ': 'Pushok ИИ',
+    'Профиль': 'Аккаунт и обновления',
+  };
+  final back = find.byKey(const Key('flow_settings_back'));
   if (destination == 'Главная') {
-    for (var i = 0; i < 3; i++) {
-      final back = find.byKey(const Key('flow_settings_back'));
-      if (back.evaluate().isEmpty) break;
+    for (var i = 0; i < 3 && back.evaluate().isNotEmpty; i++) {
       await tester.tap(back);
       await tester.pump();
     }
     return;
   }
 
-  final keyName = routes[destination];
-  if (keyName == null) throw ArgumentError.value(destination, 'destination');
-  final target = find.byKey(ValueKey(keyName));
+  final key = routes[destination];
+  if (key == null) throw ArgumentError.value(destination, 'destination');
+  // Re-selecting an already open panel should not trigger another network
+  // read or a duplicate automatic refresh.
+  if (find.descendant(of: find.byType(AppBar),
+      matching: find.text(titles[destination]!)).evaluate().isNotEmpty &&
+      find.byKey(const Key('flow_settings_menu')).evaluate().isEmpty) {
+    return;
+  }
 
+  final target = find.byKey(ValueKey(key));
   if (target.evaluate().isEmpty) {
-    final back = find.byKey(const Key('flow_settings_back'));
     if (back.evaluate().isNotEmpty) {
       await tester.tap(back);
     } else {
@@ -35,9 +46,16 @@ Future<void> flowNavigate(WidgetTester tester, String destination) async {
     }
     await tester.pump();
   }
-  // A repeated tap on the already selected settings section is a no-op.
-  if (target.evaluate().isEmpty) return;
-  await tester.ensureVisible(target);
+  if (target.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(target, 130,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('flow_settings_menu')),
+        matching: find.byType(Scrollable),
+      ).first);
+  } else {
+    await tester.ensureVisible(target);
+  }
+  expect(target, findsOneWidget);
   await tester.tap(target);
   await tester.pump();
 }
