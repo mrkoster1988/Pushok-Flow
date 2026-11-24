@@ -35,5 +35,25 @@ fun main() {
         try { FlowShopBridgePolicy.parseExchange(reply); error("accepted invalid response") }
         catch (failure: FlowShopFailure) { check(failure.code == "SHOP_PROTOCOL_INVALID") }
     }
+    // Every 409 used to display "another phone", including replayed tickets.
+    // Match only tightly whitelisted conflict codes, never arbitrary messages.
+    check(FlowShopBridgePolicy.conflictCode(mapOf(
+        "detail" to mapOf("code" to "FLOW_DEVICE_BOUND"))) == "SHOP_DEVICE_BOUND")
+    check(FlowShopBridgePolicy.conflictCode(mapOf(
+        "detail" to mapOf("code" to "FLOW_PROOF_REPLAY"))) == "SHOP_PROOF_REPLAY")
+    check(FlowShopBridgePolicy.conflictCode(mapOf(
+        "detail" to mapOf("code" to "FLOW_IDENTITY_CONFLICT"))) == "SHOP_IDENTITY_CONFLICT")
+    check(FlowShopBridgePolicy.conflictCode(mapOf(
+        "detail" to "Подтверждение уже использовано")) == "SHOP_PROOF_REPLAY")
+    check(FlowShopBridgePolicy.conflictCode(mapOf(
+        "detail" to "Подключение уже привязано к другому устройству")) == "SHOP_DEVICE_BOUND")
+    check(FlowShopBridgePolicy.conflictCode(mapOf(
+        "detail" to "Измените платёжный ключ: secret=private")) == "SHOP_CONFLICT")
+    for (bad in listOf<Map<String, Any?>>(
+        emptyMap(), mapOf("detail" to null),
+        mapOf("detail" to mapOf("code" to "FLOW_DEVICE_BOUND", "token" to "private")),
+        mapOf("detail" to mapOf("code" to "UNKNOWN")),
+        mapOf("detail" to "FLOW_DEVICE_BOUND", "ticket" to "secret"),
+    )) check(FlowShopBridgePolicy.conflictCode(bad) == "SHOP_CONFLICT")
     println("FlowShop bridge shape, privacy and exact-state checks passed")
 }
