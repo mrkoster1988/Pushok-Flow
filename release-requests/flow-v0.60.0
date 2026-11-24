@@ -1,0 +1,9 @@
+Pushok Flow v0.60.0 — ONE-TIME OFFICIAL PUBLICATION REQUEST
+Requested by project owner on 2026-11-24.
+
+Run the unchanged android-release.yml signing and publication pipeline on main.
+Required signing certificate SHA-256: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
+Do not publish a debug APK or a temporary candidate; all source, Kotlin, Flutter,
+Android, APK-signature and release-channel integrity checks must pass.
+
+This file is a one-time event trigger, not a signing secret or an update manifest.
