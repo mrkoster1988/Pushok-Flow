@@ -19,7 +19,9 @@ void main() {
     expect(find.byKey(const Key('connection_error')), findsNothing);
     expect(find.text('Твой интернет. Твои правила.'), findsNothing);
     expect(find.text('трафик'), findsNothing);
-    expect(find.byKey(const Key('open_app_information')), findsOneWidget);
+    expect(find.byKey(const Key('open_flow_settings')), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byKey(const Key('home_vital_status')), findsOneWidget);
     expect(tester.binding.transientCallbackCount, greaterThan(0));
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
@@ -57,6 +59,9 @@ void main() {
         expect(tester.takeException(), isNull);
       }
 
+      await flowGoTo(tester, 'Настройки');
+      expect(find.byKey(const Key('settings_help')), findsOneWidget);
+      expect(find.byKey(const Key('settings_updates')), findsOneWidget);
       await tester.tap(find.byKey(const Key('open_app_information')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('app_information_sheet')), findsOneWidget);
@@ -71,6 +76,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('app_information_sheet')), findsNothing);
       expect(find.byKey(const Key('tunnel_diagnostics_card')), findsNothing);
+      await flowGoTo(tester, 'Главная');
       expect(find.byKey(const Key('pushok_connect_button')).hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
 
