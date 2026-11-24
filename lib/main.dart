@@ -1535,7 +1535,15 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
             ? (_settingsLanding ? 'Настройки' : _settingsTitle())
             : 'Pushok Flow',
           style: const TextStyle(fontWeight: FontWeight.w700)),
-        actions: !_settingsOpen ? [IconButton(
+        actions: _settingsOpen && !_settingsLanding && tab == 5 ? [
+          IconButton(
+            key: const Key('open_app_information'),
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Диагностика',
+            onPressed: connecting || _profileBusy || _profileEditorOpen
+                ? null : _openInformation,
+          ),
+        ] : !_settingsOpen ? [IconButton(
           key: const Key('flow_settings_button'),
           icon: const Icon(Icons.settings_outlined),
           tooltip: 'Настройки',
