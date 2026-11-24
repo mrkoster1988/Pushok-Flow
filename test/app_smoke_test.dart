@@ -85,4 +85,42 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('Single home and gear open help before advanced settings', (tester) async {
+    await tester.pumpWidget(const PushokFlowApp(
+      isAndroid: false, animationsEnabled: false));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byKey(const Key('flow_page_0')), findsOneWidget);
+    expect(find.byKey(const Key('home_account_actions')), findsOneWidget);
+    expect(find.byKey(const Key('home_vital_status')), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const Key('home_subscription_expiry'))).data,
+      'Нет данных');
+    expect(tester.widget<Text>(find.byKey(const Key('home_latency_value'))).data, '—');
+
+    await tester.tap(find.byKey(const Key('open_flow_settings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('flow_settings_menu')), findsOneWidget);
+    final helpTop = tester.getTopLeft(find.byKey(const Key('settings_help'))).dy;
+    final accountTop = tester.getTopLeft(find.byKey(const Key('settings_account'))).dy;
+    expect(helpTop, lessThan(accountTop), reason: 'Help must be first in Settings');
+
+    await tester.tap(find.byKey(const Key('settings_help')));
+    await tester.pumpAndSettle();
+    expect(find.text('Как подключить Pushok Flow'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('close_flow_help')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('settings_routes')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('flow_page_1')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('flow_back_navigation')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('flow_settings_menu')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('flow_back_navigation')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('flow_page_0')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
