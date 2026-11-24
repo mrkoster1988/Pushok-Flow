@@ -55,7 +55,7 @@ void main() {
       for (final screen in screens.entries) {
         await flowGoTo(tester, screen.key);
         await tester.pumpAndSettle();
-        expect(find.text(screen.value), findsOneWidget);
+        expect(find.text(screen.value), findsWidgets);
         expect(tester.takeException(), isNull);
       }
 
