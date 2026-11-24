@@ -1,0 +1,7 @@
+Pushok Flow v0.60.0 — one-time verified PUBLICATION request.
+Approved by the project owner on 2026-11-24.
+
+Use release-staging/v0.60.0.json and publish-public-release.yml.
+Restore the exact signed APK using the pinned successful main-branch CI artifact.
+Do not use temporary Android debug certificates or expose the signing keystore.
+The GitHub Release must pass all existing independent signature, hash and updater checks.
