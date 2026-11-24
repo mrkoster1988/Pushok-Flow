@@ -10,6 +10,16 @@ Future<void> flowGoTo(WidgetTester tester, String label) async {
     'Профиль': 'settings_account',
     'Обновления': 'settings_updates',
   };
+  if (label == 'Настройки') {
+    if (find.byKey(const Key('flow_settings_menu')).evaluate().isNotEmpty) return;
+    if (find.byKey(const Key('open_flow_settings')).evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(const Key('open_flow_settings')));
+    } else {
+      await tester.tap(find.byKey(const Key('flow_back_navigation')));
+    }
+    await tester.pump();
+    return;
+  }
   if (label == 'Главная') {
     if (find.byKey(const Key('open_flow_settings')).evaluate().isNotEmpty) return;
     if (find.byKey(const Key('flow_settings_menu')).evaluate().isEmpty) {
