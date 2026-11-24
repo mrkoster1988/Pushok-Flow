@@ -92,7 +92,7 @@ class FlowHelpPage extends StatelessWidget {
             style: TextStyle(color: PushokPalette.muted)),
           const SizedBox(height: 12),
           OutlinedButton.icon(
-            key: const Key('open_app_information'),
+            key: const Key('open_diagnostics_from_help'),
             onPressed: onDiagnostics,
             icon: const Icon(Icons.info_outline),
             label: const Text('Открыть диагностику'),
