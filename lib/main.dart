@@ -19,6 +19,7 @@ import 'ui/subscriptions_card.dart';
 import 'ui/subscription_editor.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/account_card.dart';
+import 'ui/flow_connection_vitals.dart';
 import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
 import 'ui/route_recommendations_card.dart';
@@ -59,7 +60,10 @@ class FlowHome extends StatefulWidget {
 }
 
 class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
+  // Only Home is top level; the former tabs are grouped under Settings.
   int tab = 0;
+  bool _settingsOpen = false;
+  bool _settingsLanding = false;
   List<InstalledApp> installed = [];
   Set<String> bypassPackages = {};
   Set<String> unavailableBypassPackages = {};
@@ -164,6 +168,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (!mounted || !_foreground || _informationOpen || _profileEditorOpen ||
         _routeConfirmationOpen) return;
     setState(() {
+      _settingsOpen = true;
+      _settingsLanding = false;
       tab = 1;
       _routeQuery = '';
       _onlySelectedRoutes = !onlyUnavailable;
@@ -652,7 +658,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         _pendingSubscriptionLinkSequence = request;
         _pendingSubscriptionLink = draft;
         _pendingSubscriptionLinkIntentEpoch = current() ? intentEpoch : null;
-        if (current()) tab = 2;
+        if (current()) { tab = 2; _settingsOpen = true; _settingsLanding = false; }
       });
     } catch (_) {
       // A broken external link cannot reveal native message/details or replace
@@ -755,7 +761,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       }
     }
     if (saved == true && mounted && _foreground) {
-      setState(() => tab = 2);
+      setState(() { tab = 2; _settingsOpen = true; _settingsLanding = false; });
       _showNotice(profileSaved
           ? 'Профиль добавлен. Выберите сервер и подключитесь на главной.'
           : _subscriptionSavedNotice(addedSubscription));
@@ -1142,7 +1148,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (!mounted) return;
     if (subscriptionSaved) {
       if (_foreground) {
-        setState(() => tab = 2);
+        setState(() { tab = 2; _settingsOpen = true; _settingsLanding = false; });
         _showNotice(_subscriptionSavedNotice(addedSubscription));
       }
       return;
@@ -1449,7 +1455,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
   void _selectTab(int value) {
-    final enteringRoutes = value == 1 && value != tab;
+    final enteringRoutes = value == 1 && (!_settingsOpen || _settingsLanding || value != tab);
     if (value != tab) {
       _recommendationEpoch++;
       _recommendationPoll?.cancel();
@@ -1461,6 +1467,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         _recommendationsSavingAutoUpdate = false;
       }
       tab = value;
+      _settingsOpen = value != 0;
+      _settingsLanding = false;
     });
     if (value == 1) {
       unawaited(_refreshRoutes());
