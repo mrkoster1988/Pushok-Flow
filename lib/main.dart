@@ -1550,59 +1550,83 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
 
-  Widget home() => LayoutBuilder(builder: (context, constraints) => ListView(children: [
-    const SizedBox(height: 6),
-    Center(child: AnimatedPushokMascot(
-      key: const Key('pushok_mascot'),
-      height: constraints.maxHeight < 540 ? 126 : 160,
-      connected: _tunnelConfirmed)),
-    const SizedBox(height: 18),
-    Center(child: AnimatedContainer(
-      duration: const Duration(milliseconds: 450),
-      width: constraints.maxWidth < 340 ? 176 : 202,
-      height: constraints.maxWidth < 340 ? 176 : 202,
-      padding: const EdgeInsets.all(5),
-      decoration: BoxDecoration(shape: BoxShape.circle,
-        gradient: LinearGradient(colors: _tunnelConfirmed
-          ? [PushokPalette.mint, PushokPalette.glowCyan]
-          : [PushokPalette.glowCyan, PushokPalette.electricBlue, PushokPalette.glowViolet]),
-        boxShadow: [BoxShadow(color: (_tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan)
-          .withValues(alpha: .45), blurRadius: 30, spreadRadius: 3)]),
-      child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
-        key: const Key('pushok_connect_button'),
-        customBorder: const CircleBorder(),
-        onTap: _canToggleTunnel ? () => _toggleTunnel() : null,
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(_tunnelConfirmed ? Icons.check_circle_outline
-              : _ownsTunnel ? Icons.info_outline : Icons.power_settings_new,
-            color: _tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan, size: 54),
-          const SizedBox(height: 10),
-          Text(connecting ? (_ownsTunnel ? 'Отключение' : 'Подключение') : _ownsTunnel ? 'Отключить' : 'Подключить',
-            textAlign: TextAlign.center, style: const TextStyle(color: Colors.white,
-              fontWeight: FontWeight.w800, fontSize: 20)),
-        ]),
+  Widget home() => LayoutBuilder(builder: (context, constraints) => ListView(
+    key: const Key('flow_home_screen'),
+    children: [
+      Center(child: AnimatedPushokMascot(
+        key: const Key('pushok_mascot'),
+        height: constraints.maxHeight < 590 ? 84 : 112,
+        connected: _tunnelConfirmed)),
+      const SizedBox(height: 10),
+      Center(child: AnimatedContainer(
+        duration: const Duration(milliseconds: 450),
+        width: constraints.maxWidth < 340 ? 152 : 174,
+        height: constraints.maxWidth < 340 ? 152 : 174,
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(shape: BoxShape.circle,
+          gradient: LinearGradient(colors: _tunnelConfirmed
+            ? [PushokPalette.mint, PushokPalette.glowCyan]
+            : [PushokPalette.glowCyan, PushokPalette.electricBlue, PushokPalette.glowViolet]),
+          boxShadow: [BoxShadow(color: (_tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan)
+            .withValues(alpha: .45), blurRadius: 30, spreadRadius: 3)]),
+        child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
+          key: const Key('pushok_connect_button'),
+          customBorder: const CircleBorder(),
+          onTap: _canToggleTunnel ? () => _toggleTunnel() : null,
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(_tunnelConfirmed ? Icons.check_circle_outline
+                : _ownsTunnel ? Icons.info_outline : Icons.power_settings_new,
+              color: _tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan, size: 46),
+            const SizedBox(height: 8),
+            Text(connecting ? (_ownsTunnel ? 'Отключение' : 'Подключение')
+                : _ownsTunnel ? 'Отключить' : 'Подключить',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white,
+                fontWeight: FontWeight.w800, fontSize: 18)),
+          ]),
+        )),
       )),
-    )),
-    const SizedBox(height: 18),
-    Center(child: PushokStatusChip(
-      label: connecting ? (_ownsTunnel ? 'Отключение туннеля' : 'Соединение устанавливается')
-          : _nativeBusy ? 'Состояние изменяется'
-          : _recovery == TunnelRecovery.waitingNetwork ? 'Ожидание сети'
-          : _recovery == TunnelRecovery.reconnecting ? 'Восстанавливается'
-          : _isAndroid && (_diagnosticsStale || !_diagnostics.isKnown)
-              ? 'Статус уточняется'
-              : _tunnelConfirmed ? 'Туннель включён' : 'Статус: отключено',
-      icon: connecting || _nativeBusy || _recovering ? Icons.sync
-          : _diagnosticsStale ? Icons.info_outline
-          : _ownsTunnel ? Icons.shield_outlined : Icons.circle,
-      color: connecting || _nativeBusy || _recovering ? PushokPalette.glowCyan
-          : _diagnosticsStale ? PushokPalette.muted
-          : _ownsTunnel ? PushokPalette.mint : PushokPalette.orange)),
-    if (_isAndroid) ...[
-      const SizedBox(height: 8),
-      _homeSelectedServer(),
+      const SizedBox(height: 13),
+      // Explicit login -> personal config. Separate native flows retain
+      // MTProxy consent, per-device binding and Android VPN permission.
+      PushokAccountCard(
+        key: const Key('flow_home_account_actions'),
+        isAndroid: _isAndroid,
+        compactHome: true,
+        onShopSynced: () {
+          unawaited(_readSubscriptions());
+          unawaited(_refreshProfileStatus());
+        },
+        onOpenCabinet: _isAndroid && _foreground && !_openingPushok
+            ? _openPushokAccount : null,
+        onOpenHub: _isAndroid && _foreground && !_openingPushok
+            ? _openPushokHub : null,
+      ),
+      const SizedBox(height: 11),
+      FlowConnectionVitals(
+        selected: _profiles?.activeProfile,
+        selectionCurrent: _foreground && !_statusRefreshing &&
+            !_profileBusy && !_profileEditorOpen && !_diagnosticsStale &&
+            _profilesError == null && _profiles != null,
+        subscriptions: _subscriptionsError == null ? _subscriptions : null,
+        diagnostics: _diagnostics,
+        diagnosticsCurrent: _foreground && !_diagnosticsStale &&
+            _diagnostics.isKnown && !_statusRefreshing,
+        confirmedConnected: _tunnelConfirmed,
+        connecting: connecting,
+        nativeBusy: _nativeBusy,
+        ownsTunnel: _ownsTunnel,
+        recovering: _recovering,
+        isAndroid: _isAndroid,
+        connectionError: connectionError,
+      ),
+      if (_isAndroid) ...[
+        const SizedBox(height: 4),
+        _homeSelectedServer(),
+      ],
     ],
-  ]));
+  ));
+
 
   Widget _homeSelectedServer() {
     // This is the saved selection, not proof of the tunnel's remote endpoint.
