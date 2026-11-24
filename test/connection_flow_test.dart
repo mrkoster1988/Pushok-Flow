@@ -820,6 +820,8 @@ void main() {
       bridge.statusState = null;
       await _showDiagnostics(tester);
       await _closeInformation(tester);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
       expect(tester.widget<InkWell>(connect).onTap, isNotNull);
       expect(bridge.named('connectWireGuard'), hasLength(1));
       await tester.tap(connect);
