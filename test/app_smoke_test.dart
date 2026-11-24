@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pushok_flow/main.dart';
+import 'flow_test_navigation.dart';
 
 void main() {
   testWidgets('Pushok Flow shows the home screen', (tester) async {
@@ -50,10 +51,7 @@ void main() {
         'Главная': 'Подключить',
       };
       for (final screen in screens.entries) {
-        await tester.tap(find.descendant(
-          of: find.byType(NavigationBar),
-          matching: find.text(screen.key),
-        ));
+        await flowGoTo(tester, screen.key);
         await tester.pumpAndSettle();
         expect(find.text(screen.value), findsOneWidget);
         expect(tester.takeException(), isNull);
