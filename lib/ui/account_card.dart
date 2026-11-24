@@ -548,8 +548,9 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         const SizedBox(height: 8),
         FilledButton.icon(
           key: const Key('home_get_config_button'),
-          onPressed: canReceive ? () => unawaited(
-            _shopAutoSync ? _syncShop() : _setShopAutoSync(true)) : null,
+          // A manual request must work even when background sync is disabled.
+          // Do not silently turn on automatic retries as a side effect.
+          onPressed: canReceive ? () => unawaited(_syncShop()) : null,
           icon: _shopBusy
               ? const SizedBox(width: 18, height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2))
