@@ -10,9 +10,12 @@ enum _LocalAccountClear { cancelLogin, logout, recoverAccount }
 
 class PushokAccountCard extends StatefulWidget {
   const PushokAccountCard({super.key, required this.isAndroid, this.account,
-    this.subscriptions, this.onShopSynced,
+    this.subscriptions, this.onShopSynced, this.compactHome = false,
     this.onOpenCabinet, this.onOpenHub, this.now});
   final bool isAndroid;
+  /// A short login -> config flow under the main power button.
+  /// The full account and balance remain in Settings -> Profile.
+  final bool compactHome;
   final FlowAccount? account;
   final FlowSubscriptions? subscriptions;
   final VoidCallback? onShopSynced;
@@ -508,8 +511,103 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     ],
   );
 
+  Widget _compactHome() {
+    final status = _status;
+    final expired = _expired;
+    final pending = expired ? null : status?.pending;
+    final connected = status?.state == FlowAccountState.connected &&
+        !expired && status?.profile != null;
+    final clearing = _clearingAccount;
+    final recoveryAvailable = status?.recoveryAvailable ?? false;
+    final enabled = widget.isAndroid && _foreground && !_busy &&
+        !_recoveryDialogOpen && clearing == null && !(status?.busy ?? false);
+    final errorCode = expired
+        ? status?.pending != null ? 'FLOW_LOGIN_EXPIRED' : 'FLOW_SESSION_EXPIRED'
+        : status?.errorCode;
+    final error = _error ?? (errorCode == null ? null : flowAccountErrorMessage(errorCode));
+    final profile = status?.profile;
+    final authLabel = connected
+        ? 'Авторизован: ${profile!.displayName}'
+        : recoveryAvailable ? 'Восстановить вход'
+        : pending != null ? 'Открыть подтверждение входа'
+        : 'Войти через Telegram';
+    final authAction = !enabled
+        ? null : recoveryAvailable ? () => unawaited(_confirmRecovery())
+        : pending != null ? () => unawaited(_openLogin())
+        : connected || status == null ? null
+        : () => unawaited(_run(_account.beginLogin));
+    final canReceive = connected && enabled && !_shopBusy;
+    return PushokPanel(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OutlinedButton.icon(
+          key: const Key('home_authorize_button'),
+          onPressed: authAction,
+          icon: Icon(connected ? Icons.verified_user_outlined : Icons.login),
+          label: Text(authLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          key: const Key('home_get_config_button'),
+          onPressed: canReceive ? () => unawaited(
+            _shopAutoSync ? _syncShop() : _setShopAutoSync(true)) : null,
+          icon: _shopBusy
+              ? const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.download_outlined),
+          label: Text(_shopBusy ? 'Получаем конфиг…'
+              : _shopSyncState == 'active' ? 'Обновить конфиг'
+              : 'Получить конфиг'),
+        ),
+        if (pending != null) ...[
+          const SizedBox(height: 8),
+          const Text('Подтверди вход через MTProxy. Код:',
+            style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
+          SelectableText(pending.displayCode,
+            key: const Key('home_account_code'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: PushokPalette.glowCyan,
+              fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 1)),
+          TextButton(
+            key: const Key('home_cancel_login'),
+            onPressed: widget.isAndroid && _foreground && clearing == null
+                ? () => unawaited(_clearAccount(
+                    _LocalAccountClear.cancelLogin, userCode: pending.userCode))
+                : null,
+            child: const Text('Отменить вход'),
+          ),
+        ],
+        if (connected || _shopSyncState != 'idle') ...[
+          const SizedBox(height: 6),
+          Text(switch (_shopSyncState) {
+            'active' => 'Личная подписка получена',
+            'pending' => 'Создаём подключение в Shop…',
+            'expired' => 'Срок подписки истёк',
+            'revoked' => 'Подписка отозвана',
+            'disabled' => 'Выдача пока отключена в Shop',
+            'unavailable' => 'Подключение пока недоступно',
+            'link_disabled' => 'Личная ссылка отключена в Shop',
+            _ => 'Вход выполнен · можно получить конфиг',
+          }, key: const Key('home_shop_status'),
+            style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+        ],
+        if (_busy && status != null) const Padding(
+          padding: EdgeInsets.only(top: 6),
+          child: LinearProgressIndicator(minHeight: 2)),
+        if (clearing != null) const Text('Подтверждаем действие с аккаунтом…',
+          style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
+        if (error != null) Text(error, key: const Key('home_auth_error'),
+          style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
+        if (_shopError != null) Text(_shopError!,
+          key: const Key('home_config_error'),
+          style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
+      ],
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (widget.compactHome) return _compactHome();
     final status = _status;
     final expired = _expired;
     final pending = expired ? null : status?.pending;
