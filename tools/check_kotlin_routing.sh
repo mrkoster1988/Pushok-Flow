@@ -45,6 +45,7 @@ java -jar "$out/account-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccount.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowShopBridgePolicy.kt \
   native/android/tests/account_bridge_stubs/*.kt \
   native/android/tests/FlowAccountBridgeCheck.kt -include-runtime -d "$out/account-bridge-tests.jar"
 java -jar "$out/account-bridge-tests.jar"
