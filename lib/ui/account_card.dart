@@ -11,13 +11,16 @@ enum _LocalAccountClear { cancelLogin, logout, recoverAccount }
 class PushokAccountCard extends StatefulWidget {
   const PushokAccountCard({super.key, required this.isAndroid, this.account,
     this.subscriptions, this.onShopSynced,
-    this.onOpenCabinet, this.onOpenHub, this.now});
+    this.onOpenCabinet, this.onOpenHub, this.onOpenAccountSettings, this.compact = false, this.now});
   final bool isAndroid;
   final FlowAccount? account;
   final FlowSubscriptions? subscriptions;
   final VoidCallback? onShopSynced;
   final VoidCallback? onOpenCabinet;
   final VoidCallback? onOpenHub;
+  final VoidCallback? onOpenAccountSettings;
+  /// A minimal first-screen entry. The full account controls remain in Settings.
+  final bool compact;
   final DateTime Function()? now;
 
   @override
@@ -527,6 +530,99 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       ? status?.pending != null ? 'FLOW_LOGIN_EXPIRED' : 'FLOW_SESSION_EXPIRED'
       : status?.errorCode;
     final error = _error ?? (errorCode == null ? null : flowAccountErrorMessage(errorCode));
+    if (widget.compact) {
+      return PushokPanel(
+        key: const Key('flow_home_account_panel'),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Вход и личное подключение',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          if (!widget.isAndroid)
+            const Text('Личный доступ доступен на Android.',
+              style: TextStyle(color: PushokPalette.muted))
+          else if (clearing != null)
+            const Text('Завершаем действие с аккаунтом…',
+              style: TextStyle(color: PushokPalette.muted))
+          else if (recoveryAvailable) ...[
+            const Text('Сохранённый вход необходимо восстановить.',
+              style: TextStyle(color: PushokPalette.muted)),
+            FilledButton.icon(
+              key: const Key('home_recover_account'),
+              onPressed: enabled ? () => unawaited(_confirmRecovery()) : null,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Восстановить вход')),
+          ] else if (status == null && _busy)
+            const Center(child: Padding(
+              padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+          else if (connected) ...[
+            const Row(children: [
+              Icon(Icons.verified_user_outlined, color: PushokPalette.mint),
+              SizedBox(width: 8),
+              Expanded(child: Text('Аккаунт MTProxy подключён',
+                key: Key('home_account_connected'),
+                style: TextStyle(color: PushokPalette.mint))),
+            ]),
+            const SizedBox(height: 9),
+            FilledButton.icon(
+              key: const Key('home_get_config'),
+              onPressed: enabled && !_shopBusy && status?.profile != null
+                ? () => unawaited(_syncShop()) : null,
+              icon: _shopBusy ? const SizedBox(width: 17, height: 17,
+                child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.download_outlined),
+              label: Text(_shopBusy ? 'Получаем подключение…'
+                : 'Получить мой конфиг')),
+            const SizedBox(height: 5),
+            Text(_shopStateText(), key: const Key('home_shop_sync_state'),
+              style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+            if (_shopError != null) Text(_shopError!,
+              key: const Key('home_shop_sync_error'),
+              style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
+          ] else if (pending != null) ...[
+            const Text('Подтвердите вход через Telegram, затем вернитесь в Flow.',
+              style: TextStyle(color: PushokPalette.muted)),
+            SelectableText(pending.displayCode,
+              key: const Key('home_account_code'),
+              style: const TextStyle(color: PushokPalette.teal,
+                fontSize: 19, fontWeight: FontWeight.w800)),
+            OutlinedButton.icon(
+              key: const Key('home_confirm_login'),
+              onPressed: enabled ? () => unawaited(_openLogin()) : null,
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Открыть подтверждение')),
+            TextButton(
+              key: const Key('home_cancel_login'),
+              onPressed: canClear ? () => unawaited(_clearAccount(
+                _LocalAccountClear.cancelLogin, userCode: pending.userCode)) : null,
+              child: const Text('Отменить вход')),
+          ] else ...[
+            const Text('Авторизуйтесь через существующий аккаунт MTProxy.',
+              style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              key: const Key('home_authorize_button'),
+              onPressed: enabled && status != null
+                ? () => unawaited(_run(_account.beginLogin)) : null,
+              icon: const Icon(Icons.login),
+              label: const Text('Войти через Telegram')),
+          ],
+          if (_busy && status != null)
+            const LinearProgressIndicator(minHeight: 2),
+          if (error != null) ...[
+            const SizedBox(height: 5),
+            Text(error, key: const Key('home_account_error'),
+              style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
+          ],
+          if (widget.onOpenAccountSettings != null) Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const Key('home_account_settings'),
+              onPressed: widget.onOpenAccountSettings,
+              child: const Text('Управление аккаунтом и автоматической выдачей')),
+          ),
+        ]),
+      );
+    }
     return PushokPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         const Expanded(child: Text('Аккаунт Pushok',
