@@ -1550,9 +1550,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   }
 
 
-  Widget home() => LayoutBuilder(builder: (context, constraints) => ListView(
+  Widget home() => LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(
     key: const Key('flow_home_screen'),
-    children: [
+    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Center(child: AnimatedPushokMascot(
         key: const Key('pushok_mascot'),
         height: constraints.maxHeight < 590 ? 84 : 112,
@@ -1623,7 +1623,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         const SizedBox(height: 4),
         _homeSelectedServer(),
       ],
-    ],
+    ]),
   ));
 
 
