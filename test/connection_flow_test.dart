@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'flow_navigation_helper.dart';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/main.dart';
 import 'package:pushok_flow/ui/wireguard_profile_editor.dart';
@@ -224,9 +226,7 @@ Future<void> _withApp(WidgetTester tester, Future<void> Function() body,
 
 Future<void> _openRoutes(WidgetTester tester) async {
   await _closeInformation(tester);
-  await tester.tap(find.descendant(
-    of: find.byType(NavigationBar), matching: find.text('Маршруты'),
-  ));
+  await flowNavigate(tester, 'Маршруты');
   await tester.pumpAndSettle();
   // Route rows are lazy and follow the recommendations card. Inspect the
   // actual row after bringing it into view, including while changes are locked.
@@ -240,9 +240,7 @@ Future<void> _openRoutes(WidgetTester tester) async {
 
 Future<void> _openServers(WidgetTester tester) async {
   await _closeInformation(tester);
-  await tester.tap(find.descendant(
-    of: find.byType(NavigationBar), matching: find.text('Серверы'),
-  ));
+  await flowNavigate(tester, 'Серверы');
   await tester.pumpAndSettle();
   // The subscriptions card precedes the manual profiles. These scenarios
   // inspect the existing profile controls after bringing that section into view.
@@ -264,6 +262,8 @@ Future<void> _openProfileEditor(WidgetTester tester) async {
 Future<void> _showDiagnostics(WidgetTester tester) async {
   if (find.byKey(const Key('app_information_sheet')).evaluate().isEmpty) {
     expect(find.byKey(const Key('tunnel_diagnostics_card')), findsNothing);
+    await flowNavigate(tester, 'Справка');
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open_app_information')));
     await tester.pumpAndSettle();
   }
@@ -326,7 +326,7 @@ void main() {
       final reads = bridge.named('listWireGuardProfiles').length;
       await tester.tap(find.byKey(const Key('home_selected_server')));
       await tester.pumpAndSettle();
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(find.byKey(const Key('flow_home_screen')), findsNothing);
       expect(bridge.named('listWireGuardProfiles').length, greaterThan(reads));
       expect(bridge.activeProfileId, _firstProfileId);
       expect(bridge.named('selectWireGuardProfile'), isEmpty);
@@ -370,7 +370,7 @@ void main() {
       expect(find.text('Добавить сервер'), findsOneWidget);
       await tester.tap(find.byKey(const Key('home_selected_server')));
       await tester.pumpAndSettle();
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(find.byKey(const Key('flow_home_screen')), findsNothing);
       expect(find.byType(WireGuardProfileEditor), findsNothing);
       expect(bridge.named('saveWireGuardProfile'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
@@ -420,7 +420,7 @@ void main() {
       expect(find.textContaining('PRIVATE_CATALOG_DETAILS'), findsNothing);
       await tester.tap(find.byKey(const Key('home_selected_server')));
       await tester.pumpAndSettle();
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
+      expect(find.byKey(const Key('flow_home_screen')), findsNothing);
       expect(bridge.named('selectWireGuardProfile'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
     });
@@ -466,8 +466,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(deletions, 1);
-      await tester.tap(find.descendant(
-        of: find.byType(NavigationBar), matching: find.text('Главная')));
+      await flowNavigate(tester, 'Главная');
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('home_selected_server_name')), findsNothing,
         reason: 'The shared profile-mutation guard must hide the previous selection.');
@@ -533,7 +532,7 @@ void main() {
       expect(bridge.named('setBypass'), isEmpty);
       await tester.tap(find.byKey(const Key('open_routes_after_connection_error')));
       await tester.pumpAndSettle();
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 1);
+      expect(find.byKey(const Key('flow_settings_back')), findsOneWidget);
       expect(tester.widget<ChoiceChip>(find.byKey(const Key('routes_filter_unavailable'))).selected, isTrue);
       final toggle = find.byKey(const Key('route_toggle_example.deleted'));
       await tester.scrollUntilVisible(toggle, 140, scrollable: find.descendant(
@@ -557,7 +556,7 @@ void main() {
       expect(find.textContaining('Не удалось проверить приложения в исключениях.'), findsOneWidget);
       await tester.tap(find.byKey(const Key('open_routes_after_connection_error')));
       await tester.pumpAndSettle();
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 1);
+      expect(find.byKey(const Key('flow_settings_back')), findsOneWidget);
       expect(find.byKey(const Key('routes_unavailable_summary')), findsNothing);
       expect(find.byKey(const Key('routes_filter_unavailable')), findsNothing);
       expect(find.textContaining('Не удалось проверить доступность приложений.'), findsOneWidget);
@@ -1537,7 +1536,7 @@ void main() {
       expect(find.byKey(const Key('active_wireguard_profile_$_secondProfileId')), findsOneWidget);
       expect(bridge.named('loadWireGuardProfile'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
-      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Главная')));
+      await flowNavigate(tester, 'Главная');
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pumpAndSettle();
@@ -1567,7 +1566,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(bridge.named('loadWireGuardProfile'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
-      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Главная')));
+      await flowNavigate(tester, 'Главная');
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pumpAndSettle();
@@ -1575,7 +1574,9 @@ void main() {
       expect(args['config'], _vlessProfile);
       expect(args['expectedProfileId'], _secondProfileId);
       expect(bridge.profiles[_firstProfileId]?['config'], _profile);
-      await tester.tap(find.byKey(const Key('open_app_information')));
+      await flowNavigate(tester, 'Справка');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open_app_information')));
       await tester.pumpAndSettle();
       expect(find.text('VLESS'), findsOneWidget);
       expect(find.text('Рукопожатие WireGuard'), findsNothing);
