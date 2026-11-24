@@ -23,6 +23,7 @@ import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
 import 'ui/route_recommendations_card.dart';
 import 'ui/animated_pushok_mascot.dart';
+import 'ui/flow_network_latency.dart';
 
 void main() => runApp(const PushokFlowApp());
 
@@ -1472,37 +1473,133 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
   }
 
+  // Only Home is a top-level page. The other functional screens are reached
+  // through the gear, retaining their native operation gates and controller state.
+  static const _pageTitles = [
+    'Pushok Flow', 'Маршруты', 'Серверы', 'Pushok ИИ',
+    'Аккаунт Pushok', 'Настройки', 'Версия и обновления',
+  ];
+
+  void _openHelp() {
+    if (!mounted || !_foreground) return;
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: PushokPalette.midnight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        side: BorderSide(color: PushokPalette.border)),
+      builder: (sheet) => SafeArea(child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 26),
+        child: SingleChildScrollView(child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Expanded(child: Text('Справка',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold))),
+              IconButton(key: const Key('close_flow_help'),
+                onPressed: () => Navigator.of(sheet).pop(),
+                icon: const Icon(Icons.close)),
+            ]),
+            const SizedBox(height: 10),
+            const Text('Как подключить Pushok Flow',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 7),
+            const Text('1. На главной нажмите «Войти через Telegram» и подтвердите вход в кабинете MTProxy.'),
+            const SizedBox(height: 5),
+            const Text('2. Нажмите «Получить мой конфиг». При статусе «готовится» дождитесь серверной выдачи.'),
+            const SizedBox(height: 5),
+            const Text('3. После появления сервера нажмите большую кнопку «Подключить» и разрешите подключение Android.'),
+            const SizedBox(height: 12),
+            const Text('Настройки → Серверы: ручной импорт и выбор. Настройки → Маршруты: исключения приложений.'),
+            const SizedBox(height: 9),
+            const Text('Отклик сети — время TCP-подключения к pushok.shop:443; это не ICMP-пинг узла WireGuard и не показатель скорости.',
+              style: TextStyle(fontSize: 12, color: PushokPalette.muted)),
+          ],
+        )),
+      )),
+    );
+  }
+
+  Widget _settingsEntry({
+    required String keyName, required String label,
+    required IconData icon, required VoidCallback onTap,
+    String? subtitle,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: PushokPanel(child: ListTile(
+      key: Key(keyName), contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, color: PushokPalette.teal),
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: subtitle == null ? null : Text(subtitle,
+        style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
+    )),
+  );
+
+  Widget settingsMenu() => ListView(key: const Key('flow_settings_menu'), children: [
+    _settingsEntry(keyName: 'settings_help', label: 'Справка',
+      subtitle: 'Как подключить, получить конфиг и управлять приложениями',
+      icon: Icons.help_outline, onTap: _openHelp),
+    _settingsEntry(keyName: 'settings_account', label: 'Аккаунт и авторизация',
+      subtitle: 'Подписки Shop, Telegram, автоматическая выдача',
+      icon: Icons.person_outline, onTap: () => _selectTab(4)),
+    _settingsEntry(keyName: 'settings_servers', label: 'Серверы и подписки',
+      subtitle: 'Выбор профиля, QR и ручное добавление',
+      icon: Icons.dns_outlined, onTap: () => _selectTab(2)),
+    _settingsEntry(keyName: 'settings_routes', label: 'Маршруты и исключения',
+      subtitle: 'Приложения с прямым подключением',
+      icon: Icons.alt_route_outlined, onTap: () => _selectTab(1)),
+    _settingsEntry(keyName: 'settings_ai', label: 'Pushok ИИ',
+      subtitle: 'Рекомендации и обратная связь',
+      icon: Icons.auto_awesome_outlined, onTap: () => _selectTab(3)),
+    _settingsEntry(keyName: 'settings_updates', label: 'Версия и обновления',
+      subtitle: 'Проверка, загрузка и установка новой версии',
+      icon: Icons.system_update_outlined, onTap: () => _selectTab(6)),
+    _settingsEntry(keyName: 'open_app_information', label: 'Диагностика',
+      subtitle: 'Реальное состояние соединения, ошибки и статистика',
+      icon: Icons.info_outline,
+      onTap: connecting || _profileBusy || _profileEditorOpen
+        ? () {} : () => unawaited(_openInformation())),
+  ]);
+
+  Widget updates() => ListView(children: [
+    AppUpdatesCard(isAndroid: _isAndroid),
+  ]);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pushok Flow', style: TextStyle(fontWeight: FontWeight.w700)),
-        actions: [IconButton(
-          key: const Key('open_app_information'),
-          icon: const Icon(Icons.info_outline),
-          tooltip: 'Информация и диагностика',
-          onPressed: connecting || _profileBusy || _profileEditorOpen
-              ? null : _openInformation,
-        )],
+        leading: tab == 0 ? null : IconButton(
+          key: const Key('flow_back_navigation'),
+          tooltip: tab == 5 ? 'На главную' : 'В настройки',
+          onPressed: () => _selectTab(tab == 5 ? 0 : 5),
+          icon: const Icon(Icons.arrow_back)),
+        title: Text(_pageTitles[tab],
+          style: const TextStyle(fontWeight: FontWeight.w700)),
+        actions: tab == 0 ? [
+          IconButton(
+            key: const Key('open_flow_settings'),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Настройки',
+            onPressed: () => _selectTab(5)),
+        ] : tab == 5 ? [
+          IconButton(
+            key: const Key('flow_settings_home'),
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Главная',
+            onPressed: () => _selectTab(0)),
+        ] : const [],
       ),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
-        child: [home(), routes(), servers(), assistant(), profile()][tab],
+        child: [home(), routes(), servers(), assistant(), profile(),
+          settingsMenu(), updates()][tab],
       ))),
-      bottomNavigationBar: NavigationBar(
-        backgroundColor: PushokFlowApp.bg,
-        indicatorColor: PushokFlowApp.panel,
-        selectedIndex: tab,
-        onDestinationSelected: _selectTab,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Главная'),
-          NavigationDestination(icon: Icon(Icons.alt_route_outlined), label: 'Маршруты'),
-          NavigationDestination(icon: Icon(Icons.dns_outlined), label: 'Серверы'),
-          NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), label: 'Pushok ИИ'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'Профиль'),
-        ],
-      ),
     );
   }
 
@@ -1510,13 +1607,13 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     const SizedBox(height: 6),
     Center(child: AnimatedPushokMascot(
       key: const Key('pushok_mascot'),
-      height: constraints.maxHeight < 540 ? 126 : 160,
+      height: constraints.maxHeight < 540 ? 88 : 105,
       connected: _tunnelConfirmed)),
-    const SizedBox(height: 18),
+    const SizedBox(height: 9),
     Center(child: AnimatedContainer(
       duration: const Duration(milliseconds: 450),
-      width: constraints.maxWidth < 340 ? 176 : 202,
-      height: constraints.maxWidth < 340 ? 176 : 202,
+      width: constraints.maxWidth < 340 ? 150 : 182,
+      height: constraints.maxWidth < 340 ? 150 : 182,
       padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(shape: BoxShape.circle,
         gradient: LinearGradient(colors: _tunnelConfirmed
@@ -1539,7 +1636,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         ]),
       )),
     )),
-    const SizedBox(height: 18),
+    const SizedBox(height: 11),
     Center(child: PushokStatusChip(
       label: connecting ? (_ownsTunnel ? 'Отключение туннеля' : 'Соединение устанавливается')
           : _nativeBusy ? 'Состояние изменяется'
@@ -1554,8 +1651,21 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       color: connecting || _nativeBusy || _recovering ? PushokPalette.glowCyan
           : _diagnosticsStale ? PushokPalette.muted
           : _ownsTunnel ? PushokPalette.mint : PushokPalette.orange)),
+    const SizedBox(height: 10),
+    PushokAccountCard(
+      key: const Key('home_account_actions'),
+      isAndroid: _isAndroid,
+      compact: true,
+      onOpenAccountSettings: () => _selectTab(4),
+      onShopSynced: () {
+        unawaited(_readSubscriptions());
+        unawaited(_refreshProfileStatus());
+      },
+    ),
+    const SizedBox(height: 10),
+    _homeVitalStatus(),
     if (_isAndroid) ...[
-      const SizedBox(height: 8),
+      const SizedBox(height: 4),
       _homeSelectedServer(),
     ],
   ]));
@@ -1737,7 +1847,5 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       },
       onOpenCabinet: _isAndroid && _foreground && !_openingPushok ? _openPushokAccount : null,
       onOpenHub: _isAndroid && _foreground && !_openingPushok ? _openPushokHub : null),
-    const SizedBox(height: 12),
-    AppUpdatesCard(isAndroid: _isAndroid),
   ]);
 }
