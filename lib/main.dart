@@ -1483,7 +1483,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   void _openSettings() {
     if (!_foreground || _profileEditorOpen || _routeConfirmationOpen ||
-        _informationOpen || connecting) return;
+        _informationOpen) return;
     setState(() { _settingsOpen = true; _settingsLanding = true; });
   }
 
@@ -1616,9 +1616,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         connecting: connecting,
         nativeBusy: _nativeBusy,
         ownsTunnel: _ownsTunnel,
-        recovering: _recovering,
+        recovery: _recovery,
         isAndroid: _isAndroid,
-        connectionError: connectionError,
       ),
       if (_isAndroid) ...[
         const SizedBox(height: 4),
