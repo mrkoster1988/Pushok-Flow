@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/main.dart';
+import 'flow_test_navigation.dart';
 
 class _RoutesBridge {
   final calls = <MethodCall>[];
@@ -111,9 +112,7 @@ class _RoutesBridge {
 }
 
 Future<void> _nav(WidgetTester tester, String label) async {
-  await tester.tap(find.descendant(
-    of: find.byType(NavigationBar), matching: find.text(label),
-  ));
+  await flowGoTo(tester, label);
   await tester.pump();
 }
 
