@@ -34,6 +34,9 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/tests/update_stubs/*.kt native/android/tests/UpdateWorkerCheck.kt \
   -nowarn -include-runtime -d "$out/update-worker-tests.jar"
 java -jar "$out/update-worker-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowShopBridgePolicy.kt \
+  native/android/tests/FlowShopBridgePolicyCheck.kt -include-runtime -d "$out/shop-bridge-policy-tests.jar"
+java -jar "$out/shop-bridge-policy-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountPolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowAccountSessionManager.kt \
   native/android/tests/FlowAccountCheck.kt -include-runtime -d "$out/account-tests.jar"
