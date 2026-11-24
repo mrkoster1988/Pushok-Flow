@@ -8,8 +8,9 @@ class ApprovedVisualContract(unittest.TestCase):
             self.assertIn(token, theme)
     def test_home_preserves_working_connection(self):
         source = (ROOT/'lib/main.dart').read_text()
-        for token in ("Key('pushok_connect_button')", '_toggleTunnel', 'WireGuardTunnel.connect', 'PushokNeonBackdrop', 'NavigationDestination'):
+        for token in ("Key('pushok_connect_button')", '_toggleTunnel', 'WireGuardTunnel.connect', 'PushokNeonBackdrop', "Key('flow_settings_button')", 'FlowConnectionVitals', 'FlowSettingsMenu'):
             self.assertIn(token, source)
+        self.assertNotIn('bottomNavigationBar: NavigationBar(', source)
     def test_design_contract(self):
         doc=(ROOT/'docs/DESIGN-SYSTEM.md').read_text()
         self.assertIn('42860.png',doc)

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'flow_navigation_helper.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pushok_flow/main.dart';
 
@@ -111,10 +112,7 @@ class _RoutesBridge {
 }
 
 Future<void> _nav(WidgetTester tester, String label) async {
-  await tester.tap(find.descendant(
-    of: find.byType(NavigationBar), matching: find.text(label),
-  ));
-  await tester.pump();
+  await flowNavigate(tester, label);
 }
 
 Future<void> _reveal(WidgetTester tester, Finder finder) async {

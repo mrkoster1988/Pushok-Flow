@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pushok_flow/main.dart';
+import 'flow_navigation_helper.dart';
 
 void main() {
   testWidgets('Pushok Flow shows the home screen', (tester) async {
@@ -18,7 +19,10 @@ void main() {
     expect(find.byKey(const Key('connection_error')), findsNothing);
     expect(find.text('Твой интернет. Твои правила.'), findsNothing);
     expect(find.text('трафик'), findsNothing);
-    expect(find.byKey(const Key('open_app_information')), findsOneWidget);
+    expect(find.byKey(const Key('flow_settings_button')), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byKey(const Key('home_authorize_button')), findsOneWidget);
+    expect(find.byKey(const Key('home_get_config_button')), findsOneWidget);
     expect(tester.binding.transientCallbackCount, greaterThan(0));
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
@@ -50,15 +54,15 @@ void main() {
         'Главная': 'Подключить',
       };
       for (final screen in screens.entries) {
-        await tester.tap(find.descendant(
-          of: find.byType(NavigationBar),
-          matching: find.text(screen.key),
-        ));
+        await flowNavigate(tester, screen.key);
         await tester.pumpAndSettle();
         expect(find.text(screen.value), findsOneWidget);
         expect(tester.takeException(), isNull);
       }
 
+      await flowNavigate(tester, 'Справка');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('flow_help_screen')), findsOneWidget);
       await tester.tap(find.byKey(const Key('open_app_information')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('app_information_sheet')), findsOneWidget);
@@ -73,6 +77,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('app_information_sheet')), findsNothing);
       expect(find.byKey(const Key('tunnel_diagnostics_card')), findsNothing);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('pushok_connect_button')).hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
 
