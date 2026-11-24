@@ -552,8 +552,11 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
               icon: const Icon(Icons.restart_alt),
               label: const Text('Восстановить вход')),
           ] else if (status == null && _busy)
-            const Center(child: Padding(
-              padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text('Проверяем сохранённый вход…',
+                key: Key('home_account_loading'),
+                style: TextStyle(color: PushokPalette.muted, fontSize: 12)))
           else if (connected) ...[
             const Row(children: [
               Icon(Icons.verified_user_outlined, color: PushokPalette.mint),
