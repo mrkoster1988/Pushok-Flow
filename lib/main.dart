@@ -1670,6 +1670,108 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     ],
   ]));
 
+  FlowSubscription? _homeTrackedSubscription() {
+    final subs = _subscriptions?.subscriptions ?? const <FlowSubscription>[];
+    final selectedId = _profiles?.activeProfile?.subscriptionId;
+    if (selectedId != null) {
+      for (final item in subs) {
+        if (item.id == selectedId && item.isWireGuard) return item;
+      }
+    }
+    // Do not present a manually imported peer as a server-managed free trial.
+    for (final item in subs) {
+      if (item.isWireGuard &&
+          item.effectiveState(DateTime.now()) == SubscriptionAccessState.active) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  static String _homeRemaining(DateTime? until, DateTime now) {
+    if (until == null) return 'Не указан';
+    final difference = until.difference(now);
+    if (difference <= Duration.zero) return 'Истёк';
+    if (difference.inDays >= 1) return '${difference.inDays} дн.';
+    if (difference.inHours >= 1) return '${difference.inHours} ч';
+    return '${difference.inMinutes.clamp(1, 59)} мин';
+  }
+
+  static String _homeDate(DateTime? date) {
+    if (date == null) return 'Нет данных';
+    final local = date.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(local.day)}.${two(local.month)}.${local.year}';
+  }
+
+  static String _homeBytes(int? received, int? sent) {
+    if (received == null || sent == null) return '—';
+    final bytes = received + sent;
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} КБ';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ';
+  }
+
+  Widget _vitalItem(String label, String value, String valueKey) => Expanded(
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(
+        color: PushokPalette.muted, fontSize: 11)),
+      const SizedBox(height: 4),
+      Text(value, key: Key(valueKey), maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 15,
+          fontWeight: FontWeight.w800, color: Colors.white)),
+    ]),
+  );
+
+  Widget _homeVitalStatus() {
+    final managed = _homeTrackedSubscription();
+    final expires = managed?.expiresAt;
+    final fresh = !_subscriptionsLoading && _subscriptionsError == null;
+    final isConnected = _tunnelConfirmed && !_diagnosticsStale;
+    final stats = isConnected ? _diagnostics.statistics
+        : const TunnelStatistics.unavailable();
+    final rx = stats.status == TunnelStatisticsStatus.available
+        ? stats.rxBytes : null;
+    final tx = stats.status == TunnelStatisticsStatus.available
+        ? stats.txBytes : null;
+    final handshake = isConnected &&
+        stats.handshakeStatus == HandshakeStatus.observed &&
+        stats.latestHandshakeAgeSeconds != null
+          ? 'Handshake: ${stats.latestHandshakeAgeSeconds} с назад'
+          : 'Handshake: нет подтверждённого измерения';
+    return PushokPanel(
+      key: const Key('home_vital_status'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Состояние доступа',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 9),
+        Row(children: [
+          _vitalItem('Доступ до', fresh ? _homeDate(expires) : 'Уточняем',
+            'home_subscription_expiry'),
+          const SizedBox(width: 12),
+          _vitalItem('Осталось', fresh ? _homeRemaining(expires, DateTime.now())
+            : '—', 'home_subscription_remaining'),
+        ]),
+        const Divider(height: 20, color: PushokPalette.border),
+        Row(children: [
+          Expanded(child: FlowNetworkLatency(active: isConnected)),
+          const SizedBox(width: 8),
+          _vitalItem('Передано всего', _homeBytes(rx, tx),
+            'home_transfer_total'),
+        ]),
+        const SizedBox(height: 4),
+        Text(handshake, key: const Key('home_handshake'),
+          style: const TextStyle(color: PushokPalette.muted, fontSize: 11)),
+        if (_subscriptionsError != null) Text(
+          'Сведения о подписке временно недоступны.',
+          style: const TextStyle(color: PushokPalette.orange, fontSize: 11)),
+        if (managed != null && expires != null)
+          const Text('Срок указан по последней сохранённой подписке.',
+            style: TextStyle(color: PushokPalette.muted, fontSize: 10)),
+      ]),
+    );
+  }
+
   Widget _homeSelectedServer() {
     // This is the saved selection, not proof of the tunnel's remote endpoint.
     // A cached catalog must not look current while a read/change is pending,
