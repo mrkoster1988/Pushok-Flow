@@ -40,5 +40,31 @@ internal object FlowShopBridgePolicy {
         return Reply(state, null)
     }
 
+    /**
+     * HTTP 409 is not proof that another phone owns a peer. The MTProxy proof
+     * can also be replayed or the identity mapping can conflict. Read only
+     * fixed server codes, never display arbitrary API error strings.
+     * Legacy server strings are accepted for a safe rolling deployment.
+     */
+    fun conflictCode(value: Map<String, Any?>): String {
+        if (value.keys != setOf("detail")) return "SHOP_CONFLICT"
+        val detail = value["detail"]
+        val remote = when (detail) {
+            is String -> detail
+            is Map<*, *> ->
+                if (detail.keys == setOf("code")) detail["code"] as? String else null
+            else -> null
+        }
+        return when (remote) {
+            "FLOW_DEVICE_BOUND", "Подключение уже привязано к другому устройству" ->
+                "SHOP_DEVICE_BOUND"
+            "FLOW_PROOF_REPLAY", "Подтверждение уже использовано" ->
+                "SHOP_PROOF_REPLAY"
+            "FLOW_IDENTITY_CONFLICT", "Для аккаунта требуется проверка привязки",
+            "Привязка аккаунтов изменилась" -> "SHOP_IDENTITY_CONFLICT"
+            else -> "SHOP_CONFLICT"
+        }
+    }
+
     private fun invalid(): Nothing = throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
 }
