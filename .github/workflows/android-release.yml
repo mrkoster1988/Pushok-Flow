@@ -2,12 +2,6 @@ name: Android release with in-app updates
 
 on:
   workflow_dispatch:
-  # A single explicitly requested v0.60 publication. No application-code
-  # push can trigger release; all signing and verification gates are unchanged.
-  push:
-    branches: [main]
-    paths:
-      - 'release-requests/flow-v0.60.0'
 
 permissions:
   contents: read
