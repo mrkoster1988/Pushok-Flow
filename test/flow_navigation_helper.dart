@@ -55,7 +55,8 @@ Future<void> flowNavigate(WidgetTester tester, String destination) async {
   } else {
     await tester.ensureVisible(target);
   }
-  expect(target, findsOneWidget);
+  await tester.pumpAndSettle();
+  expect(target.hitTestable(), findsOneWidget);
   await tester.tap(target);
   await tester.pump();
 }
