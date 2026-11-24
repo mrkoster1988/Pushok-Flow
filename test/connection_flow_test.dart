@@ -264,7 +264,9 @@ Future<void> _showDiagnostics(WidgetTester tester) async {
     expect(find.byKey(const Key('tunnel_diagnostics_card')), findsNothing);
     await flowNavigate(tester, 'Справка');
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('open_app_information')));
+    await tester.ensureVisible(find.byKey(const Key('open_app_information')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('open_app_information')));
     await tester.pumpAndSettle();
   }
   await tester.ensureVisible(find.byKey(const Key('tunnel_diagnostics_card')));
@@ -1024,6 +1026,8 @@ void main() {
       // Closing the panel leaves the read pending while the user performs the
       // newer disconnect operation on Home.
       await _closeInformation(tester);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pump();
       expect(bridge.named('disconnectWireGuard'), hasLength(1));
@@ -1072,6 +1076,8 @@ void main() {
       expect(_diagnosticValue(tester, 'tunnel_rx_value'), '—');
       expect(_diagnosticValue(tester, 'tunnel_handshake_value'), 'Данные недоступны');
       await _closeInformation(tester);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
       expect(find.text('Отключить'), findsOneWidget);
       expect(find.text('Туннель включён'), findsNothing);
       expect(find.text('Статус уточняется'), findsOneWidget);
@@ -1113,6 +1119,8 @@ void main() {
       expect(bridge.named('vpnStatus').length, greaterThan(earlierReads));
       expect(find.byKey(const Key('recover_tunnel_disconnect')), findsNothing);
       await _closeInformation(tester);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
       expect(find.text('Статус: отключено'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
@@ -1576,7 +1584,9 @@ void main() {
       expect(bridge.profiles[_firstProfileId]?['config'], _profile);
       await flowNavigate(tester, 'Справка');
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('open_app_information')));
+    await tester.ensureVisible(find.byKey(const Key('open_app_information')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('open_app_information')));
       await tester.pumpAndSettle();
       expect(find.text('VLESS'), findsOneWidget);
       expect(find.text('Рукопожатие WireGuard'), findsNothing);
@@ -1621,6 +1631,8 @@ void main() {
       await _openServers(tester);
       await _showDiagnostics(tester);
       await _closeInformation(tester);
+      await flowNavigate(tester, 'Серверы');
+      await tester.pumpAndSettle();
       final edit = find.byKey(const Key('edit_wireguard_profile_$_secondProfileId'));
       await tester.ensureVisible(edit);
       await tester.tap(edit);
