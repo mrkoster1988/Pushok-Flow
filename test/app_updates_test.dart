@@ -907,11 +907,11 @@ void main() {
 
   testWidgets('Installed changes and the recent history are available without a network check', (tester) async {
     bridge.state = _status(phase: 'current', automatic: false, permission: true,
-      installedVersion: '0.59.0', installedBuild: 59);
+      installedVersion: '0.60.0', installedBuild: 60);
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.59.0'), findsOneWidget);
-      expect(find.text('Добавлено получение личной WireGuard-подписки через аккаунт Pushok и Shop без QR. Подключение не запускается автоматически.'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.60.0'), findsOneWidget);
+      expect(find.text('Оставлена одна главная: кнопка подключения, вход через MTProxy, получение личного конфига, состояние подписки и туннеля.'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
       expect(find.byKey(const ValueKey('history_release_53')), findsNothing);
       final history = find.byKey(const Key('app_release_history'));
