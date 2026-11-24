@@ -80,13 +80,13 @@ void main() {
         'disabled', 'unavailable', 'link_disabled']) {
       expect(SubscriptionStatus.fromPlatform(_snapshot(state: state)).shopSyncState, state);
     }
-    expect(subscriptionErrorMessage(const PlatformException(code: 'SHOP_DEVICE_BOUND')),
+    expect(subscriptionErrorMessage(PlatformException(code: 'SHOP_DEVICE_BOUND')),
       contains('другому телефону'));
-    expect(subscriptionErrorMessage(const PlatformException(code: 'SHOP_ACCOUNT_CHANGED')),
+    expect(subscriptionErrorMessage(PlatformException(code: 'SHOP_ACCOUNT_CHANGED')),
       contains('другим аккаунтом'));
-    expect(subscriptionErrorMessage(const PlatformException(code: 'SHOP_NETWORK_ERROR')),
+    expect(subscriptionErrorMessage(PlatformException(code: 'SHOP_NETWORK_ERROR')),
       contains('интернет'));
-    expect(subscriptionErrorMessage(const PlatformException(code: 'PRIVATE_SERVER_TOKEN')),
+    expect(subscriptionErrorMessage(PlatformException(code: 'PRIVATE_SERVER_TOKEN')),
       isNot(contains('PRIVATE_SERVER_TOKEN')));
   });
 }

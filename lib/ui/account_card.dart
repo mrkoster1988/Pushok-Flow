@@ -436,7 +436,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         'Сессия действует 12 часов.\n\n'
         'Баланс MTProxy и подключение серверов Flow учитываются отдельно. '
         'Свою WireGuard-подписку можно получить в этом профиле после отдельного согласия. '
-        'Серверы можно также добавлять в разделе «Серверы».'.
+        'Серверы можно также добавлять в разделе «Серверы».'
       )),
       actions: [TextButton(onPressed: () => Navigator.of(context).pop(),
         child: const Text('Понятно'))],
