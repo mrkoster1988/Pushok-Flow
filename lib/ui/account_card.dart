@@ -284,9 +284,10 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         _status?.profile == null || _expired) return;
     final accountId = _status!.profile!.id;
     final now = widget.now?.call() ?? DateTime.now();
-    if (automatic && _shopLastAttempt != null &&
-        now.difference(_shopLastAttempt!) < (_shopSyncState == 'pending'
-            ? const Duration(seconds: 40) : const Duration(minutes: 5))) return;
+    // Pending retries are paced by the 45-second timer, not wall-clock DateTime.
+    // This also remains correct when app timers use a monotonic/fake clock.
+    if (automatic && _shopSyncState != 'pending' && _shopLastAttempt != null &&
+        now.difference(_shopLastAttempt!) < const Duration(minutes: 5)) return;
     _shopLastAttempt = now;
     _shopPendingPoll?.cancel();
     final epoch = ++_shopEpoch;
