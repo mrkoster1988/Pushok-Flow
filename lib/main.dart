@@ -1597,8 +1597,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       ),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: const EdgeInsets.all(14),
-        child: [home(), routes(), servers(), assistant(), profile(),
-          settingsMenu(), updates()][tab],
+        child: KeyedSubtree(key: Key('flow_page_$tab'),
+          child: [home(), routes(), servers(), assistant(), profile(),
+            settingsMenu(), updates()][tab]),
       ))),
     );
   }
