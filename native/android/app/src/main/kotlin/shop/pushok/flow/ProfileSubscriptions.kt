@@ -328,7 +328,8 @@ class ProfileSubscriptions(
         }
         return metadata + mapOf(
             "automaticUpdatesEnabled" to enabled,
-            // First-login onboarding defaults to auto-import. Explicit user OFF persists.\n            "shopAutoSyncEnabled" to settings.getBoolean("shop_auto_sync", true),
+            // First-login onboarding defaults to auto-import. Explicit user OFF persists.
+            "shopAutoSyncEnabled" to settings.getBoolean("shop_auto_sync", true),
             "shopSyncState" to shopSyncState,
             "busy" to busy.get(),
             "errorCode" to errorCode,
