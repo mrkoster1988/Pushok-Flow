@@ -258,9 +258,19 @@ Future<void> _openProfileEditor(WidgetTester tester) async {
   await tester.tap(button);
 }
 
+int? _diagnosticsReturnPage;
+
 Future<void> _showDiagnostics(WidgetTester tester) async {
   if (find.byKey(const Key('app_information_sheet')).evaluate().isEmpty) {
     expect(find.byKey(const Key('tunnel_diagnostics_card')), findsNothing);
+    _diagnosticsReturnPage = null;
+    for (final index in [0, 1, 2, 3, 4, 6]) {
+      if (find.byKey(Key('flow_page_$index')).evaluate().isNotEmpty) {
+        _diagnosticsReturnPage = index;
+        break;
+      }
+    }
+    await flowGoTo(tester, 'Настройки');
     await tester.tap(find.byKey(const Key('open_app_information')));
     await tester.pumpAndSettle();
   }
@@ -275,6 +285,14 @@ Future<void> _closeInformation(WidgetTester tester) async {
   await tester.pumpAndSettle();
   expect(find.byKey(const Key('app_information_sheet')), findsNothing);
   expect(find.byKey(const Key('tunnel_diagnostics_card')), findsNothing);
+  final returnPage = _diagnosticsReturnPage;
+  _diagnosticsReturnPage = null;
+  if (returnPage != null) {
+    const titles = {0: 'Главная', 1: 'Маршруты', 2: 'Серверы',
+      3: 'Pushok ИИ', 4: 'Профиль', 6: 'Обновления'};
+    await flowGoTo(tester, titles[returnPage]!);
+    await tester.pumpAndSettle();
+  }
 }
 
 String? _diagnosticValue(WidgetTester tester, String key) =>
@@ -1571,8 +1589,7 @@ void main() {
       expect(args['config'], _vlessProfile);
       expect(args['expectedProfileId'], _secondProfileId);
       expect(bridge.profiles[_firstProfileId]?['config'], _profile);
-      await tester.tap(find.byKey(const Key('open_app_information')));
-      await tester.pumpAndSettle();
+      await _showDiagnostics(tester);
       expect(find.text('VLESS'), findsOneWidget);
       expect(find.text('Рукопожатие WireGuard'), findsNothing);
       expect(find.textContaining('example.invalid'), findsNothing);
