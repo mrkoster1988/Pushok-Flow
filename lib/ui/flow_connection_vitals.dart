@@ -62,8 +62,13 @@ class FlowConnectionVitals extends StatelessWidget {
     final expiry = sub.expiresAt!;
     final formatted = expiry.day.toString().padLeft(2, '0') + '.' +
         expiry.month.toString().padLeft(2, '0') + '.' + expiry.year.toString();
-    final remaining = expiry.difference(DateTime.now()).inSeconds;
-    if (remaining <= 0 || sub.effectiveState(DateTime.now()) != SubscriptionAccessState.active) {
+    final now = DateTime.now();
+    final remaining = expiry.difference(now).inSeconds;
+    final access = sub.effectiveState(now);
+    // Revocation is different from expiry: do not report a revoked lease
+    // as though its purchased term merely elapsed.
+    if (access == SubscriptionAccessState.revoked) return 'Отозвана';
+    if (remaining <= 0 || access == SubscriptionAccessState.expired) {
       return 'Истёк ' + formatted;
     }
     if (remaining < 86400) return 'До ' + formatted + ' · <1 дня';
