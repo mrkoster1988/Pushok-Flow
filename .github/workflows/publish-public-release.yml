@@ -7,11 +7,6 @@ on:
         description: 'Tracked release version, for example 0.27.0'
         type: string
         required: true
-  # A one-time user-authorized v0.60 publication. Other releases stay manual.
-  push:
-    branches: [main]
-    paths:
-      - 'release-requests/flow-v0.60.0-publish'
 
 permissions:
   contents: read
@@ -29,7 +24,7 @@ jobs:
       actions: read
       contents: write
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'push' && '0.60.0' || inputs.release_version }}
+      RELEASE_VERSION: ${{ inputs.release_version }}
       RELEASE_CERTIFICATE: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
     steps:
       - uses: actions/checkout@v4
