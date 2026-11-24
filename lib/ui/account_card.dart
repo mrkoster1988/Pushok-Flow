@@ -353,7 +353,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
 
   String _shopStateText() => switch (_shopSyncState) {
     'active' => 'Личная подписка добавлена. Выберите сервер и нажмите «Подключить».',
-    'pending' => 'WGDashboard готовит личное подключение. Проверьте позднее.',
+    'pending' => 'WGDashboard готовит подключение. Flow проверит готовность автоматически.',
     'expired' => 'Срок личного подключения истёк. Продлите его в Shop.',
     'revoked' => 'Личное подключение отозвано на сервере.',
     'disabled' => 'Автоматическая выдача доступа пока не включена владельцем Shop.',
