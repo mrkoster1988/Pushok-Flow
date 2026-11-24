@@ -15,7 +15,7 @@ class FlowConnectionVitals extends StatelessWidget {
     required this.connecting,
     required this.nativeBusy,
     required this.ownsTunnel,
-    required this.recovering,
+    required this.recovery,
     required this.isAndroid,
     this.selected,
     this.subscriptions,
@@ -29,7 +29,8 @@ class FlowConnectionVitals extends StatelessWidget {
   final bool connecting;
   final bool nativeBusy;
   final bool ownsTunnel;
-  final bool recovering;
+  final TunnelRecovery recovery;
+  bool get recovering => recovery != TunnelRecovery.none;
   final bool isAndroid;
   final bool selectionCurrent;
   final WireGuardProfileSummary? selected;
@@ -72,7 +73,8 @@ class FlowConnectionVitals extends StatelessWidget {
   String get _state => connecting
       ? (ownsTunnel ? 'Отключение туннеля' : 'Соединение устанавливается')
       : nativeBusy ? 'Состояние изменяется'
-      : recovering ? 'Восстанавливается'
+      : recovery == TunnelRecovery.waitingNetwork ? 'Ожидание сети'
+      : recovery == TunnelRecovery.reconnecting ? 'Восстанавливается'
       : isAndroid && !diagnosticsCurrent ? 'Статус уточняется'
       : confirmedConnected ? 'Туннель включён' : 'Статус: отключено';
 
@@ -105,7 +107,10 @@ class FlowConnectionVitals extends StatelessWidget {
     return PushokPanel(child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PushokStatusChip(
+        Align(alignment: Alignment.centerLeft, child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: PushokStatusChip(
           key: const Key('home_connection_state'),
           label: _state,
           icon: connecting || nativeBusy || recovering ? Icons.sync :
@@ -114,7 +119,7 @@ class FlowConnectionVitals extends StatelessWidget {
           color: connecting || nativeBusy || recovering ? PushokPalette.glowCyan :
               !diagnosticsCurrent ? PushokPalette.muted :
               ownsTunnel ? PushokPalette.mint : PushokPalette.orange,
-        ),
+        ))),
         const SizedBox(height: 11),
         Row(children: [
           _metric('Срок подписки', _expires, Icons.event_available_outlined),
