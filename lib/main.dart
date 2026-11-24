@@ -1731,6 +1731,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   ]);
   Widget profile() => ListView(children: [
     PushokAccountCard(isAndroid: _isAndroid,
+      onShopSynced: () {
+        unawaited(_readSubscriptions());
+        unawaited(_refreshProfileStatus());
+      },
       onOpenCabinet: _isAndroid && _foreground && !_openingPushok ? _openPushokAccount : null,
       onOpenHub: _isAndroid && _foreground && !_openingPushok ? _openPushokHub : null),
     const SizedBox(height: 12),

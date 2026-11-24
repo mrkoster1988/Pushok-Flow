@@ -13,11 +13,13 @@ class Preferences {
     var failWrites = false
     fun getBoolean(key: String, fallback: Boolean) = values[key] as? Boolean ?: fallback
     fun getLong(key: String, fallback: Long) = values[key] as? Long ?: fallback
+    fun getString(key: String, fallback: String?): String? = values[key] as? String ?: fallback
     fun edit() = Editor()
     inner class Editor {
         private val changes = mutableMapOf<String, Any?>()
         fun putBoolean(key: String, value: Boolean) = apply { changes[key] = value }
         fun putLong(key: String, value: Long) = apply { changes[key] = value }
+        fun putString(key: String, value: String) = apply { changes[key] = value }
         fun remove(key: String) = apply { changes[key] = null }
         fun commit(): Boolean {
             if (failWrites) return false

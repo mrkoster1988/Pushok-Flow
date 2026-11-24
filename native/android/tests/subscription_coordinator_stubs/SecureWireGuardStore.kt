@@ -32,6 +32,8 @@ class SecureWireGuardStore {
     }
     fun subscriptionRecords() = catalogStore.subscriptionRecords()
     fun subscriptions() = catalogStore.subscriptions()
+    fun metadata() = catalogStore.metadata()
+    fun load(id: String) = catalogStore.load(id)
     fun importSubscription(name: String, url: String, feed: SubscriptionFeed.Parsed, now: Long) =
         catalogStore.importSubscription(name, url, feed, now)
     fun refreshSubscription(id: String, url: String, feed: SubscriptionFeed.Parsed, now: Long) {

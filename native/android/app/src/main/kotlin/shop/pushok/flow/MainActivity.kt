@@ -95,6 +95,7 @@ class MainActivity : FlutterActivity() {
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
     private val appUpdates by lazy { AppUpdates(this) }
     private val flowAccount by lazy { FlowAccount(this) }
+    private val shopBinding by lazy { FlowShopBindingStore(applicationContext) }
     private val routeRecommendations by lazy { RouteRecommendations(this) }
     private val profileScreenProtection by lazy { ProfileScreenProtection(this) }
     private val profileImport by lazy { WireGuardProfileImport(this) { profileScreenProtection.isActive } }
@@ -180,6 +181,10 @@ class MainActivity : FlutterActivity() {
             }
             var requestedProtocol = Session.protocol
             try {
+                // Recheck after Android VPN permission: logout/account switch
+                // while that dialog is open must not start another user's tunnel.
+                shopBinding.requireConnectionAllowed(raw, expectedProfileId as? String,
+                    secureStore, FlowAccountCoordinator.get(applicationContext))
                 val kind = validateConnectionProfile(raw)
                 requestedProtocol = if (kind == ConnectionProfile.Kind.VLESS)
                     TunnelConnectionSession.Protocol.VLESS else TunnelConnectionSession.Protocol.WIREGUARD
@@ -316,6 +321,7 @@ class MainActivity : FlutterActivity() {
     private fun profileErrorCode(error: Exception, fallback: String): String {
         if (error is ProfileFormatFailure) return error.code
         if (error is SubscriptionFailure) return error.code
+        if (error is FlowShopFailure) return error.code
         val code = (error as? ProfileCatalogFailure)?.code
         return if (code in setOf("PROFILE_NAME_INVALID", "PROFILE_LIMIT_REACHED", "PROFILE_NOT_FOUND",
                 "PROFILE_STORE_UNAVAILABLE", "PROFILE_CHANGED", "PROFILE_MANAGED", "SUBSCRIPTION_EXPIRED",
@@ -560,6 +566,10 @@ class MainActivity : FlutterActivity() {
                                 result.error("UPDATE_INSTALLING", "Android завершает обновление. Подключитесь после установки.", null)
                             } else try {
                                 validateConnectionProfile(config)
+                                // Guard once before displaying the Android permission prompt.
+                                shopBinding.requireConnectionAllowed(config,
+                                    call.argument<String>("expectedProfileId"),
+                                    secureStore, FlowAccountCoordinator.get(applicationContext))
                                 val approval = VpnService.prepare(this)
                                 if (approval != null) {
                                     pending = PendingTunnelRequest(call, result, token)

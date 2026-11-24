@@ -10,9 +10,12 @@ enum _LocalAccountClear { cancelLogin, logout, recoverAccount }
 
 class PushokAccountCard extends StatefulWidget {
   const PushokAccountCard({super.key, required this.isAndroid, this.account,
+    this.subscriptions, this.onShopSynced,
     this.onOpenCabinet, this.onOpenHub, this.now});
   final bool isAndroid;
   final FlowAccount? account;
+  final FlowSubscriptions? subscriptions;
+  final VoidCallback? onShopSynced;
   final VoidCallback? onOpenCabinet;
   final VoidCallback? onOpenHub;
   final DateTime Function()? now;
@@ -23,6 +26,14 @@ class PushokAccountCard extends StatefulWidget {
 
 class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindingObserver {
   late final FlowAccount _account;
+  late final FlowSubscriptions _shop;
+  bool _shopAutoSync = false;
+  bool _shopBusy = false;
+  String _shopSyncState = 'idle';
+  String? _shopError;
+  int _shopEpoch = 0;
+  String? _shopAccountId;
+  DateTime? _shopLastAttempt;
   FlowAccountStatus? _status;
   String? _error;
   bool _busy = false;
@@ -43,6 +54,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   void initState() {
     super.initState();
     _account = widget.account ?? FlowAccount(isAndroid: widget.isAndroid);
+    _shop = widget.subscriptions ?? FlowSubscriptions(isAndroid: widget.isAndroid);
     WidgetsBinding.instance.addObserver(this);
     final state = WidgetsBinding.instance.lifecycleState;
     _foreground = state == null || state == AppLifecycleState.resumed;
@@ -52,6 +64,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   @override
   void dispose() {
     _epoch++;
+    _shopEpoch++;
     _poll?.cancel();
     _viewTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -61,6 +74,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _epoch++;
+    _shopEpoch++;
+    _shopBusy = false;
     _poll?.cancel();
     _viewTimer?.cancel();
     _foreground = state == AppLifecycleState.resumed;
@@ -140,6 +155,16 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       if (!mounted || !_foreground || epoch != _epoch) return false;
       setState(() {
         _status = status;
+        final accountId = status.state == FlowAccountState.connected
+            ? status.profile?.id : null;
+        if (_shopAccountId != accountId) {
+          _shopAccountId = accountId;
+          _shopEpoch++;
+          _shopBusy = false;
+          _shopSyncState = 'idle';
+          _shopError = null;
+          _shopLastAttempt = null;
+        }
         // Keep identity/code hidden until native code confirms a durable local
         // clear. A failed store is fail-closed in memory but its disk state is
         // uncertain; it must not be presented as a completed logout.
@@ -174,9 +199,185 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         setState(() => _busy = false);
         _schedulePoll();
         _scheduleViewUpdate();
+        if (_foreground && _status?.state == FlowAccountState.connected &&
+            _status?.profile != null && _clearingAccount == null) {
+          unawaited(_readShopSettings(automatic: true));
+        }
       }
     }
   }
+
+  Future<void> _readShopSettings({bool automatic = false}) async {
+    if (!mounted || !_foreground || !widget.isAndroid || _shopBusy ||
+        _status?.state != FlowAccountState.connected || _status?.profile == null ||
+        _clearingAccount != null) return;
+    final accountId = _status!.profile!.id;
+    final epoch = ++_shopEpoch;
+    try {
+      final value = await _shop.status();
+      if (!mounted || !_foreground || epoch != _shopEpoch ||
+          _status?.profile?.id != accountId) return;
+      setState(() {
+        _shopAutoSync = value.shopAutoSyncEnabled;
+        _shopSyncState = value.shopSyncState;
+      });
+      if (automatic && value.shopAutoSyncEnabled) {
+        unawaited(_syncShop(automatic: true));
+      }
+    } catch (_) {
+      // On old APKs the channel may be absent; this read must not affect login.
+      // Explicit sync will report a useful error and keeps the account intact.
+    }
+  }
+
+  Future<void> _setShopAutoSync(bool value) async {
+    if (!mounted || !_foreground || _shopBusy) return;
+    final accountId = _status?.profile?.id;
+    final epoch = ++_shopEpoch;
+    setState(() { _shopBusy = true; _shopError = null; });
+    try {
+      final updated = await _shop.setShopAutoSync(value);
+      if (!mounted || !_foreground || epoch != _shopEpoch ||
+          accountId != _status?.profile?.id) return;
+      setState(() {
+        _shopAutoSync = updated.shopAutoSyncEnabled;
+        _shopSyncState = updated.shopSyncState;
+      });
+    } catch (error) {
+      if (mounted && _foreground && epoch == _shopEpoch) {
+        setState(() => _shopError = subscriptionErrorMessage(error));
+      }
+    } finally {
+      if (mounted && epoch == _shopEpoch) {
+        setState(() => _shopBusy = false);
+        if (value && _shopAutoSync) unawaited(_syncShop(automatic: true));
+      }
+    }
+  }
+
+  Future<void> _syncShop({bool automatic = false}) async {
+    if (!mounted || !_foreground || !widget.isAndroid ||
+        _busy || _shopBusy || _clearingAccount != null ||
+        _status?.state != FlowAccountState.connected ||
+        _status?.profile == null || _expired) return;
+    final accountId = _status!.profile!.id;
+    final now = widget.now?.call() ?? DateTime.now();
+    if (automatic && _shopLastAttempt != null &&
+        now.difference(_shopLastAttempt!) < const Duration(minutes: 5)) return;
+    _shopLastAttempt = now;
+    final epoch = ++_shopEpoch;
+    setState(() {
+      _shopBusy = true;
+      _shopError = null;
+    });
+    try {
+      final status = await _shop.syncShop();
+      if (!mounted || !_foreground || epoch != _shopEpoch ||
+          _status?.profile?.id != accountId) return;
+      setState(() => _shopSyncState = status.shopSyncState);
+      if (status.shopSyncState == 'active') widget.onShopSynced?.call();
+    } catch (error) {
+      if (mounted && _foreground && epoch == _shopEpoch) {
+        setState(() => _shopError = subscriptionErrorMessage(error));
+      }
+    } finally {
+      if (mounted && epoch == _shopEpoch) setState(() => _shopBusy = false);
+    }
+  }
+
+  Future<void> _unlinkShop() async {
+    if (!mounted || !_foreground || _shopBusy) return;
+    final accountId = _status?.profile?.id;
+    if (accountId == null) return;
+    final accepted = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Отвязать подключение?'),
+      content: const SingleChildScrollView(child: Text(
+        'Личная WireGuard-подписка будет удалена только с этого телефона. '
+        'Остальные серверы и настройки аккаунта сохранятся. '
+        'Перед отвязкой отключите туннель. '
+        'Это действие не отзывает уже выданный ключ на сервере Shop.'
+      )),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Отмена')),
+        FilledButton(key: const Key('confirm_shop_unlink'),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Отвязать')),
+      ],
+    ));
+    if (accepted != true || !mounted || !_foreground ||
+        accountId != _status?.profile?.id || _shopBusy) return;
+    final epoch = ++_shopEpoch;
+    setState(() { _shopBusy = true; _shopError = null; });
+    try {
+      final result = await _shop.unlinkShop();
+      if (mounted && epoch == _shopEpoch) {
+        setState(() { _shopSyncState = result.shopSyncState; _shopLastAttempt = null; });
+        widget.onShopSynced?.call();
+      }
+    } catch (error) {
+      if (mounted && epoch == _shopEpoch) {
+        setState(() => _shopError = subscriptionErrorMessage(error));
+      }
+    } finally {
+      if (mounted && epoch == _shopEpoch) setState(() => _shopBusy = false);
+    }
+  }
+
+  String _shopStateText() => switch (_shopSyncState) {
+    'active' => 'Личная подписка добавлена. Выберите сервер и нажмите «Подключить».',
+    'pending' => 'WGDashboard готовит личное подключение. Проверьте позднее.',
+    'expired' => 'Срок личного подключения истёк. Продлите его в Shop.',
+    'revoked' => 'Личное подключение отозвано на сервере.',
+    'disabled' => 'Автоматическая выдача доступа пока не включена владельцем Shop.',
+    'unavailable' => 'В Shop пока нет доступного подключения для вашего аккаунта.',
+    'link_disabled' => 'Личная ссылка отключена в Shop. Включите её в кабинете.',
+    _ => 'Получайте действующую подписку WireGuard без QR-кода.',
+  };
+
+  Widget _shopControls(bool enabled) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Divider(height: 26),
+      const Text('Мои подключения Pushok',
+        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 5),
+      const Text('Shop выдаёт только ваше личное подключение. '
+        'При первом получении подтвердите обмен данными между MTProxy и Shop. '
+        'Административные ключи приложению не передаются.',
+        style: TextStyle(color: PushokPalette.muted)),
+      SwitchListTile.adaptive(
+        key: const Key('shop_auto_sync'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Получать подключения автоматически'),
+        subtitle: const Text('При входе или возвращении на экран профиля'),
+        value: _shopAutoSync,
+        onChanged: enabled && !_shopBusy ? (value) =>
+          unawaited(_setShopAutoSync(value)) : null,
+      ),
+      const SizedBox(height: 5),
+      FilledButton.icon(
+        key: const Key('shop_sync_now'),
+        onPressed: enabled && !_shopBusy ? () => unawaited(_syncShop()) : null,
+        icon: _shopBusy
+            ? const SizedBox(width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.sync),
+        label: Text(_shopBusy ? 'Получаем личное подключение…' : 'Получить моё подключение'),
+      ),
+      const SizedBox(height: 7),
+      Text(_shopStateText(), key: const Key('shop_sync_state'),
+        style: const TextStyle(color: PushokPalette.muted)),
+      if (_shopError != null) Padding(padding: const EdgeInsets.only(top: 6),
+        child: Text(_shopError!, key: const Key('shop_sync_error'),
+          style: const TextStyle(color: PushokPalette.orange))),
+      TextButton(
+        key: const Key('shop_unlink'),
+        onPressed: enabled && !_shopBusy ? () => unawaited(_unlinkShop()) : null,
+        child: const Text('Отвязать личное подключение на телефоне'),
+      ),
+    ],
+  );
 
   Future<void> _openLogin() async {
     await _run(() async {
@@ -234,7 +435,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         'кабинета MTProxy. Списание денег и управление рекламой отсюда недоступны. '
         'Сессия действует 12 часов.\n\n'
         'Баланс MTProxy и подключение серверов Flow учитываются отдельно. '
-        'Серверы по-прежнему добавляются в разделе «Серверы».'
+        'Свою WireGuard-подписку можно получить в этом профиле после отдельного согласия. '
+        'Серверы можно также добавлять в разделе «Серверы».'.
       )),
       actions: [TextButton(onPressed: () => Navigator.of(context).pop(),
         child: const Text('Понятно'))],
@@ -347,6 +549,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
             onPressed: canClear ? () => unawaited(_clearAccount(_LocalAccountClear.logout)) : null,
             icon: const Icon(Icons.logout), label: const Text('Выйти')),
         ]),
+        if (status.profile != null) _shopControls(enabled),
       ] else if (pending != null) ...[
         const Text('Подтвердите вход в кабинете MTProxy и вернитесь в Flow.'),
         const SizedBox(height: 12),

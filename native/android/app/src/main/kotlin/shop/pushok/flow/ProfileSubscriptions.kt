@@ -32,6 +32,9 @@ class ProfileSubscriptions(
     private val foreground = AtomicBoolean(false)
     private val epoch = AtomicLong(0)
     private val downloader = SubscriptionDownloader()
+    private val shopBridge = FlowShopBridgeClient(context)
+    private val shopBinding = FlowShopBindingStore(context)
+    @Volatile private var shopSyncState: String = "idle"
     private val pendingResults = mutableSetOf<MethodChannel.Result>()
     private var channel: MethodChannel? = null
     @Volatile private var automatic = false
@@ -62,6 +65,22 @@ class ProfileSubscriptions(
             registered.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "status" -> status(result)
+                    "syncShop" -> request(result) { operationEpoch ->
+                        syncShop(operationEpoch)
+                    }
+                    "unlinkShop" -> request(result) { operationEpoch ->
+                        guardedWrite(operationEpoch) {
+                            shopBinding.unlink(store)
+                            shopSyncState = "idle"
+                        }
+                    }
+                    "setShopAutoSync" -> {
+                        val args = call.arguments as? Map<*, *>
+                        val enabled = args?.get("enabled") as? Boolean
+                        if (args?.keys != setOf("enabled") || enabled == null) {
+                            failure(result, "SUBSCRIPTION_INVALID")
+                        } else setShopAutoSync(enabled, result)
+                    }
                     "takePendingLink" -> result.success(takePendingLink())
                     "openPushokAccount" -> openPushokLink(PushokExternalLinks.Destination.ACCOUNT, result)
                     "openPushokHub" -> openPushokLink(PushokExternalLinks.Destination.HUB, result)
@@ -180,6 +199,77 @@ class ProfileSubscriptions(
         }
     }
 
+    private fun setShopAutoSync(value: Boolean, result: MethodChannel.Result) {
+        if (disposed.get()) { failure(result, "SUBSCRIPTION_INTERRUPTED"); return }
+        pendingResults.add(result)
+        reads.execute {
+            var failureCode: String? = null
+            try {
+                if (!settings.edit().putBoolean("shop_auto_sync", value).commit()) {
+                    throw SubscriptionFailure("SUBSCRIPTION_STORE_FAILED")
+                }
+            } catch (_: Exception) { failureCode = "SUBSCRIPTION_STORE_FAILED" }
+            main.post {
+                if (pendingResults.remove(result)) {
+                    if (failureCode != null) failure(result, failureCode!!)
+                    else status(result)
+                }
+            }
+        }
+    }
+
+    private fun syncShop(operationEpoch: Long) {
+        ensureActive(operationEpoch)
+        val coordinator = FlowAccountCoordinator.get(context)
+        val lease = coordinator.shopLease() ?: throw FlowShopFailure("SHOP_LOGIN_REQUIRED")
+        shopBinding.requireOwner(lease.accountId)
+        val reply = shopBridge.exchange(lease.token) {
+            ensureActive(operationEpoch)
+            coordinator.requireShopLease(lease)
+        }
+        if (reply.state != "active") {
+            synchronized(lifecycleLock) {
+                ensureActive(operationEpoch)
+                coordinator.requireShopLease(lease)
+                shopSyncState = reply.state
+            }
+            return
+        }
+        val rawUrl = reply.url ?: throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
+        val url = try { SubscriptionPolicy.normalizeUrl(rawUrl) }
+            catch (_: SubscriptionFailure) { throw FlowShopFailure("SHOP_PROTOCOL_INVALID") }
+        // Never import a subscription from a caller-controlled domain. Shop URLs are
+        // returned only from the signed identity exchange and checked again here.
+        if (!url.startsWith("https://pushok.shop/shop/flow/wireguard/")) {
+            throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
+        }
+        val response = downloader.fetch(url) {
+            ensureActive(operationEpoch)
+            coordinator.requireShopLease(lease)
+        }
+        val feed = try { SubscriptionFeed.parse(response.body, response.userInfo, response.title) }
+            finally { response.body.fill(0) }
+        if (feed.format != SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) {
+            throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
+        }
+        // This entire block holds the existing MainActivity operation gate and
+        // verifies the tunnel is DOWN. It never starts a connection.
+        guardedWrite(operationEpoch) {
+            coordinator.requireShopLease(lease)
+            shopBinding.requireOwner(lease.accountId)
+            val previous = store.subscriptionRecords()
+            val linked = previous.firstOrNull { it.url == url }
+            // The binding commits BEFORE any personal configuration can be written.
+            shopBinding.bind(lease.accountId, url)
+            if (linked == null) {
+                store.importSubscription("Моё подключение Pushok", url, feed, System.currentTimeMillis())
+            } else {
+                store.refreshSubscription(linked.id, linked.url, feed, System.currentTimeMillis())
+            }
+            shopSyncState = "active"
+        }
+    }
+
     private fun setAutomaticUpdates(value: Boolean, result: MethodChannel.Result) {
         // The toggle is explicit and local. Persist OFF even if opening a system screen pauses Flow.
         if (disposed.get()) { failure(result, "SUBSCRIPTION_INTERRUPTED"); return }
@@ -238,6 +328,8 @@ class ProfileSubscriptions(
         }
         return metadata + mapOf(
             "automaticUpdatesEnabled" to enabled,
+            "shopAutoSyncEnabled" to settings.getBoolean("shop_auto_sync", false),
+            "shopSyncState" to shopSyncState,
             "busy" to busy.get(),
             "errorCode" to errorCode,
             "refreshErrors" to failures,
@@ -366,6 +458,7 @@ class ProfileSubscriptions(
     }
 
     private fun safeError(error: Exception): String = when (error) {
+        is FlowShopFailure -> error.code
         is SubscriptionFailure -> error.code
         is ProfileCatalogFailure -> error.code.takeIf { it in setOf("PROFILE_NAME_INVALID",
             "PROFILE_LIMIT_REACHED", "PROFILE_STORE_UNAVAILABLE", "PROFILE_MANAGED",

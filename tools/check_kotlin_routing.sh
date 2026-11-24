@@ -197,6 +197,8 @@ kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionDownloader.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileSubscriptions.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowShopBridgePolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/FlowShopBindingStore.kt \
   native/android/tests/subscription_coordinator_stubs/*.kt \
   native/android/tests/SubscriptionCoordinatorCheck.kt -classpath "$wireguard_core" -include-runtime -d "$out/subscription-coordinator-tests.jar"
 java -cp "$out/subscription-coordinator-tests.jar:$wireguard_core" shop.pushok.flow.SubscriptionCoordinatorCheckKt

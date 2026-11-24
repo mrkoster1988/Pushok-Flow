@@ -50,11 +50,12 @@ class FlowSubscription {
 class SubscriptionStatus {
   const SubscriptionStatus.empty()
       : subscriptions = const [], automaticUpdatesEnabled = true,
+        shopAutoSyncEnabled = false, shopSyncState = 'idle',
         busy = false, errorCode = null, refreshErrors = const {};
 
   SubscriptionStatus._(List<FlowSubscription> values,
       this.automaticUpdatesEnabled, this.busy, this.errorCode,
-      Map<String, String> refreshErrors)
+      Map<String, String> refreshErrors, this.shopAutoSyncEnabled, this.shopSyncState)
       : subscriptions = List.unmodifiable(values),
         refreshErrors = Map.unmodifiable(refreshErrors);
 
@@ -68,6 +69,10 @@ class SubscriptionStatus {
       r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
   final List<FlowSubscription> subscriptions;
   final bool automaticUpdatesEnabled;
+  /// Defaults remain disabled until the user explicitly consents.
+  final bool shopAutoSyncEnabled;
+  /// Native-only exchange statuses; no bearer URL, ticket or user ID.
+  final String shopSyncState;
   final bool busy;
   final String? errorCode;
   /// Last provider failures for current subscriptions; never contains URLs or messages.
@@ -77,12 +82,22 @@ class SubscriptionStatus {
     const invalid = FormatException('Invalid subscription status');
     if (raw is! Map || raw.keys.any((key) => !const {
           'subscriptions', 'automaticUpdatesEnabled', 'busy', 'errorCode',
-          'refreshErrors',
+          'refreshErrors', 'shopAutoSyncEnabled', 'shopSyncState',
         }.contains(key)) ||
         raw['subscriptions'] is! List ||
         raw['automaticUpdatesEnabled'] is! bool) throw invalid;
     final busy = raw['busy'] ?? false;
     final errorCode = raw['errorCode'];
+    final shopEnabled = raw.containsKey('shopAutoSyncEnabled')
+        ? raw['shopAutoSyncEnabled'] : false;
+    final shopState = raw.containsKey('shopSyncState')
+        ? raw['shopSyncState'] : 'idle';
+    const shopStates = {
+      'idle', 'active', 'pending', 'expired', 'revoked', 'disabled',
+      'unavailable', 'link_disabled',
+    };
+    if (shopEnabled is! bool || shopState is! String ||
+        !shopStates.contains(shopState)) throw invalid;
     if (busy is! bool || (errorCode != null &&
         (errorCode is! String || !RegExp(r'^[A-Z_]{1,64}$').hasMatch(errorCode)))) throw invalid;
     final entries = raw['subscriptions'] as List;
@@ -159,7 +174,7 @@ class SubscriptionStatus {
       }
     }
     return SubscriptionStatus._(subscriptions, raw['automaticUpdatesEnabled'] as bool,
-      busy, errorCode as String?, errors);
+      busy, errorCode as String?, errors, shopEnabled, shopState);
   }
 }
 
@@ -218,6 +233,10 @@ class FlowSubscriptions {
   }
 
   Future<SubscriptionStatus> status() => _status('status');
+  Future<SubscriptionStatus> syncShop() => _status('syncShop');
+  Future<SubscriptionStatus> unlinkShop() => _status('unlinkShop');
+  Future<SubscriptionStatus> setShopAutoSync(bool enabled) =>
+      _status('setShopAutoSync', {'enabled': enabled});
   Future<SubscriptionStatus> refreshDue() => _status('refreshDue');
   Future<SubscriptionStatus> importSubscription(String url, String name) =>
       _status('importSubscription', {'url': url, 'name': name});
@@ -246,6 +265,15 @@ class FlowSubscriptions {
 String subscriptionErrorMessage(Object error) {
   final code = error is PlatformException ? error.code : null;
   return switch (code) {
+    'SHOP_LOGIN_REQUIRED' => 'Войдите в свой аккаунт Pushok, чтобы получить личное подключение.',
+    'SHOP_ACCOUNT_CHANGED' => 'Это подключение связано с другим аккаунтом. Сначала отвяжите его после отключения туннеля.',
+    'SHOP_LINK_CHANGED' => 'Адрес личной подписки изменился. Отвяжите старую запись и повторите добавление.',
+    'SHOP_DEVICE_BOUND' => 'Подключение уже привязано к другому телефону. Потребуется перевыпуск устройства в Shop.',
+    'SHOP_SERVICE_UNAVAILABLE' => 'Связь Shop и Pushok пока не настроена на сервере.',
+    'SHOP_RATE_LIMITED' => 'Слишком частые запросы. Повторите попытку позже.',
+    'SHOP_NETWORK_ERROR' => 'Не удалось получить подключение из Shop. Проверьте интернет.',
+    'SHOP_PROTOCOL_INVALID' => 'Shop вернул неподдерживаемые данные подключения.',
+    'SHOP_STORAGE_ERROR' => 'Не удалось сохранить привязку личного подключения. Повторите попытку.',
     'SUBSCRIPTION_URL_INVALID' =>
       'Нужна полная HTTPS-ссылка подписки, полученная в магазине или панели.',
     'SUBSCRIPTION_EMPTY' =>

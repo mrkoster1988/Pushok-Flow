@@ -43,6 +43,25 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
         manager.record.metadata(System.currentTimeMillis(), busy, override ?: error) +
             ("recoveryAvailable" to manager.recoveryAvailable)
     }
+    /** Snapshot never crosses Flutter channel; session owners are checked again before each write. */
+    internal fun shopLease(): FlowShopSessionLease? = synchronized(lock) {
+        val session = manager.record.session ?: return@synchronized null
+        val account = session.profile ?: return@synchronized null
+        val current = System.currentTimeMillis()
+        if (manager.recoveryAvailable || busy || session.expiresAt <= current) return@synchronized null
+        FlowShopSessionLease(account.id, session.accessToken, epoch, session.expiresAt)
+    }
+
+    internal fun requireShopLease(lease: FlowShopSessionLease) = synchronized(lock) {
+        val current = manager.record.session
+        if (manager.recoveryAvailable || busy || lease.epoch != epoch ||
+            current == null || current.accessToken != lease.token ||
+            current.profile?.id != lease.accountId ||
+            current.expiresAt != lease.expiresAt || current.expiresAt <= System.currentTimeMillis()) {
+            throw FlowShopFailure("SHOP_ACCOUNT_CHANGED")
+        }
+    }
+
     fun status(callback: (Map<String, Any?>) -> Unit) {
         io.execute {
             val selectedEpoch = synchronized(lock) { epoch }
@@ -114,6 +133,13 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
             }
         }
     }
+}
+
+/** Native-only account snapshot. Never pass this to UI, logs or exception messages. */
+internal class FlowShopSessionLease(
+    val accountId: String, val token: String, val epoch: Long, val expiresAt: Long,
+) {
+    override fun toString() = "FlowShopSessionLease(redacted)"
 }
 
 /** The channel exposes only validated metadata and fixed public-code handoffs. */

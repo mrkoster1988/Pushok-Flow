@@ -378,8 +378,59 @@ private fun mixedImportsAndRefreshesReportSkippedProfilesWithoutPartialFailures(
     }
 }
 
+private fun shopRequiresAnAccountAndCannotLeakOrDuplicateExistingSubscriptions() {
+    Fixture().use { f ->
+        val state = FlowAccountCoordinator.fixture
+        val previous = state.current
+        try {
+            state.current = null
+            FlowShopBridgeClient.requests = 0
+            val oldWrites = f.store.writes
+            val denied = f.invoke("syncShop")
+            check(denied.code == "SHOP_LOGIN_REQUIRED")
+            check(FlowShopBridgeClient.requests == 0)
+            check(f.store.writes == oldWrites)
+
+            state.current = FlowShopSessionLease("10000000-0000-4000-8000-000000000001",
+                "pfa_" + "0".repeat(64))
+            FlowShopBridgeClient.response = FlowShopBridgePolicy.Reply("disabled", null)
+            val response = f.invoke("syncShop").status()
+            check(response["shopSyncState"] == "disabled")
+            check(FlowShopBridgeClient.requests == 1)
+            check(f.store.writes == oldWrites)
+            check(!response.toString().contains("pfa_"))
+            check(!response.toString().contains("private-token"))
+
+            val enabled = f.invoke("setShopAutoSync", mapOf("enabled" to true)).status()
+            check(enabled["shopAutoSyncEnabled"] == true)
+            val unlinked = f.invoke("unlinkShop").status()
+            check(unlinked["shopSyncState"] == "idle")
+            check(f.store.subscriptionRecords().size == f.ids.size)
+
+            val binding = FlowShopBindingStore(f.activity)
+            val account = "10000000-0000-4000-8000-000000000001"
+            val address = "https://pushok.shop/shop/flow/wireguard/" + "X".repeat(43)
+            binding.bind(account, address)
+            check(binding.binding()?.accountId == account)
+            binding.bind(account, address)
+            try {
+                binding.bind("10000000-0000-4000-8000-000000000002", address)
+                error("Other Shop account replaced the previous owner")
+            } catch (failure: FlowShopFailure) { check(failure.code == "SHOP_ACCOUNT_CHANGED") }
+            check(!binding.binding().toString().contains(address))
+            binding.unlink(f.store)
+            check(binding.binding() == null)
+        } finally {
+            state.current = previous
+            FlowShopBridgeClient.response = FlowShopBridgePolicy.Reply("disabled", null)
+            FlowShopBridgeClient.requests = 0
+        }
+    }
+}
+
 fun main() {
     try {
+        shopRequiresAnAccountAndCannotLeakOrDuplicateExistingSubscriptions()
         partialRefreshContinues()
         providerFailuresAreBoundedAndPreserveProfiles()
         manualRecoveryAndDeletionOnlyClearTheirOwnErrors()
@@ -387,7 +438,7 @@ fun main() {
         interruptionBetweenProvidersStopsFurtherTraffic()
         cancellationDominatesABlockedProviderFailure()
         mixedImportsAndRefreshesReportSkippedProfilesWithoutPartialFailures()
-        println("Actual subscription coordinator checks passed: 7 regression groups")
+        println("Actual subscription coordinator checks passed: 8 regression groups")
     } finally {
         for (name in listOf("network", "reads")) {
             executor(name).shutdownNow()
