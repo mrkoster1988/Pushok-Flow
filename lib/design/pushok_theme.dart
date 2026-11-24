@@ -146,7 +146,7 @@ class _PushokNeonBackdropState extends State<PushokNeonBackdrop>
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _phase = AnimationController(vsync: this,
-      duration: const Duration(seconds: 24));
+      duration: const Duration(seconds: 48));
     _painter = _FlowWavePainter(_phase);
   }
 
@@ -227,6 +227,43 @@ class _FlowWavePainter extends CustomPainter {
     aurora(Offset(size.width * (.32 + .17 * math.sin(angle + 2.1)),
       size.height * (.88 + .045 * math.cos(angle + 1.4))),
       size.width * 1.9, size.height * .7, PushokPalette.glowViolet, .115);
+
+    // Broad translucent ribbons add a quiet sense of 3D depth. All geometry
+    // is deterministic and moves in a seamless 48-second loop.
+    void ribbon(double baseline, double phaseOffset, Color color,
+        double amplitude, double opacity) {
+      final drift = math.sin(angle + phaseOffset);
+      final bend = math.cos(angle + phaseOffset);
+      final y = size.height * baseline;
+      final path = Path()
+        ..moveTo(-size.width * .15, y + drift * 22)
+        ..cubicTo(size.width * .18, y - amplitude + bend * 20,
+          size.width * .53, y + amplitude * .55 - drift * 16,
+          size.width * 1.16, y - amplitude * .28 + bend * 18)
+        ..lineTo(size.width * 1.16, y + amplitude * .9 + bend * 18)
+        ..cubicTo(size.width * .65, y + amplitude * 1.5 - drift * 14,
+          size.width * .22, y + amplitude * .25 + bend * 18,
+          -size.width * .15, y + amplitude * .85 + drift * 22)
+        ..close();
+      final bounds = Rect.fromLTWH(0, math.max(0, y - amplitude * 1.6),
+          size.width, amplitude * 3.8);
+      canvas.drawPath(path, Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [
+            color.withValues(alpha: 0),
+            color.withValues(alpha: opacity * .55),
+            color.withValues(alpha: opacity),
+            color.withValues(alpha: opacity * .22),
+            color.withValues(alpha: 0),
+          ],
+          stops: const [0, .22, .48, .78, 1],
+        ).createShader(bounds));
+    }
+
+    ribbon(.30, .3, PushokPalette.glowCyan, size.height * .095, .065);
+    ribbon(.67, 2.4, PushokPalette.electricBlue, size.height * .11, .065);
+    ribbon(.87, 4.1, PushokPalette.glowViolet, size.height * .09, .055);
 
     void wave(double baseline, Color color, double offset, double strength) {
       final height = size.height * baseline;
