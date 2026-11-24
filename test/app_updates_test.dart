@@ -911,7 +911,7 @@ void main() {
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
       expect(find.text('Что нового в установленной версии 0.59.0'), findsOneWidget);
-      expect(find.text('Установленные рекомендуемые приложения для прямого доступа включаются по умолчанию при первом запуске маршрутов.'), findsOneWidget);
+      expect(find.text('Добавлено получение личной WireGuard-подписки через аккаунт Pushok и Shop без QR. Подключение не запускается автоматически.'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
       expect(find.byKey(const ValueKey('history_release_53')), findsNothing);
       final history = find.byKey(const Key('app_release_history'));
