@@ -44,6 +44,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   int _epoch = 0;
   Timer? _poll;
   Timer? _viewTimer;
+  Timer? _shopPendingPoll;
   int? _expiryChecked;
 
   int get _nowMs => (widget.now?.call() ?? DateTime.now()).millisecondsSinceEpoch;
@@ -67,6 +68,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     _shopEpoch++;
     _poll?.cancel();
     _viewTimer?.cancel();
+    _shopPendingPoll?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -78,6 +80,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     _shopBusy = false;
     _poll?.cancel();
     _viewTimer?.cancel();
+    _shopPendingPoll?.cancel();
     _foreground = state == AppLifecycleState.resumed;
     // A response from before switching to Telegram must not overwrite the
     // fresh, durable native snapshot read on return.
@@ -164,6 +167,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
           _shopSyncState = 'idle';
           _shopError = null;
           _shopLastAttempt = null;
+          _shopPendingPoll?.cancel();
         }
         // Keep identity/code hidden until native code confirms a durable local
         // clear. A failed store is fail-closed in memory but its disk state is
@@ -230,10 +234,27 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     }
   }
 
+  // A new WGDashboard peer is provisioned asynchronously. Keep checking a
+  // pending claim on this visible screen so a user does not have to reopen Flow.
+  // The signed MTProxy ticket is acquired afresh for every attempt; never cache it.
+  void _schedulePendingShopPoll() {
+    _shopPendingPoll?.cancel();
+    if (!mounted || !_foreground || !_shopAutoSync ||
+        _shopSyncState != 'pending' || _shopBusy || _busy || _expired ||
+        _clearingAccount != null || _status?.state != FlowAccountState.connected ||
+        _status?.profile?.id == null) return;
+    final accountId = _status!.profile!.id;
+    _shopPendingPoll = Timer(const Duration(seconds: 45), () {
+      if (!mounted || !_foreground || accountId != _status?.profile?.id) return;
+      unawaited(_syncShop(automatic: true));
+    });
+  }
+
   Future<void> _setShopAutoSync(bool value) async {
     if (!mounted || !_foreground || _shopBusy) return;
     final accountId = _status?.profile?.id;
     final epoch = ++_shopEpoch;
+    _shopPendingPoll?.cancel();
     setState(() { _shopBusy = true; _shopError = null; });
     try {
       final updated = await _shop.setShopAutoSync(value);
@@ -251,6 +272,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       if (mounted && epoch == _shopEpoch) {
         setState(() => _shopBusy = false);
         if (value && _shopAutoSync) unawaited(_syncShop(automatic: true));
+        else _schedulePendingShopPoll();
       }
     }
   }
@@ -262,9 +284,12 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         _status?.profile == null || _expired) return;
     final accountId = _status!.profile!.id;
     final now = widget.now?.call() ?? DateTime.now();
-    if (automatic && _shopLastAttempt != null &&
+    // Pending retries are paced by the 45-second timer, not wall-clock DateTime.
+    // This also remains correct when app timers use a monotonic/fake clock.
+    if (automatic && _shopSyncState != 'pending' && _shopLastAttempt != null &&
         now.difference(_shopLastAttempt!) < const Duration(minutes: 5)) return;
     _shopLastAttempt = now;
+    _shopPendingPoll?.cancel();
     final epoch = ++_shopEpoch;
     setState(() {
       _shopBusy = true;
@@ -281,7 +306,10 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         setState(() => _shopError = subscriptionErrorMessage(error));
       }
     } finally {
-      if (mounted && epoch == _shopEpoch) setState(() => _shopBusy = false);
+      if (mounted && epoch == _shopEpoch) {
+        setState(() => _shopBusy = false);
+        _schedulePendingShopPoll();
+      }
     }
   }
 
@@ -326,7 +354,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
 
   String _shopStateText() => switch (_shopSyncState) {
     'active' => 'Личная подписка добавлена. Выберите сервер и нажмите «Подключить».',
-    'pending' => 'WGDashboard готовит личное подключение. Проверьте позднее.',
+    'pending' => 'WGDashboard готовит подключение. Flow проверит готовность автоматически.',
     'expired' => 'Срок личного подключения истёк. Продлите его в Shop.',
     'revoked' => 'Личное подключение отозвано на сервере.',
     'disabled' => 'Автоматическая выдача доступа пока не включена владельцем Shop.',
