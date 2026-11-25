@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'release-requests/flow-v0.64.0-build'
+      - 'pubspec.yaml'
 
 permissions:
   contents: read
@@ -35,14 +35,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Verify explicit v0.64.0 release request
-        if: github.event_name == 'push'
+      - name: Verify exact main commit and version consistency
         run: |
           set -euo pipefail
-          test -f release-requests/flow-v0.64.0-build
-          grep -Fxq 'Release: 0.64.0' release-requests/flow-v0.64.0-build
-          grep -Fxq 'version: 0.64.0+64' pubspec.yaml
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          manifest = Path('pubspec.yaml').read_text()
+          match = re.search(r'(?m)^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$', manifest)
+          if not match:
+              raise SystemExit('Missing valid Flutter release version')
+          name, code = match.group(1), int(match.group(2))
+          constants = Path('lib/models/app_version.dart').read_text()
+          if ("const appVersionName = '" + name + "';") not in constants or (
+                  'const appVersionCode = ' + str(code) + ';') not in constants:
+              raise SystemExit('Flutter and native version metadata disagree')
+          print('Version ready for signed release:', name, code)
+          PY
       - name: Resolve release version and refuse existing tags
         id: version
         env:
