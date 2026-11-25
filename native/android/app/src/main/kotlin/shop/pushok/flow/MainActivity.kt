@@ -265,7 +265,7 @@ open class MainActivity : FlutterActivity() {
                         RouteAppAvailability.requireForConnection(exclusions, ::isRouteAppAvailable)
                         Session.protocol = requestedProtocol
                         try {
-                            if (backend == null) backend = GoBackend(applicationContext)
+                            if (backend == null) backend = GoBackend(BrowserRoutingContext(applicationContext))
                             backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
                         } catch (_: PackageManager.NameNotFoundException) {
                             // The app may disappear between preflight and the
@@ -472,6 +472,7 @@ open class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        BrowserSites.register(this,flutterEngine.dartExecutor.binaryMessenger)
         DeviceTraffic.register(this, flutterEngine.dartExecutor.binaryMessenger)
         profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)

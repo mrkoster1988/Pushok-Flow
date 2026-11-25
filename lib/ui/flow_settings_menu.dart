@@ -32,6 +32,8 @@ class FlowSettingsMenu extends StatelessWidget {
       _entry('settings_routes','Маршруты',
         'Прямой трафик приложений и исключения',Icons.alt_route_outlined,1),
       const SizedBox(height: 9),
+      _entry('settings_sites','Сайты напрямую','Маршруты сайтов в браузере',Icons.language,8),
+      const SizedBox(height: 9),
       _entry('settings_servers','Серверы и подписки',
         'Профили, QR, импорт и выбор сервера',Icons.dns_outlined,2),
       const SizedBox(height: 9),
@@ -41,9 +43,7 @@ class FlowSettingsMenu extends StatelessWidget {
       _entry('settings_profile','Аккаунт и обновления',
         'MTProxy, баланс и новая версия Flow',Icons.person_outline,4),
       const SizedBox(height: 9),
-      ExpansionTile(title: const Text('Дополнительно'), children: [
-        _entry('settings_assistant','Pushok ИИ', '', Icons.auto_awesome_outlined,3),
-      ]),
+      _entry('settings_assistant','Pushok ИИ','Поддержка и предложения',Icons.auto_awesome_outlined,3),
     ],
   );
 }

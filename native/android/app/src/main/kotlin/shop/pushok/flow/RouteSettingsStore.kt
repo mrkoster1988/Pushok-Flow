@@ -115,14 +115,20 @@ object RouteAppLabels {
 object RouteInitialRecommendations {
     val packages: Set<String> = linkedSetOf(
         "com.idamob.tinkoff.android",
+        "com.octopod.russianpost.client.android",
         "com.vk.im",
         "com.vkontakte.android",
         "com.wildberries.ru",
         "ru.alfabank.mobile.android",
+        "ru.dublgis.dgismobile",
         "ru.oneme.app",
         "ru.ozon.app.android",
+        "ru.rostel",
+        "ru.rzd.pass",
         "ru.sberbankmobile",
         "ru.vtb24.mobilebanking.android",
+        "ru.yandex.taxi",
+        "ru.yandex.yandexmaps",
     )
 
     fun installedOnly(visiblePackages: Collection<String>): Set<String> =

@@ -49,7 +49,7 @@ private fun reject(code: String, action: () -> Any?) {
 fun main() {
     // The bundled defaults are offline and only installed recommendations can
     // be selected; all other apps and absent packages are left untouched.
-    check(RouteInitialRecommendations.packages.size == 9)
+    check(RouteInitialRecommendations.packages.size == 15)
     check(RouteInitialRecommendations.installedOnly(listOf(
         "com.vkontakte.android", "ru.sberbankmobile", "com.example.other",
         "ru.sberbankmobile", "com.example.missing",

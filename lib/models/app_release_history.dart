@@ -65,6 +65,7 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'В маршрутах есть 15 рекомендованных приложений и выбор прямого подключения для 12 сайтов в браузере.',
     'Если Telegram не выходит на связь, на главной можно получить гостевое подключение на семь суток.',
     'Кнопка MTProxy открывает действующий прокси Pushok в Telegram. Подтвердите подключение после возврата в Flow.',
   ]),

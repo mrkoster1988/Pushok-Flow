@@ -266,7 +266,7 @@ dependencies {
                 app = self.patch().find("application")
                 self.assertEqual(app.get(ANDROID + "allowBackup"), "false")
                 self.assertEqual([service.get(ANDROID + "name") for service in app.findall("service")],
-                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, "shop.pushok.flow.FlowTile", "shop.pushok.flow.FlowPush"])
+                                 [".OtherService", "shop.pushok.flow.FlowBrowserVpnService", PATCH.UPDATE_FOREGROUND_SERVICE, "shop.pushok.flow.FlowTile", "shop.pushok.flow.FlowPush"])
 
     def test_update_receivers_are_private_deduplicated_and_keep_unrelated_receiver(self):
         self.write_manifest(services='''<receiver android:name=".UpdateInstallReceiver"
@@ -489,7 +489,7 @@ class BootstrapScriptTests(unittest.TestCase):
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",
             "UpdateAutomationPolicy.kt",
-            "FlowAccount.kt", "FlowAccountPolicy.kt", "FlowAccountSessionManager.kt", "FlowAccountStore.kt", "FlowAccountClient.kt", "FlowShopBridgePolicy.kt", "FlowShopBridgeClient.kt", "FlowShopBindingStore.kt",
+            "FlowAccount.kt", "FlowAccountPolicy.kt", "FlowAccountSessionManager.kt", "FlowAccountStore.kt", "FlowAccountClient.kt", "FlowShopBridgePolicy.kt", "FlowShopBridgeClient.kt", "TelegramProxyLink.kt", "DirectBrowserProxy.kt", "FlowBrowserVpnService.kt", "FlowShopBindingStore.kt",
             "ProfileScreenProtection.kt", "ProfileProtectionPolicy.kt",
             "WireGuardProfileImport.kt", "ProfileImportWork.kt", "ProfileImportReader.kt", "ProfileImportPayload.kt", "ProfileQrDecoder.kt",
             "ProfileQrCameraDecoder.kt", "ProfileQrImageReader.kt", "ProfileQrSession.kt", "WireGuardQrActivity.kt",

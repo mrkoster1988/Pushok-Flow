@@ -104,6 +104,11 @@ def patch_manifest(path: Path) -> None:
         if service.get(ANDROID + "name") == VPN_SERVICE:
             app.remove(service)
 
+    browser_vpn = "shop.pushok.flow.FlowBrowserVpnService"
+    if not any(s.get(ANDROID + "name") == browser_vpn for s in app.findall("service")):
+        ET.SubElement(app,"service",{ANDROID+"name":browser_vpn, ANDROID+"exported":"false",
+                                    ANDROID+"permission":"android.permission.BIND_VPN_SERVICE"})
+
     # Self-updates still require Android's per-source install authorization.
     for permission_name in ("android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
                             "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION",

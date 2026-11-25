@@ -100,6 +100,7 @@ class ProfileSubscriptions(
                     "takePendingLink" -> result.success(takePendingLink())
                     "openPushokAccount" -> openPushokLink(PushokExternalLinks.Destination.ACCOUNT, result)
                     "openPushokHub" -> openPushokLink(PushokExternalLinks.Destination.HUB, result)
+                    "openSupport" -> openPushokLink(PushokExternalLinks.Destination.SUPPORT, result)
                     "openPushokShop" -> openPushokLink(PushokExternalLinks.Destination.SHOP, result)
                     "setAutomaticUpdates" -> {
                         val value = (call.arguments as? Map<*, *>)?.get("enabled") as? Boolean
@@ -233,6 +234,7 @@ class ProfileSubscriptions(
             failure(result, when (destination) {
                 PushokExternalLinks.Destination.ACCOUNT -> "PUSHOK_ACCOUNT_UNAVAILABLE"
                 PushokExternalLinks.Destination.HUB -> "PUSHOK_HUB_UNAVAILABLE"
+                PushokExternalLinks.Destination.SUPPORT -> "PUSHOK_SUPPORT_UNAVAILABLE"
                 PushokExternalLinks.Destination.SHOP -> "PUSHOK_SHOP_UNAVAILABLE"
             })
         }

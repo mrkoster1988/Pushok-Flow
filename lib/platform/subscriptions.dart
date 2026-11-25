@@ -278,6 +278,10 @@ class FlowSubscriptions {
     await _channel.invokeMethod<void>('openPushokHub');
   }
 
+  Future<void> openSupport() async {
+    await _channel.invokeMethod<void>('openSupport');
+  }
+
   Future<void> openPushokShop() async {
     if (!isAndroid) throw MissingPluginException();
     await _channel.invokeMethod<void>('openPushokShop');

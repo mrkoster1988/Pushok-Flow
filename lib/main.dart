@@ -21,6 +21,7 @@ import 'ui/subscription_editor.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/account_card.dart';
 import 'ui/telegram_proxy_action.dart';
+import 'ui/browser_sites_page.dart';
 import 'ui/flow_connection_vitals.dart';
 import 'ui/flow_settings_menu.dart';
 import 'ui/device_traffic_page.dart';
@@ -1602,12 +1603,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     5 => 'Справка',
     6 => 'Обновление',
     7 => 'IP и трафик',
+    8 => 'Сайты напрямую',
     _ => 'Настройки',
   };
 
   Widget _settingsContent() {
     if (_settingsLanding) return FlowSettingsMenu(onSelect: _selectTab);
     return switch (tab) {
+      8 => const BrowserSitesPage(),
       7 => const DeviceTrafficPage(),
       6 => ListView(children: [AppUpdatesCard(isAndroid: _isAndroid)]),
       1 => routes(),
@@ -1862,6 +1865,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     ),
   ]));
   Widget assistant() => ListView(children: [
+    ListTile(leading:const Icon(Icons.chat_bubble_outline),title:const Text('Чат с Pushok ИИ'),
+      subtitle:const Text('Поддержка и предложения по развитию'),
+      onTap:() async {
+        try { await _subscriptionBridge.openSupport(); }
+        catch (_) { if (mounted) _showNotice('Не удалось открыть поддержку.'); }
+      }),
     card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const ListTile(leading: Icon(Icons.smart_toy_outlined, color: PushokFlowApp.teal),
         title: Text('Pushok ИИ'), subtitle: Text('Локальная память результатов')),
