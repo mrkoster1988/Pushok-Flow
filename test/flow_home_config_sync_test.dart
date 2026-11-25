@@ -107,7 +107,7 @@ void main() {
     }
     final receive = find.byKey(const Key('home_get_config_button'));
     expect(receive, findsOneWidget);
-    expect(tester.widget<FilledButton>(receive).onPressed, isNotNull);
+    expect(tester.widget<OutlinedButton>(receive).onPressed, isNotNull);
     expect(syncCalls, 0);
     expect(preferenceWrites, 0);
 
@@ -116,7 +116,7 @@ void main() {
     await tester.pump();
     expect(syncCalls, 1, reason: 'First tap must make the native Shop request.');
     expect(preferenceWrites, 0);
-    expect(find.text('Создаём подключение в Shop…'), findsOneWidget);
+    expect(find.textContaining('Shop создаёт WireGuard-профиль'), findsOneWidget);
 
     // Automatic polling must remain disabled if the user opted out.
     await tester.pump(const Duration(seconds: 90));
@@ -127,21 +127,22 @@ void main() {
     expect(syncCalls, 2);
     expect(preferenceWrites, 0);
     expect(successfulCallbacks, 1);
-    expect(find.text('Личная подписка получена'), findsOneWidget);
+    expect(find.text('Ваше личное подключение готово'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('Account-only renewal opens Shop without changing the WireGuard tunnel',
-      (tester) async {
+  testWidgets('Compact home has no authorization/delete/renewal controls', (tester) async {
+    final key = GlobalKey<PushokAccountCardState>();
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: SingleChildScrollView(child: PushokAccountCard(
-        isAndroid: true, compactHome: true,
+        key: key, isAndroid: true, compactHome: true,
       ))),
     ));
     for (var i = 0; i < 5; i++) await tester.pump();
-    final renew = find.byKey(const Key('home_renew_subscription'));
-    expect(renew, findsOneWidget);
-    await tester.tap(renew);
+    expect(find.byKey(const Key('home_authorize_button')), findsNothing);
+    expect(find.byKey(const Key('home_delete_config')), findsNothing);
+    expect(find.byKey(const Key('home_renew_subscription')), findsNothing);
+    key.currentState!.openRenewal();
     await tester.pump();
     expect(shopOpenCalls, 1);
     expect(syncCalls, 0);
@@ -150,31 +151,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('Local delete never revokes account and does not reimport automatically',
+  testWidgets('Deletion stays in Settings, preserves the account and stops autoimport',
       (tester) async {
     shopState = 'active';
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: SingleChildScrollView(child: PushokAccountCard(
-        isAndroid: true, compactHome: true,
+        isAndroid: true, compactHome: false,
       ))),
     ));
     for (var i = 0; i < 5; i++) await tester.pump();
-    final remove = find.byKey(const Key('home_delete_config'));
-    expect(remove, findsOneWidget);
+    final remove = find.byKey(const Key('shop_unlink'));
+    await tester.ensureVisible(remove);
     await tester.tap(remove);
     await tester.pump();
     expect(find.text('Отвязать подключение?'), findsOneWidget);
-    expect(unlinkCalls, 0, reason: 'Delete requires explicit confirmation.');
+    expect(unlinkCalls, 0);
     await tester.tap(find.byKey(const Key('confirm_shop_unlink')));
     await tester.pump();
     await tester.pump();
     expect(unlinkCalls, 1);
     expect(preferenceWrites, 0);
     expect(syncCalls, 0);
-    expect(find.byKey(const Key('home_authorize_button')), findsOneWidget,
-      reason: 'Account remains signed in after local removal.');
+    expect(find.text('Аккаунт Pushok'), findsOneWidget,
+      reason: 'Local deletion must preserve account sign-in.');
     await tester.pump(const Duration(seconds: 90));
-    expect(syncCalls, 0, reason: 'Old personal config must not be reimported.');
+    expect(syncCalls, 0, reason: 'Do not auto-import an explicitly deleted config.');
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
 }
