@@ -70,6 +70,11 @@ class ProfileSubscriptions(
                     }
                     "unlinkShop" -> request(result) { operationEpoch ->
                         guardedWrite(operationEpoch) {
+                            // Deleting the local managed profile must NOT reimport it
+                            // on the next account refresh. Disable auto-sync durably first.
+                            if (!settings.edit().putBoolean("shop_auto_sync", false).commit()) {
+                                throw SubscriptionFailure("SUBSCRIPTION_STORE_FAILED")
+                            }
                             shopBinding.unlink(store)
                             shopSyncState = "idle"
                         }
@@ -84,6 +89,7 @@ class ProfileSubscriptions(
                     "takePendingLink" -> result.success(takePendingLink())
                     "openPushokAccount" -> openPushokLink(PushokExternalLinks.Destination.ACCOUNT, result)
                     "openPushokHub" -> openPushokLink(PushokExternalLinks.Destination.HUB, result)
+                    "openPushokShop" -> openPushokLink(PushokExternalLinks.Destination.SHOP, result)
                     "setAutomaticUpdates" -> {
                         val value = (call.arguments as? Map<*, *>)?.get("enabled") as? Boolean
                         if (value == null) failure(result, "SUBSCRIPTION_INVALID")
@@ -195,6 +201,7 @@ class ProfileSubscriptions(
             failure(result, when (destination) {
                 PushokExternalLinks.Destination.ACCOUNT -> "PUSHOK_ACCOUNT_UNAVAILABLE"
                 PushokExternalLinks.Destination.HUB -> "PUSHOK_HUB_UNAVAILABLE"
+                PushokExternalLinks.Destination.SHOP -> "PUSHOK_SHOP_UNAVAILABLE"
             })
         }
     }

@@ -42,11 +42,15 @@ void main() {
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   var syncCalls = 0;
   var preferenceWrites = 0;
+  var unlinkCalls = 0;
+  var shopOpenCalls = 0;
   var shopState = 'idle';
 
   setUp(() {
     syncCalls = 0;
     preferenceWrites = 0;
+    unlinkCalls = 0;
+    shopOpenCalls = 0;
     shopState = 'idle';
     messenger.setMockMethodCallHandler(_accountChannel, (call) async {
       if (call.method == 'status' || call.method == 'refresh') {
@@ -66,6 +70,18 @@ void main() {
       if (call.method == 'setShopAutoSync') {
         preferenceWrites++;
         throw StateError('Manual get-config cannot change a saved preference.');
+      }
+      if (call.method == 'openPushokShop') {
+        expect(call.arguments, isNull,
+            reason: 'Shop URLs and personal tokens must never leave native Android.');
+        shopOpenCalls++;
+        return true;
+      }
+      if (call.method == 'unlinkShop') {
+        expect(call.arguments, isNull);
+        unlinkCalls++;
+        shopState = 'idle';
+        return _shopState(shopState);
       }
       throw MissingPluginException(call.method);
     });
@@ -112,6 +128,53 @@ void main() {
     expect(preferenceWrites, 0);
     expect(successfulCallbacks, 1);
     expect(find.text('Личная подписка получена'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Account-only renewal opens Shop without changing the WireGuard tunnel',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SingleChildScrollView(child: PushokAccountCard(
+        isAndroid: true, compactHome: true,
+      ))),
+    ));
+    for (var i = 0; i < 5; i++) await tester.pump();
+    final renew = find.byKey(const Key('home_renew_subscription'));
+    expect(renew, findsOneWidget);
+    await tester.tap(renew);
+    await tester.pump();
+    expect(shopOpenCalls, 1);
+    expect(syncCalls, 0);
+    expect(unlinkCalls, 0);
+    expect(preferenceWrites, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Local delete never revokes account and does not reimport automatically',
+      (tester) async {
+    shopState = 'active';
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SingleChildScrollView(child: PushokAccountCard(
+        isAndroid: true, compactHome: true,
+      ))),
+    ));
+    for (var i = 0; i < 5; i++) await tester.pump();
+    final remove = find.byKey(const Key('home_delete_config'));
+    expect(remove, findsOneWidget);
+    await tester.tap(remove);
+    await tester.pump();
+    expect(find.text('Отвязать подключение?'), findsOneWidget);
+    expect(unlinkCalls, 0, reason: 'Delete requires explicit confirmation.');
+    await tester.tap(find.byKey(const Key('confirm_shop_unlink')));
+    await tester.pump();
+    await tester.pump();
+    expect(unlinkCalls, 1);
+    expect(preferenceWrites, 0);
+    expect(syncCalls, 0);
+    expect(find.byKey(const Key('home_authorize_button')), findsOneWidget,
+      reason: 'Account remains signed in after local removal.');
+    await tester.pump(const Duration(seconds: 90));
+    expect(syncCalls, 0, reason: 'Old personal config must not be reimported.');
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

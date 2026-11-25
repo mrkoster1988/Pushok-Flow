@@ -343,7 +343,12 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     try {
       final result = await _shop.unlinkShop();
       if (mounted && epoch == _shopEpoch) {
-        setState(() { _shopSyncState = result.shopSyncState; _shopLastAttempt = null; });
+        _shopPendingPoll?.cancel();
+        setState(() {
+          _shopSyncState = result.shopSyncState;
+          _shopAutoSync = result.shopAutoSyncEnabled;
+          _shopLastAttempt = null;
+        });
         widget.onShopSynced?.call();
       }
     } catch (error) {
@@ -402,13 +407,32 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       if (_shopError != null) Padding(padding: const EdgeInsets.only(top: 6),
         child: Text(_shopError!, key: const Key('shop_sync_error'),
           style: const TextStyle(color: PushokPalette.orange))),
-      TextButton(
+      OutlinedButton.icon(
+        key: const Key('shop_renew'),
+        onPressed: enabled && !_shopBusy ? () => unawaited(_openShop()) : null,
+        icon: const Icon(Icons.event_repeat_outlined),
+        label: const Text('Продлить через Shop'),
+      ),
+      TextButton.icon(
         key: const Key('shop_unlink'),
         onPressed: enabled && !_shopBusy ? () => unawaited(_unlinkShop()) : null,
-        child: const Text('Отвязать личное подключение на телефоне'),
+        icon: const Icon(Icons.delete_outline),
+        label: const Text('Удалить конфиг из Flow'),
       ),
     ],
   );
+
+  Future<void> _openShop() async {
+    if (!mounted || !_foreground || !widget.isAndroid) return;
+    try {
+      await _shop.openPushokShop();
+    } catch (_) {
+      if (mounted && _foreground) {
+        setState(() => _shopError =
+          'Не удалось открыть Shop. Откройте https://pushok.shop/shop/ в браузере.');
+      }
+    }
+  }
 
   Future<void> _openLogin() async {
     await _run(() async {
@@ -559,6 +583,24 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
               : _shopSyncState == 'active' ? 'Обновить конфиг'
               : 'Получить конфиг'),
         ),
+        if (connected) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              key: const Key('home_renew_subscription'),
+              onPressed: enabled && !_shopBusy ? () => unawaited(_openShop()) : null,
+              icon: const Icon(Icons.event_repeat_outlined),
+              label: const Text('Продлить'),
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: OutlinedButton.icon(
+              key: const Key('home_delete_config'),
+              onPressed: enabled && !_shopBusy ? () => unawaited(_unlinkShop()) : null,
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Удалить конфиг'),
+            )),
+          ]),
+        ],
         if (pending != null) ...[
           const SizedBox(height: 8),
           const Text('Подтверди вход через MTProxy. Код:',

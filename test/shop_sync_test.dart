@@ -81,7 +81,7 @@ void main() {
       expect(SubscriptionStatus.fromPlatform(_snapshot(state: state)).shopSyncState, state);
     }
     expect(subscriptionErrorMessage(PlatformException(code: 'SHOP_DEVICE_BOUND')),
-      contains('другому устройству'));
+      contains('принадлежать аккаунту'));
     expect(subscriptionErrorMessage(PlatformException(code: 'SHOP_PROOF_REPLAY')),
       contains('уже использовано'));
     expect(subscriptionErrorMessage(PlatformException(code: 'SHOP_IDENTITY_CONFLICT')),

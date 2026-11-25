@@ -14,8 +14,7 @@ fun main() {
         try { FlowShopBridgePolicy.requireTicket(data); error("accepted malformed ticket") }
         catch (failure: FlowShopFailure) { check(failure.code == "SHOP_PROTOCOL_INVALID") }
     }
-    check(FlowShopBridgePolicy.validClientId("pfc_" + "A".repeat(43)))
-    check(!FlowShopBridgePolicy.validClientId("pfc_" + "A".repeat(42)))
+    // No per-phone identifier is required to exchange a verified account ticket.
     val url = "https://pushok.shop/shop/flow/wireguard/private"
     val valid = FlowShopBridgePolicy.parseExchange(mapOf("status" to "active",
         "subscription_url" to url))

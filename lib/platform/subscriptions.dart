@@ -260,6 +260,11 @@ class FlowSubscriptions {
     if (!isAndroid) throw MissingPluginException();
     await _channel.invokeMethod<void>('openPushokHub');
   }
+
+  Future<void> openPushokShop() async {
+    if (!isAndroid) throw MissingPluginException();
+    await _channel.invokeMethod<void>('openPushokShop');
+  }
 }
 
 String subscriptionErrorMessage(Object error) {
@@ -268,7 +273,7 @@ String subscriptionErrorMessage(Object error) {
     'SHOP_LOGIN_REQUIRED' => 'Войдите в свой аккаунт Pushok, чтобы получить личное подключение.',
     'SHOP_ACCOUNT_CHANGED' => 'Это подключение связано с другим аккаунтом. Сначала отвяжите его после отключения туннеля.',
     'SHOP_LINK_CHANGED' => 'Адрес личной подписки изменился. Отвяжите старую запись и повторите добавление.',
-    'SHOP_DEVICE_BOUND' => 'Shop подтвердил привязку к другому устройству. Откройте карточку пользователя в Shop для безопасного перевыпуска; приложение не меняет чужой ключ.',
+    'SHOP_DEVICE_BOUND' => 'Установленная версия Shop всё ещё ограничивает доступ по телефону. Обновите Shop: доступ Flow должен принадлежать аккаунту Pushok.',
     'SHOP_PROOF_REPLAY' => 'Подтверждение входа уже использовано. Нажмите «Получить конфиг» ещё раз — Flow запросит новое подтверждение.',
     'SHOP_IDENTITY_CONFLICT' => 'Shop обнаружил конфликт привязки аккаунтов. Проверьте Telegram ID в карточке пользователя Shop; не создавайте второй аккаунт.',
     'SHOP_CONFLICT' => 'Shop сообщил о конфликте выдачи. Проверьте привязку пользователя и состояние подписки в админке Shop.',

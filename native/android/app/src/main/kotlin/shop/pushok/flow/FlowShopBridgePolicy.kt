@@ -7,15 +7,12 @@ internal object FlowShopBridgePolicy {
     const val TICKET_URL = "https://pushok.shop/api/v1/flow/shop-ticket"
     const val EXCHANGE_URL = "https://pushok.shop/shop/api/flow/bridge/exchange"
     private val ticket = Regex("psb1\\.[A-Za-z0-9_-]{20,720}\\.[a-f0-9]{64}")
-    private val clientId = Regex("pfc_[A-Za-z0-9_-]{43}")
     private val states = setOf("active", "pending", "expired", "revoked", "disabled",
         "unavailable", "link_disabled")
 
     class Reply(val state: String, val url: String?) {
         override fun toString() = "FlowShopBridgePolicy.Reply($state, redacted)"
     }
-
-    fun validClientId(value: String): Boolean = clientId.matches(value)
 
     fun requireTicket(value: Map<String, Any?>): String {
         if (value.keys != setOf("ticket", "expires_in")) invalid()
