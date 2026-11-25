@@ -648,7 +648,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
       // authorization panel or second required "Get config" tap.
       if (pending != null) PushokPanel(child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('Подтвердите вход в кабинете MTProxy. Сверьте код:',
+          const Text('Подтвердите вход в кабинете MTProxy. Сверьте код:', textAlign: TextAlign.center,
             style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
           const SizedBox(height: 8),
           SelectableText(pending.displayCode,
@@ -692,9 +692,9 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
         }, key: const Key('home_shop_status'), textAlign: TextAlign.center,
           style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
       ],
-      if (error != null) Text(error, key: const Key('home_auth_error'),
+      if (error != null) Text(error, key: const Key('home_auth_error'), textAlign: TextAlign.center,
         style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
-      if (_shopError != null) Text(_shopError!, key: const Key('home_config_error'),
+      if (_shopError != null) Text(_shopError!, key: const Key('home_config_error'), textAlign: TextAlign.center,
         style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
       if (connected && !(_shopBusy || _busy) && _shopSyncState != 'active') ...[
         const SizedBox(height: 6),

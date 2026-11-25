@@ -1,8 +1,8 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@drawable/flow_widget_background" android:orientation="vertical" android:gravity="center">
-    <TextView android:id="@+id/flow_action" android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="1" android:gravity="center" android:text="⏻" android:textColor="#53E9D2" android:textSize="23sp" />
-    <TextView android:id="@+id/flow_status" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center" android:singleLine="true" android:ellipsize="end" android:text="Flow" android:textColor="#FFFFFF" android:textSize="9sp"/>
-</LinearLayout>
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/flow_action"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="2dp"
+    android:scaleType="fitCenter"
+    android:contentDescription="Pushok Flow"
+    android:src="@drawable/flow_launcher_foreground" />

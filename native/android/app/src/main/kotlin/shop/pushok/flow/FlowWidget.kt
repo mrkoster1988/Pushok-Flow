@@ -9,6 +9,13 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.widget.RemoteViews
@@ -59,6 +66,36 @@ class FlowWidget : AppWidgetProvider() {
         private const val NOTICE = 3602
         private val worker = Executors.newSingleThreadExecutor()
 
+        private var portraits: Pair<Bitmap, Bitmap>? = null
+
+        @Synchronized
+        private fun portrait(context: Context, connected: Boolean): Bitmap {
+            val cached = portraits ?: run {
+                val icon = BitmapFactory.decodeResource(context.resources, R.drawable.flow_launcher_foreground)
+                // The adaptive icon includes a wide transparent safe zone. Trim it for the 1×1 widget.
+                val pixels = IntArray(icon.width * icon.height)
+                icon.getPixels(pixels, 0, icon.width, 0, 0, icon.width, icon.height)
+                val bounds = Rect(icon.width, icon.height, 0, 0)
+                for (y in 0 until icon.height) for (x in 0 until icon.width) {
+                    if (pixels[y * icon.width + x] ushr 24 > 12) {
+                        bounds.left = minOf(bounds.left, x)
+                        bounds.top = minOf(bounds.top, y)
+                        bounds.right = maxOf(bounds.right, x + 1)
+                        bounds.bottom = maxOf(bounds.bottom, y + 1)
+                    }
+                }
+                val color = if (bounds.isEmpty) icon else Bitmap.createBitmap(icon, bounds.left,
+                    bounds.top, bounds.width(), bounds.height())
+                val gray = Bitmap.createBitmap(color.width, color.height, Bitmap.Config.ARGB_8888)
+                val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                    colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+                }
+                Canvas(gray).drawBitmap(color, null, Rect(0, 0, gray.width, gray.height), paint)
+                Pair(color, gray).also { portraits = it }
+            }
+            return if (connected) cached.first else cached.second
+        }
+
         internal fun action(context: Context, command: String): PendingIntent {
             val intent = if (command == "open") Intent(context, MainActivity::class.java)
                 else Intent(context, WidgetControlActivity::class.java).setAction(command)
@@ -80,15 +117,13 @@ class FlowWidget : AppWidgetProvider() {
                 else -> "open"
             }
             val views = RemoteViews(context.packageName, R.layout.flow_widget)
-            views.setTextViewText(R.id.flow_status, text)
-            views.setTextColor(R.id.flow_action, if (command == STOP) 0xFF53E9D2.toInt() else 0xFFBBD7E4.toInt())
+            views.setImageViewBitmap(R.id.flow_action, portrait(context, state == "connected" || state == "wireguard"))
             views.setContentDescription(R.id.flow_action, "Pushok Flow. $text. " + when (command) {
                 CONNECT -> "Подключить"
                 STOP -> "Отключить"
                 else -> "Открыть"
             })
             views.setOnClickPendingIntent(R.id.flow_action, action(context, command))
-            views.setOnClickPendingIntent(R.id.flow_status, action(context, command))
             AppWidgetManager.getInstance(context).updateAppWidget(ComponentName(context, FlowWidget::class.java), views)
         }
 

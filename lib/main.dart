@@ -1676,15 +1676,16 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         },
         child: AnimatedContainer(
         duration: const Duration(milliseconds: 450),
-        width: constraints.maxWidth < 340 ? 152 : 174,
-        height: constraints.maxWidth < 340 ? 152 : 174,
+        width: (constraints.maxWidth * .63).clamp(174.0, 258.0).toDouble(),
+        height: (constraints.maxWidth * .63).clamp(174.0, 258.0).toDouble(),
         padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(shape: BoxShape.circle,
           gradient: LinearGradient(colors: _tunnelConfirmed
             ? [PushokPalette.mint, PushokPalette.glowCyan]
             : [PushokPalette.glowCyan, PushokPalette.electricBlue, PushokPalette.glowViolet]),
-          boxShadow: [BoxShadow(color: (_tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan)
-            .withValues(alpha: .45), blurRadius: 30, spreadRadius: 3)]),
+          boxShadow: [BoxShadow(color: PushokPalette.glowViolet.withValues(alpha: .28), blurRadius: 40, spreadRadius: 6, offset: const Offset(6, 5)),
+            BoxShadow(color: (_tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan)
+            .withValues(alpha: .55), blurRadius: 28, spreadRadius: 3)]),
         child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
           key: const Key('pushok_connect_button'),
           customBorder: const CircleBorder(),
@@ -1692,7 +1693,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(_tunnelConfirmed ? Icons.check_circle_outline
                 : _ownsTunnel ? Icons.info_outline : Icons.power_settings_new,
-              color: _tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan, size: 46),
+              color: _tunnelConfirmed ? PushokPalette.mint : PushokPalette.glowCyan, size: 54),
             const SizedBox(height: 8),
             Text(connecting ? (_ownsTunnel ? 'Отключение' : 'Подключение')
                 : _ownsTunnel ? 'Отключить' : 'Подключить',
@@ -1702,6 +1703,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           ]),
         )),
       ))),
+      ]),
+      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const SizedBox(height: 13),
       // The power button controls login, provisioning and eventual connect.
       // The compact status below is informational, not another login step.
@@ -1724,7 +1727,6 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         onOpenHub: _isAndroid && _foreground && !_openingPushok
             ? _openPushokHub : null,
       ),
-      ]),
       Padding(padding: const EdgeInsets.only(top: 10), child: FlowConnectionVitals(
         pingMs: _tunnelConfirmed ? _pingMs : null,
         renew: _isAndroid && _homeAccountAuthorized && _foreground
@@ -1745,6 +1747,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         isAndroid: _isAndroid,
       ),
       ),
+      ]),
     ])),
   ));
 

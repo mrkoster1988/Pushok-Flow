@@ -65,6 +65,10 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'Виджет показывает цветного Пушка при подключении и серого при отключении.',
+    'На главной увеличена кнопка, усилено свечение волн и изменено расположение показателей и сообщений.',
+  ]),
+  AppReleaseNotes(versionName: '2.0.1', versionCode: 66, changes: [
     'Новая иконка Пушка, компактный виджет и подключение из шторки Android.',
     'Обновлена главная, добавлены замер задержки и подключение свайпом вверх.',
   ]),

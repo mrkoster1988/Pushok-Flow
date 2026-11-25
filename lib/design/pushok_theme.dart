@@ -103,20 +103,23 @@ class PushokPanel extends StatelessWidget {
 }
 
 class PushokStatusChip extends StatelessWidget {
-  const PushokStatusChip({super.key, required this.label, required this.color, required this.icon});
+  const PushokStatusChip({super.key, required this.label, required this.color, required this.icon, this.stretch = false});
+  final bool stretch;
   final String label;
   final Color color;
   final IconData icon;
   @override
   Widget build(BuildContext context) => Container(
+    constraints: stretch ? const BoxConstraints(minHeight: 44) : null,
+    alignment: stretch ? Alignment.center : null,
     padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 10),
     decoration: BoxDecoration(color: color.withValues(alpha: .17),
       borderRadius: BorderRadius.circular(10),
       border: Border.all(color: color.withValues(alpha: .4))),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
+    child: FittedBox(fit: BoxFit.scaleDown, child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 15, color: color), const SizedBox(width: 6),
       Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
-    ]),
+    ])),
   );
 }
 
@@ -146,7 +149,7 @@ class _PushokNeonBackdropState extends State<PushokNeonBackdrop>
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _phase = AnimationController(vsync: this,
-      duration: const Duration(seconds: 48));
+      duration: const Duration(seconds: 26));
     _painter = _FlowWavePainter(_phase);
   }
 
@@ -220,16 +223,16 @@ class _FlowWavePainter extends CustomPainter {
 
     aurora(Offset(size.width * (.14 + .11 * math.sin(angle)),
       size.height * (.21 + .045 * math.cos(angle))),
-      size.width * 1.6, size.height * .78, PushokPalette.glowCyan, .115);
+      size.width * 1.6, size.height * .78, PushokPalette.glowCyan, .18);
     aurora(Offset(size.width * (.94 + .08 * math.cos(angle + .7)),
       size.height * (.48 + .07 * math.sin(angle))),
-      size.width * 1.55, size.height * .88, PushokPalette.electricBlue, .12);
+      size.width * 1.55, size.height * .88, PushokPalette.electricBlue, .16);
     aurora(Offset(size.width * (.32 + .17 * math.sin(angle + 2.1)),
       size.height * (.88 + .045 * math.cos(angle + 1.4))),
-      size.width * 1.9, size.height * .7, PushokPalette.glowViolet, .115);
+      size.width * 1.9, size.height * .7, PushokPalette.glowViolet, .19);
 
     // Broad translucent ribbons add a quiet sense of 3D depth. All geometry
-    // is deterministic and moves in a seamless 48-second loop.
+    // is deterministic and moves in a seamless 26-second loop.
     void ribbon(double baseline, double phaseOffset, Color color,
         double amplitude, double opacity) {
       final drift = math.sin(angle + phaseOffset);
@@ -261,32 +264,35 @@ class _FlowWavePainter extends CustomPainter {
         ).createShader(bounds));
     }
 
-    ribbon(.30, .3, PushokPalette.glowCyan, size.height * .095, .065);
-    ribbon(.67, 2.4, PushokPalette.electricBlue, size.height * .11, .065);
-    ribbon(.87, 4.1, PushokPalette.glowViolet, size.height * .09, .055);
+    ribbon(.30, .3, PushokPalette.glowCyan, size.height * .095, .13);
+    ribbon(.67, 2.4, PushokPalette.electricBlue, size.height * .11, .12);
+    ribbon(.87, 4.1, PushokPalette.glowViolet, size.height * .09, .11);
 
     void wave(double baseline, Color color, double offset, double strength) {
       final height = size.height * baseline;
-      final swell = math.sin(angle + offset);
       final drift = math.cos(angle + offset);
-      final path = Path()..moveTo(-28, height + swell * 12);
-      path.cubicTo(size.width * .23, height - 45 + drift * 20,
-        size.width * .59, height + 55 - swell * 18,
-        size.width + 28, height - 18 + drift * 12);
+      final path = Path();
+      final amplitude = size.height * .034;
+      for (var i = 0; i <= 48; i++) {
+        final x = size.width * i / 48;
+        final y = height + amplitude * math.sin(i / 48 * math.pi * 2 + angle + offset)
+            + amplitude * .35 * math.sin(i / 48 * math.pi * 4 - angle + offset);
+        if (i == 0) { path.moveTo(x, y); } else { path.lineTo(x, y); }
+      }
       final strokeBounds = Rect.fromLTWH(0, height - 80, size.width, 160);
       canvas.drawPath(path, Paint()
-        ..color = color.withValues(alpha: .075 * strength)
+        ..color = color.withValues(alpha: .17 * strength)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 15
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 11));
       canvas.drawPath(path, Paint()
         ..shader = LinearGradient(colors: [
           color.withValues(alpha: .06 * strength),
-          color.withValues(alpha: .4 * strength),
+          color.withValues(alpha: .74 * strength),
           color.withValues(alpha: .12 * strength),
         ], stops: const [0, .46, 1]).createShader(strokeBounds)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.1);
+        ..strokeWidth = 1.7);
       canvas.save();
       canvas.translate(0, 7 + drift * 2);
       canvas.drawPath(path, Paint()
@@ -297,6 +303,7 @@ class _FlowWavePainter extends CustomPainter {
     }
 
     wave(.22, PushokPalette.glowCyan, .2, .85);
+    wave(.58, PushokPalette.electricBlue, 1.4, .83);
     wave(.84, PushokPalette.glowViolet, 2.2, 1);
     wave(.91, PushokPalette.electricBlue, 3.9, .9);
 

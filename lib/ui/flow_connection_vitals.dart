@@ -116,10 +116,7 @@ class FlowConnectionVitals extends StatelessWidget {
     return PushokPanel(child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(children: [Flexible(child: Align(alignment: Alignment.centerLeft, child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: PushokStatusChip(
+        Row(children: [Expanded(child: PushokStatusChip(stretch: true,
           key: const Key('home_connection_state'),
           label: _state,
           icon: connecting || nativeBusy || recovering ? Icons.sync :
@@ -128,23 +125,23 @@ class FlowConnectionVitals extends StatelessWidget {
           color: connecting || nativeBusy || recovering ? PushokPalette.glowCyan :
               !diagnosticsCurrent ? PushokPalette.muted :
               ownsTunnel ? PushokPalette.mint : PushokPalette.orange,
-        )))), if (renew != null) ...[
-          const Spacer(),
-          Semantics(button: true, child: InkWell(key: const Key('home_renew_subscription'),
-            onTap: renew, child: const PushokStatusChip(label: 'Продлить',
-              icon: Icons.event_repeat_outlined, color: PushokPalette.glowCyan))),
+        )), if (renew != null) ...[
+          const SizedBox(width: 10),
+          Expanded(child: Semantics(button: true, child: InkWell(key: const Key('home_renew_subscription'),
+            onTap: renew, child: const PushokStatusChip(stretch: true, label: 'Продлить',
+              icon: Icons.event_repeat_outlined, color: PushokPalette.glowCyan)))),
         ]]),
         const SizedBox(height: 11),
         Row(children: [
-          _metric('Срок подписки', _expires, Icons.event_available_outlined),
-          const SizedBox(width: 10),
           _metric('Пинг', pingMs == null ? '—' : '$pingMs мс', Icons.speed_outlined),
+          const SizedBox(width: 10),
+          _metric('Срок подписки', _expires, Icons.event_available_outlined),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          _metric('Последний отклик', handshake, Icons.sync_alt_outlined),
-          const SizedBox(width: 10),
           _metric('Трафик', traffic, Icons.swap_vert_outlined),
+          const SizedBox(width: 10),
+          _metric('Последний отклик', handshake, Icons.sync_alt_outlined),
         ]),
         if (connectionError != null) ...[
           const SizedBox(height: 9),
