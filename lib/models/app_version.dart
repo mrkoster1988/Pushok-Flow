@@ -1,4 +1,4 @@
 /// The installed app's bundled identity, shared by information and diagnostics.
 /// Keep these constants aligned with pubspec.yaml when preparing a release.
-const appVersionName = '0.62.0';
-const appVersionCode = 62;
+const appVersionName = '0.63.0';
+const appVersionCode = 63;

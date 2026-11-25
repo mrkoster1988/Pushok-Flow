@@ -15,17 +15,27 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+open class MainActivity : FlutterActivity() {
+    companion object {
+        internal fun widgetState(context: android.content.Context): String {
+            if (Session.backend?.getState(Session.tunnel) == Tunnel.State.UP) return "wireguard"
+            return XrayTunnelClient(context).status().state.wireName
+        }
+    }
+
     private val io get() = Session.connection.io
     private class PendingTunnelRequest(val call: MethodCall, val result: MethodChannel.Result, val token: Long)
     private var pending: PendingTunnelRequest? = null
     // The tunnel must outlive Activity recreation (rotation / process UI rebuild).
     // GoBackend.getState compares the Tunnel object by identity.
     private object Session {
+        @Volatile var app: android.content.Context? = null
         val connection = TunnelConnectionSession(nowElapsedMs = { SystemClock.elapsedRealtime() })
         val tunnel = object : Tunnel {
             override fun getName() = "pushok_flow"
-            override fun onStateChange(newState: Tunnel.State) {}
+            override fun onStateChange(newState: Tunnel.State) {
+                app?.let { FlowWidget.wireGuardChanged(it, newState == Tunnel.State.UP) }
+            }
         }
         @Volatile var backend: GoBackend? = null
         @Volatile var xray: XrayTunnelClient? = null
@@ -80,6 +90,75 @@ class MainActivity : FlutterActivity() {
         return readTunnelOccupied()
     }
 
+    private fun connect(call: MethodCall, result: MethodChannel.Result) {
+        val config = call.argument<String>("config")
+        if (pending != null || Session.operationInProgress.get()) {
+            result.error("VPN_BUSY", "Подключение уже выполняется", null)
+        } else if (config.isNullOrBlank() || config.length > 65536) {
+            // Do not show Android's VPN approval for an unusable profile.
+            result.error("INVALID_CONFIG", "Нужен профиль подключения", null)
+        } else {
+            val token = Session.operationInProgress.acquire()
+            if (token == null) {
+                result.error("VPN_BUSY", "Подключение уже изменяется", null)
+            } else if (!appUpdates.beginConnection(token)) {
+                releaseOperation(token)
+                result.error("UPDATE_INSTALLING", "Android завершает обновление. Подключитесь после установки.", null)
+            } else try {
+                validateConnectionProfile(config)
+                // Guard once before displaying the Android permission prompt.
+                shopBinding.requireConnectionAllowed(config,
+                    call.argument<String>("expectedProfileId"),
+                    secureStore, FlowAccountCoordinator.get(applicationContext))
+                val approval = VpnService.prepare(this)
+                if (approval != null) {
+                    pending = PendingTunnelRequest(call, result, token)
+                    startActivityForResult(approval, vpnRequestCode)
+                } else startTunnel(call, result, token)
+            } catch (error: Exception) {
+                pending = null
+                releaseOperation(token)
+                result.error(profileErrorCode(error, "VPN_REQUEST_INTERRUPTED"),
+                    "Не удалось подготовить подключение", null)
+            }
+        }
+    }
+    private fun disconnect(result: MethodChannel.Result) {
+        val token = Session.operationInProgress.acquire()
+        if (token == null) {
+            result.error("VPN_BUSY", "Подключение уже изменяется", null)
+        } else io.execute {
+            try {
+                Session.connection.disconnect(
+                    protocol = Session.protocol,
+                    readState = ::readTunnelOccupied,
+                    deactivate = ::stopTunnels,
+                )
+                runOnUiThread { result.success(mapOf("connected" to false)) }
+            } catch (_: Exception) {
+                runOnUiThread { result.error(Session.protocol.disconnectError, "Не удалось отключить туннель", null) }
+            } finally {
+                releaseOperation(token)
+            }
+        }
+    }
+
+    protected fun widgetAction(connecting: Boolean, result: MethodChannel.Result) {
+        if (!connecting) { disconnect(result); return }
+        io.execute {
+            try {
+                val id = secureStore.metadata()["activeProfileId"] as? String
+                    ?: throw IllegalStateException()
+                val config = secureStore.load(id) ?: throw IllegalStateException()
+                runOnUiThread {
+                    connect(MethodCall("connectWireGuard", mapOf("config" to config,
+                        "expectedProfileId" to id)), result)
+                }
+            } catch (_: Exception) {
+                runOnUiThread { result.error("PROFILE_LOAD_FAILED", "Выберите профиль в Pushok Flow", null) }
+            }
+        }
+    }
     private fun validateConnectionProfile(raw: String): ConnectionProfile.Kind {
         val kind = ConnectionProfile.validateShape(raw)
         if (kind == ConnectionProfile.Kind.WIREGUARD) {
@@ -219,7 +298,7 @@ class MainActivity : FlutterActivity() {
                 )
                 // Transfer the CONNECTING lease to the known-UP latch before releasing the operation token.
                 appUpdates.observeTunnel(active)
-                runOnUiThread { result.success(mapOf("connected" to active)) }
+                runOnUiThread { if (active) appUpdates.requestDownloadNotifications(); result.success(mapOf("connected" to active)) }
             } catch (error: TunnelConnectionFailure) {
                 when (error.code) {
                     "VPN_STATE_UNAVAILABLE" -> runOnUiThread { result.error("VPN_STATE_UNAVAILABLE",
@@ -407,6 +486,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        Session.app = applicationContext
         profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
         flowAccount.register(flutterEngine.dartExecutor.binaryMessenger)
@@ -550,58 +630,8 @@ class MainActivity : FlutterActivity() {
                             result.error("PROFILE_NOT_FOUND", "Не удалось выбрать профиль", null)
                         } else mutateProfile(result, "PROFILE_SELECT_FAILED") { secureStore.select(id) }
                     }
-                    "connectWireGuard" -> {
-                        val config = call.argument<String>("config")
-                        if (pending != null || Session.operationInProgress.get()) {
-                            result.error("VPN_BUSY", "Подключение уже выполняется", null)
-                        } else if (config.isNullOrBlank() || config.length > 65536) {
-                            // Do not show Android's VPN approval for an unusable profile.
-                            result.error("INVALID_CONFIG", "Нужен профиль подключения", null)
-                        } else {
-                            val token = Session.operationInProgress.acquire()
-                            if (token == null) {
-                                result.error("VPN_BUSY", "Подключение уже изменяется", null)
-                            } else if (!appUpdates.beginConnection(token)) {
-                                releaseOperation(token)
-                                result.error("UPDATE_INSTALLING", "Android завершает обновление. Подключитесь после установки.", null)
-                            } else try {
-                                validateConnectionProfile(config)
-                                // Guard once before displaying the Android permission prompt.
-                                shopBinding.requireConnectionAllowed(config,
-                                    call.argument<String>("expectedProfileId"),
-                                    secureStore, FlowAccountCoordinator.get(applicationContext))
-                                val approval = VpnService.prepare(this)
-                                if (approval != null) {
-                                    pending = PendingTunnelRequest(call, result, token)
-                                    startActivityForResult(approval, vpnRequestCode)
-                                } else startTunnel(call, result, token)
-                            } catch (error: Exception) {
-                                pending = null
-                                releaseOperation(token)
-                                result.error(profileErrorCode(error, "VPN_REQUEST_INTERRUPTED"),
-                                    "Не удалось подготовить подключение", null)
-                            }
-                        }
-                    }
-                    "disconnectWireGuard" -> {
-                        val token = Session.operationInProgress.acquire()
-                        if (token == null) {
-                            result.error("VPN_BUSY", "Подключение уже изменяется", null)
-                        } else io.execute {
-                            try {
-                                Session.connection.disconnect(
-                                    protocol = Session.protocol,
-                                    readState = ::readTunnelOccupied,
-                                    deactivate = ::stopTunnels,
-                                )
-                                runOnUiThread { result.success(mapOf("connected" to false)) }
-                            } catch (_: Exception) {
-                                runOnUiThread { result.error(Session.protocol.disconnectError, "Не удалось отключить туннель", null) }
-                            } finally {
-                                releaseOperation(token)
-                            }
-                        }
-                    }
+                    "connectWireGuard" -> connect(call, result)
+                    "disconnectWireGuard" -> disconnect(result)
                     "installedApps" -> io.execute {
                         try {
                             val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)

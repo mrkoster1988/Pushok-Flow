@@ -426,7 +426,7 @@ class XrayVpnService : VpnService() {
     }
 
     private fun finishService() {
-        if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false }
+        if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; FlowWidget.render(this, "disconnected") }
         stopSelf()
     }
 
@@ -487,11 +487,13 @@ class XrayVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(NOTIFICATION, notification)
         foreground = true
+        FlowWidget.render(this, state)
     }
 
     override fun onRevoke() { terminate(); super.onRevoke() }
 
     override fun onDestroy() {
+        if (foreground) FlowWidget.render(this, "disconnected")
         destroyed.set(true)
         lease.invalidate()
         connected = false

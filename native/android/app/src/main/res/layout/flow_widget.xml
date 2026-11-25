@@ -1,0 +1,8 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#102A3A" android:orientation="vertical" android:gravity="center_vertical" android:padding="10dp">
+    <TextView android:id="@+id/flow_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Pushok Flow" android:textColor="#FFFFFF" android:textSize="15sp"/>
+    <Button android:id="@+id/flow_action" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Открыть Flow"/>
+</LinearLayout>

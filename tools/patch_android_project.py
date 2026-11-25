@@ -220,6 +220,23 @@ def patch_manifest(path: Path) -> None:
             intent_filter = ET.SubElement(receiver, "intent-filter")
             ET.SubElement(intent_filter, "action", {ANDROID + "name": action})
 
+    for tag, name in (("receiver", "shop.pushok.flow.FlowWidget"),
+                      ("activity", "shop.pushok.flow.WidgetControlActivity")):
+        element = next((e for e in app.findall(tag) if e.get(ANDROID + "name") == name), None)
+        if element is None:
+            element = ET.SubElement(app, tag)
+        element.clear()
+        element.set(ANDROID + "name", name)
+        element.set(ANDROID + "exported", "false")
+        if tag == "receiver":
+            intent = ET.SubElement(element, "intent-filter")
+            ET.SubElement(intent, "action", {ANDROID + "name": "android.appwidget.action.APPWIDGET_UPDATE"})
+            ET.SubElement(element, "meta-data", {ANDROID + "name": "android.appwidget.provider",
+                                                 ANDROID + "resource": "@xml/flow_widget"})
+        else:
+            element.set(ANDROID + "excludeFromRecents", "true")
+            element.set(ANDROID + "taskAffinity", "shop.pushok.flow.widget")
+
     # Flutter already adds PROCESS_TEXT queries. Merge launcher visibility into
     # that block rather than treating any existing queries as sufficient.
     queries = manifest.findall("queries")

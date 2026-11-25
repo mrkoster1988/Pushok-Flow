@@ -272,7 +272,10 @@ dependencies {
             </receiver><receiver android:name="example.OtherReceiver" android:exported="false" />''')
         app = self.patch().find('application')
         receivers = {item.get(ANDROID + 'name'): item for item in app.findall('receiver')}
-        self.assertEqual(len(receivers), 3)
+        self.assertEqual(len(receivers), 4)
+        widget = receivers["shop.pushok.flow.FlowWidget"]
+        self.assertEqual(widget.get(ANDROID + "exported"), "false")
+        self.assertEqual(widget.find("meta-data").get(ANDROID + "resource"), "@xml/flow_widget")
         self.assertIn('example.OtherReceiver', receivers)
         install = receivers[PATCH.UPDATE_INSTALL_RECEIVER]
         replaced = receivers[PATCH.UPDATE_REPLACED_RECEIVER]
@@ -477,7 +480,7 @@ class BootstrapScriptTests(unittest.TestCase):
             shutil.copy2(ROOT / "tools" / tool, self.project / "tools" / tool)
 
         self.native_names = (
-            "MainActivity.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
+            "MainActivity.kt", "FlowWidget.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
             "XrayConfig.kt", "XrayNetworkPolicy.kt", "XrayNetworkMonitor.kt", "XrayDnsWire.kt", "XrayDnsBridge.kt", "XrayTunnelStatus.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",

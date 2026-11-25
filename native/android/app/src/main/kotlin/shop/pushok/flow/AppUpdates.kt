@@ -92,7 +92,7 @@ class AppUpdates(activity: Activity) {
         launch { status -> if (results.remove(result) && !disposed.get()) result.success(status) }
     }
 
-    private fun requestDownloadNotifications() {
+    internal fun requestDownloadNotifications() {
         if (Build.VERSION.SDK_INT < 33) return
         try {
             val activity = liveActivity()
