@@ -375,6 +375,8 @@ private fun checkLateTlsFailureDoesNotOverrideStop() {
 
 private fun checkPushokExternalLinks() {
     val destinations = mapOf(
+        PushokExternalLinks.Destination.SUPPORT to listOf(
+            "tg://resolve?domain=server_pushok_bot", "https://t.me/server_pushok_bot"),
         PushokExternalLinks.Destination.ACCOUNT to listOf(
             "tg://resolve?domain=mtproxy_pushok_bot", "https://pushok.shop/"),
         PushokExternalLinks.Destination.HUB to listOf(

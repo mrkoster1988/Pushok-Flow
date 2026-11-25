@@ -81,7 +81,7 @@ object SubscriptionLinks {
 /** Fixed external destinations. Opening them does not authenticate Flow. */
 object PushokExternalLinks {
     enum class Destination(val telegramUrl: String, val webUrl: String) {
-        SUPPORT("https://pushok.shop/ai-support", "https://pushok.shop/ai-support"),
+        SUPPORT("tg://resolve?domain=server_pushok_bot", "https://t.me/server_pushok_bot"),
         ACCOUNT("tg://resolve?domain=mtproxy_pushok_bot", "https://pushok.shop/"),
         HUB("tg://resolve?domain=pushok_app", "https://t.me/pushok_app"),
         // A fixed HTTPS destination: never put login tokens in an external URL.
