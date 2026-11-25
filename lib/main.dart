@@ -22,6 +22,7 @@ import 'ui/app_updates_card.dart';
 import 'ui/account_card.dart';
 import 'ui/flow_connection_vitals.dart';
 import 'ui/flow_settings_menu.dart';
+import 'ui/device_traffic_page.dart';
 import 'ui/app_information_sheet.dart';
 import 'ui/app_routes_view.dart';
 import 'ui/route_recommendations_card.dart';
@@ -1599,12 +1600,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     4 => 'Аккаунт и обновления',
     5 => 'Справка',
     6 => 'Обновление',
+    7 => 'IP и трафик',
     _ => 'Настройки',
   };
 
   Widget _settingsContent() {
     if (_settingsLanding) return FlowSettingsMenu(onSelect: _selectTab);
     return switch (tab) {
+      7 => const DeviceTrafficPage(),
       6 => ListView(children: [AppUpdatesCard(isAndroid: _isAndroid)]),
       1 => routes(),
       2 => servers(),
@@ -1619,7 +1622,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope<void>(
+      canPop: !_settingsOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _settingsOpen) _backFromSettings();
+      },
+      child: Scaffold(
       extendBodyBehindAppBar: !_settingsOpen,
       appBar: AppBar(
         backgroundColor: _settingsOpen ? null : Colors.transparent,
@@ -1655,7 +1663,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         padding: EdgeInsets.fromLTRB(14, _settingsOpen ? 14 : kToolbarHeight + 4, 14, 12),
         child: _settingsOpen ? _settingsContent() : home(),
       ))),
-    );
+    ));
   }
 
 

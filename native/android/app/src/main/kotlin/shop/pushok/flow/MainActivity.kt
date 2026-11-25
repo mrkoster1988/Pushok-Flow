@@ -472,6 +472,7 @@ open class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        DeviceTraffic.register(this, flutterEngine.dartExecutor.binaryMessenger)
         profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
         flowAccount.register(flutterEngine.dartExecutor.binaryMessenger)

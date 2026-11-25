@@ -108,6 +108,7 @@ def patch_manifest(path: Path) -> None:
     for permission_name in ("android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES",
                             "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION",
                             "android.permission.CAMERA", "android.permission.ACCESS_NETWORK_STATE",
+                            "android.permission.PACKAGE_USAGE_STATS",
                             "android.permission.CHANGE_NETWORK_STATE",
                             "android.permission.FOREGROUND_SERVICE",
                             "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
@@ -273,6 +274,7 @@ def patch_manifest(path: Path) -> None:
     # which explicitly enabled Android Auto Backup.
     app.set(ANDROID + "name", "shop.pushok.flow.FlowPushApplication")
     app.set(ANDROID + "allowBackup", "false")
+    app.set(ANDROID + "enableOnBackInvokedCallback", "true")
     app.set(ANDROID + "label", "Pushok Flow")
     # AGP's useLegacyPackaging owns the merged extraction flag. A stale source
     # manifest override could otherwise make compressed libraries unloadable.

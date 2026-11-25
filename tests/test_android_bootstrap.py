@@ -163,7 +163,7 @@ dependencies {
                           "android.permission.CHANGE_NETWORK_STATE",
                           "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                           "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
-                          "android.permission.INTERNET", "android.permission.POST_NOTIFICATIONS",
+                          "android.permission.INTERNET", "android.permission.PACKAGE_USAGE_STATS", "android.permission.POST_NOTIFICATIONS",
                           "android.permission.REQUEST_INSTALL_PACKAGES",
                           "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION"])
 
@@ -484,7 +484,7 @@ class BootstrapScriptTests(unittest.TestCase):
             shutil.copy2(ROOT / "tools" / tool, self.project / "tools" / tool)
 
         self.native_names = (
-            "MainActivity.kt", "FlowTile.kt", "FlowWidget.kt", "FlowPush.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
+            "MainActivity.kt", "DeviceTraffic.kt", "FlowTile.kt", "FlowWidget.kt", "FlowPush.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
             "XrayConfig.kt", "XrayNetworkPolicy.kt", "XrayNetworkMonitor.kt", "XrayDnsWire.kt", "XrayDnsBridge.kt", "XrayTunnelStatus.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",
