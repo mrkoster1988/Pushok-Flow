@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'release-requests/flow-v2.0.1-publish'
+      - 'release-requests/flow-v*-publish'
   workflow_dispatch:
     inputs:
       release_version:
@@ -28,7 +28,6 @@ jobs:
       actions: read
       contents: write
     env:
-      RELEASE_VERSION: ${{ inputs.release_version || '2.0.1' }}
       RELEASE_CERTIFICATE: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +36,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Resolve the requested version
+        env:
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+        run: |
+          python3 - <<'PYVERSION'
+          import os, re
+          from pathlib import Path
+          version = os.environ.get('REQUESTED_VERSION') or re.search(
+              r'(?m)^version: (\d+\.\d+\.\d+)\+\d+$', Path('pubspec.yaml').read_text())[1]
+          if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+              raise SystemExit('Invalid release version')
+          if not Path(f'release-requests/flow-v{version}-publish').is_file() and not os.environ.get('REQUESTED_VERSION'):
+              raise SystemExit('The current version has no publication request')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              print('RELEASE_VERSION=' + version, file=output)
+          PYVERSION
       - name: Validate tracked staging, successful CI and current public channel
         id: approved
         env:
