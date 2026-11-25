@@ -307,18 +307,28 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       // intent. Android consent may legitimately pause a native operation.
       if (mounted && (nativeOperationStarted ||
           (_foreground && requestEpoch == _profileRequestEpoch))) {
-        final message = _connectionMessage(error, disconnecting: disconnecting);
-        setState(() => connectionError = message);
-        final routeFailureCode = !disconnecting && error is PlatformException ? error.code : null;
-        final routeFailure = const {'ROUTES_APPS_UNAVAILABLE', 'ROUTES_APPS_CHECK_FAILED'}
-            .contains(routeFailureCode);
-        _showNotice(message, action: routeFailure ? SnackBarAction(
-          key: const Key('open_routes_after_connection_error'),
-          label: 'Маршруты',
-          onPressed: () => _openRoutesForRepair(
-            onlyUnavailable: routeFailureCode == 'ROUTES_APPS_UNAVAILABLE'),
-        ) : null);
-        if (routeFailure) unawaited(_loadRoutes());
+        final shopLoginNeeded = !disconnecting && _foreground &&
+            !_homeAccountAuthorized &&
+            error is PlatformException && error.code == 'SHOP_LOGIN_REQUIRED';
+        if (shopLoginNeeded) {
+          // A retained Shop profile needs the original verified owner to
+          // reconnect after logout. Start native login only after the actual
+          // Shop ownership gate rejects it; other managed profiles are intact.
+          _homeAccountKey.currentState?.requestConnection();
+        } else {
+          final message = _connectionMessage(error, disconnecting: disconnecting);
+          setState(() => connectionError = message);
+          final routeFailureCode = !disconnecting && error is PlatformException ? error.code : null;
+          final routeFailure = const {'ROUTES_APPS_UNAVAILABLE', 'ROUTES_APPS_CHECK_FAILED'}
+              .contains(routeFailureCode);
+          _showNotice(message, action: routeFailure ? SnackBarAction(
+            key: const Key('open_routes_after_connection_error'),
+            label: 'Маршруты',
+            onPressed: () => _openRoutesForRepair(
+              onlyUnavailable: routeFailureCode == 'ROUTES_APPS_UNAVAILABLE'),
+          ) : null);
+          if (routeFailure) unawaited(_loadRoutes());
+        }
       }
     } finally {
       if (mounted) {
