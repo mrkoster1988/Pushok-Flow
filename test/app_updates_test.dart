@@ -911,7 +911,7 @@ void main() {
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
       expect(find.text('Что нового в установленной версии 0.64.0'), findsOneWidget);
-      expect(find.text('Добавлен виджет домашнего экрана для подключения и отключения выбранного профиля.'), findsOneWidget);
+      expect(find.textContaining('Теперь большая кнопка «Подключить» сама запускает вход через Telegram'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
       expect(find.byKey(const ValueKey('history_release_55')), findsNothing);
       final history = find.byKey(const Key('app_release_history'));
