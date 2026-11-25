@@ -1,0 +1,12 @@
+Pushok Flow v0.61.0 — one-time VERIFIED publication request.
+
+Source SHA: c0ec0d8bfc922dead713a21f5d7b3ccc941efff6
+Source contract checks: 45543871553 (success, 509 Flutter tests)
+Android release candidate: 45543871502 (success)
+Staging: release-staging/v0.61.0.json
+Signed APK SHA-256: 4a2a9d1644326c31d4c875b8f003ba920b85e3129a85d77fe48135ae9fb9605e
+Persistent certificate SHA-256: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
+
+Reconstruct the exact public signed APK without private signing material.
+Keep all GitHub source, certificate, previous-release, asset and updater checks.
+Do not publish temporary or debug APKs. Requested by project owner.
