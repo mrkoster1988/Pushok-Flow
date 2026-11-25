@@ -131,6 +131,92 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+
+  testWidgets('One power intent opens Telegram confirmation and continues after login',
+      (tester) async {
+    final key = GlobalKey<PushokAccountCardState>();
+    var phase = 'signed_out';
+    var begins = 0;
+    var ready = 0;
+    var requests = 0;
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(_accountChannel, (call) async {
+      requests++;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (call.method == 'beginLogin') {
+        begins++;
+        phase = 'pending';
+      }
+      if (phase == 'connected') return _connectedAccount();
+      return {
+        'state': phase, 'busy': false, 'errorCode': null,
+        'pending': phase == 'pending'
+          ? {'userCode': '2345ABCDEFGH', 'expiresAt': now + 300000,
+             'nextPollAt': now + 60000} : null,
+        'recoveryAvailable': false, 'stale': false,
+        'sessionExpiresAt': null, 'refreshedAt': null, 'profile': null,
+      };
+    });
+    messenger.setMockMethodCallHandler(_subscriptionChannel, (call) async {
+      if (call.method == 'status') return _shopState(shopState);
+      if (call.method == 'syncShop') {
+        syncCalls++;
+        shopState = 'active';
+        return _shopState(shopState);
+      }
+      throw MissingPluginException(call.method);
+    });
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+      body: PushokAccountCard(key: key, isAndroid: true, compactHome: true,
+        onReadyToConnect: () => ready++),
+    )));
+    for (var i = 0; i < 5; i++) await tester.pump();
+    expect(begins, 0);
+    expect(syncCalls, 0);
+    key.currentState!.requestConnection();
+    for (var i = 0; i < 4; i++) await tester.pump();
+    expect(begins, 1);
+    expect(syncCalls, 0);
+    expect(find.byKey(const Key('home_account_code')), findsOneWidget);
+    expect(find.byKey(const Key('home_authorize_button')), findsNothing);
+    expect(requests, greaterThan(0));
+
+    // A verified native login is read after the user returns from Telegram.
+    phase = 'connected';
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    for (var i = 0; i < 8; i++) await tester.pump();
+    expect(begins, 1, reason: 'Returning must reuse the same approved login.');
+    expect(syncCalls, 1, reason: 'Approved identity automatically fetches Shop feed.');
+    expect(ready, 1, reason: 'The large power button may connect only after a verified feed.');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Shop rate limit never launches another exchange during the cooldown',
+      (tester) async {
+    final key = GlobalKey<PushokAccountCardState>();
+    messenger.setMockMethodCallHandler(_subscriptionChannel, (call) async {
+      if (call.method == 'status') return _shopState(shopState);
+      if (call.method == 'syncShop') {
+        syncCalls++;
+        throw PlatformException(code: 'SHOP_RATE_LIMITED');
+      }
+      throw MissingPluginException(call.method);
+    });
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+      body: PushokAccountCard(key: key, isAndroid: true, compactHome: true),
+    )));
+    for (var i = 0; i < 5; i++) await tester.pump();
+    key.currentState!.requestConnection();
+    for (var i = 0; i < 4; i++) await tester.pump();
+    expect(syncCalls, 1);
+    key.currentState!.requestConnection();
+    for (var i = 0; i < 3; i++) await tester.pump();
+    expect(syncCalls, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Compact home has no authorization/delete/renewal controls', (tester) async {
     final key = GlobalKey<PushokAccountCardState>();
     await tester.pumpWidget(MaterialApp(
