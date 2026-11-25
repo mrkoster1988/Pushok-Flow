@@ -495,7 +495,7 @@ void main() {
     });
   });
 
-  testWidgets('Save and connect persists the new profile before starting VPN', (tester) async {
+  testWidgets('Manual save preserves the profile and Home power connects explicitly', (tester) async {
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.getData') return {'text': _profile};
@@ -513,6 +513,11 @@ void main() {
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(bridge.named('saveWireGuardProfile'), hasLength(1));
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
       expect(bridge.named('connectWireGuard'), hasLength(1));
       expect(bridge.calls.indexWhere((c) => c.method == 'saveWireGuardProfile'),
           lessThan(bridge.calls.indexWhere((c) => c.method == 'connectWireGuard')));
@@ -1219,7 +1224,7 @@ void main() {
     });
   });
 
-  testWidgets('Explicit save and connect works after returning from the file picker', (tester) async {
+  testWidgets('File picker preserves the manual profile and the user connects from Home', (tester) async {
     final pendingImport = Completer<String?>();
     bridge.importGate = pendingImport;
     await _withApp(tester, () async {
@@ -1244,6 +1249,11 @@ void main() {
       await tester.tap(find.byKey(const Key('save_wireguard_profile')));
       await tester.pumpAndSettle();
       expect(bridge.savedProfile, _profile);
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
       expect(bridge.named('connectWireGuard'), hasLength(1));
       expect(bridge.privacyTokens, isEmpty);
       expect(find.text('Туннель включён'), findsOneWidget);
@@ -1291,7 +1301,7 @@ void main() {
     });
   }
 
-  testWidgets('Camera return before resume needs a fresh explicit save and connect', (tester) async {
+  testWidgets('Camera return saves safely and connects from Home only after user action', (tester) async {
     final pendingImport = Completer<String?>();
     bridge.importGate = pendingImport;
     await _withApp(tester, () async {
@@ -1326,6 +1336,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(bridge.savedProfile, _profile);
       expect(bridge.named('saveWireGuardProfile'), hasLength(1));
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
       expect(bridge.named('connectWireGuard'), hasLength(1));
       expect(bridge.privacyTokens, isEmpty);
       expect(find.text('Туннель включён'), findsOneWidget);
@@ -1358,7 +1373,7 @@ void main() {
       expect(bridge.savedProfile, _profile);
       expect(bridge.named('connectWireGuard'), isEmpty);
       expect(bridge.privacyTokens, isEmpty);
-      expect(find.text('Профиль сохранён. Нажмите «Подключить», когда будете готовы.'), findsOneWidget);
+      expect(find.text('Профиль сохранён на устройстве. Можно подключаться.'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
@@ -1621,7 +1636,7 @@ void main() {
     });
   });
 
-  testWidgets('Post-save refresh blocks a duplicate tap while Save and Connect completes once', (tester) async {
+  testWidgets('Save-to-Home only connects after an authoritative catalog refresh', (tester) async {
     await _withApp(tester, () async {
       // Manual import/edit remains in Settings; Home power is reserved for account flow.
       await _openProfileEditor(tester);
@@ -1637,13 +1652,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pump();
       expect(find.byType(WireGuardProfileEditor), findsNothing);
-      final connect = find.byKey(const Key('pushok_connect_button'));
-      expect(tester.widget<InkWell>(connect).onTap, isNull);
-      await tester.tap(connect);
-      await tester.pump();
       expect(bridge.named('connectWireGuard'), isEmpty);
       bridge.catalogGate = null;
       pending.complete(bridge.catalog);
+      await tester.pumpAndSettle();
+      expect(bridge.named('connectWireGuard'), isEmpty);
+      await flowNavigate(tester, 'Главная');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
       await tester.pumpAndSettle();
       expect(bridge.named('disconnectWireGuard'), isEmpty);
       expect(bridge.named('connectWireGuard'), hasLength(1));
