@@ -479,7 +479,7 @@ class BootstrapScriptTests(unittest.TestCase):
             shutil.copy2(ROOT / "tools" / tool, self.project / "tools" / tool)
 
         self.native_names = (
-            "MainActivity.kt", "FlowWidget.kt", "FlowPush.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
+            "MainActivity.kt", "FlowTile.kt", "FlowWidget.kt", "FlowPush.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
             "XrayConfig.kt", "XrayNetworkPolicy.kt", "XrayNetworkMonitor.kt", "XrayDnsWire.kt", "XrayDnsBridge.kt", "XrayTunnelStatus.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",

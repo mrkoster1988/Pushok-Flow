@@ -41,7 +41,7 @@ void main() {
           'config': _privateConfig, 'name': _privateName, 'revision': 999}));
       expect(report.code, code);
       expect(report.clipboardText, contains('Код: $code\n'));
-      expect(report.message, contains('WireGuard'));
+      expect(report.message, isNot(contains('WireGuard')));
       expect(report.message, contains(code == 'SUBSCRIPTION_EXPIRED' ? 'истёк' : 'отозван'));
       for (final secret in [_privateUrl, _privateId, _privateName, _privateConfig, '999']) {
         expect(report.clipboardText, isNot(contains(secret)));

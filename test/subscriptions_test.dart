@@ -137,7 +137,7 @@ void main() {
       }), throwsFormatException);
       final message = subscriptionErrorMessage(PlatformException(code: code,
         message: 'PRIVATE_PROVIDER_MESSAGE', details: 'PRIVATE_CONFIG'));
-      expect(message, contains('WireGuard'));
+      expect(message, isNot(contains('WireGuard')));
       expect(message, contains(code == 'SUBSCRIPTION_EXPIRED' ? 'истёк' : 'отозван'));
       expect(message, isNot(contains('отключён')));
       expect(message, isNot(contains('PRIVATE_')));
@@ -188,7 +188,7 @@ void main() {
       code: 'SUBSCRIPTION_UNSUPPORTED',
       message: 'https://example.invalid/PRIVATE_TOKEN', details: 'PRIVATE_CONFIG'));
     expect(message, startsWith('В подписке нет поддерживаемых подключений.'));
-    expect(message, contains('WireGuard'));
+    expect(message, isNot(contains('WireGuard')));
     expect(message, isNot(contains('VLESS')));
     expect(message, isNot(contains('PRIVATE_')));
     expect(message, isNot(contains('example.invalid')));

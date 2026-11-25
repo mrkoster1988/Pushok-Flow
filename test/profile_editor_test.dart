@@ -1575,7 +1575,7 @@ void main() {
         'Нужен один полный QR-код. Части составного кода и несколько кодов одновременно не поддерживаются.'),
       ('PROFILE_QR_IMAGE_TOO_LARGE', 'Изображение слишком большое.'),
       ('PROFILE_IMPORT_INVALID', 'В QR-коде нет поддерживаемого профиля.'),
-      ('INVALID_VLESS_CONFIG', 'В этой версии доступен WireGuard.'),
+      ('INVALID_VLESS_CONFIG', 'Импортируйте профиль .conf.'),
       ('UNSUPPORTED_PROFILE', 'Этот формат пока не поддерживается.'),
       ('UNSUPPORTED_TRANSPORT', 'Для подключения нужен профиль .conf.'),
       ('UNSUPPORTED_SECURITY', 'Для подключения нужен профиль .conf.'),
@@ -2087,7 +2087,7 @@ void main() {
     await _tapEditorKey(tester, _info);
     await tester.pumpAndSettle();
     expect(find.textContaining('QR из панели сервера'), findsOneWidget);
-    expect(find.textContaining('WireGuard нужен полный профиль .conf'), findsOneWidget);
+    expect(find.textContaining('Для подключения нужен полный профиль .conf'), findsOneWidget);
     expect(find.textContaining('В 3x-ui'), findsNothing);
     expect(find.textContaining('на видео он может выглядеть чёрным'), findsOneWidget);
     expect(find.textContaining('Конфигурация и ключи в него не входят.'), findsOneWidget);
