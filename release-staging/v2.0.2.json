@@ -1,19 +1,19 @@
 {
   "schemaVersion": 1,
   "repository": "mrkoster1988/Pushok-Flow",
-  "sourceCommit": "ada017345d369bfb2ec4ed2a7e82fd4076841353",
-  "sourceRunId": 45671580687,
-  "sourceChecksRunId": 45671580676,
+  "sourceCommit": "97cfe91a98cfdc3776deb797d99ac1ddaf3da82e",
+  "sourceRunId": 45673435439,
+  "sourceChecksRunId": 45673435480,
   "sourceArtifact": {
-    "id": 15050796186,
+    "id": 15052300489,
     "name": "pushok-flow-release-candidate",
-    "zipSizeBytes": 28480013,
-    "zipSha256": "7bf29498bf4a7d41aa54042964dc5f0a4d537a15c1d91f4668d5d43f36537c5b",
+    "zipSizeBytes": 28480007,
+    "zipSha256": "1c5244058c568ce9d92589cd4d40bea548b3ad592af8450395323485e3c23586",
     "entryName": "Pushok-Flow-v2.0.2-candidate.apk"
   },
   "candidate": {
     "sizeBytes": 28670149,
-    "sha256": "617b87c04ef3bfcf3c458bb72a679611e2ca0a87a10a1f34c08460464132a4b4"
+    "sha256": "3434602c9aec8b40f664a1dcd3327936a3f2b2024d9ca739bd58a173811be580"
   },
   "release": {
     "packageName": "shop.pushok.flow",
