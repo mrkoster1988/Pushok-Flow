@@ -83,8 +83,8 @@ void main() {
       .releaseNotes!.publishedOn, '2028-02-29');
   });
 
-  test('Bundled history contains the five recent Android versions with exact lookup', () {
-    expect(bundledAppReleaseHistory.map((notes) => notes.versionCode), [64, 63, 62, 61, 60]);
+  test('Bundled history contains recent Android versions with exact lookup', () {
+    expect(bundledAppReleaseHistory.map((notes) => notes.versionCode), [65, 64, 63, 62, 61, 60]);
     for (final notes in bundledAppReleaseHistory) {
       expect(bundledAppRelease(notes.versionName, notes.versionCode), same(notes));
       expect(bundledAppRelease(notes.versionName, notes.versionCode + 1), isNull);

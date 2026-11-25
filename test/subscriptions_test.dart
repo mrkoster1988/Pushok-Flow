@@ -188,8 +188,8 @@ void main() {
       code: 'SUBSCRIPTION_UNSUPPORTED',
       message: 'https://example.invalid/PRIVATE_TOKEN', details: 'PRIVATE_CONFIG'));
     expect(message, startsWith('В подписке нет поддерживаемых подключений.'));
-    expect(message, contains('VLESS'));
-    expect(message, contains('TLS'));
+    expect(message, contains('WireGuard'));
+    expect(message, isNot(contains('VLESS')));
     expect(message, isNot(contains('PRIVATE_')));
     expect(message, isNot(contains('example.invalid')));
   });

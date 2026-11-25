@@ -1032,11 +1032,11 @@ void main() {
   });
 
   for (final invalid in [
-    ('blank', ' \n ', 'Добавьте конфигурацию WireGuard или ссылку VLESS перед сохранением.'),
+    ('blank', ' \n ', 'Добавьте конфигурацию WireGuard перед сохранением.'),
     ('oversized', 'x' * 65537, 'Профиль слишком большой: максимум 65 536 символов.'),
     ('UUID', ' 00000000-0000-4000-8000-000000000000\n',
-      'Вставлен только UUID. Нужна полная ссылка VLESS из 3x-ui '
-          'или профиль WireGuard .conf с разделами [Interface] и [Peer].'),
+      'Вставлен только UUID. '
+          'Нужен профиль WireGuard .conf с разделами [Interface] и [Peer].'),
   ]) {
     testWidgets('${invalid.$1} input never reaches the save callback', (tester) async {
       var saves = 0;

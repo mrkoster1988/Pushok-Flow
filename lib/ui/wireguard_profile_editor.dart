@@ -204,7 +204,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   ({String code, String message})? _validationError(String config) {
     if (config.trim().isEmpty) {
       return (code: 'PROFILE_IMPORT_INVALID',
-          message: 'Добавьте конфигурацию WireGuard или ссылку VLESS перед сохранением.');
+          message: 'Добавьте конфигурацию WireGuard перед сохранением.');
     }
     if (config.length > _maxConfigLength) {
       return (code: 'PROFILE_IMPORT_TOO_LARGE',
@@ -213,8 +213,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     if (RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
         r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(config.trim())) {
       return (code: 'INVALID_VLESS_CONFIG',
-          message: 'Вставлен только UUID. Нужна полная ссылка VLESS из 3x-ui '
-              'или профиль WireGuard .conf с разделами [Interface] и [Peer].');
+          message: 'Вставлен только UUID. '
+              'Нужен профиль WireGuard .conf с разделами [Interface] и [Peer].');
     }
     // Only reject unsupported schemes here. Native code validates every VLESS
     // field; UI parsing must not normalize, log, or partly accept credentials.
