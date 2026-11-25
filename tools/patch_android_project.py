@@ -231,7 +231,7 @@ def patch_manifest(path: Path) -> None:
         tile = ET.SubElement(app, "service")
     tile.clear()
     for attribute, value in {"name": tile_name, "exported": "true",
-                             "icon": "@drawable/ic_flow_tunnel", "label": "Pushok Flow",
+                             "icon": "@drawable/ic_pushok_tile", "label": "Pushok Flow",
                              "permission": "android.permission.BIND_QUICK_SETTINGS_TILE"}.items():
         tile.set(ANDROID + attribute, value)
     tile_filter = ET.SubElement(tile, "intent-filter")

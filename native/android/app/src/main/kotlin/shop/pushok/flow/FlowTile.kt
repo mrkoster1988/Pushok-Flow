@@ -1,6 +1,7 @@
 package shop.pushok.flow
 
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
@@ -14,6 +15,7 @@ class FlowTile : TileService() {
     private fun refresh(): String {
         val state = try { MainActivity.widgetState(this) } catch (_: Exception) { "unknown" }
         qsTile?.apply {
+            icon = Icon.createWithResource(this@FlowTile, R.drawable.ic_pushok_tile)
             this.state = when (state) {
                 "wireguard" -> Tile.STATE_ACTIVE
                 "disconnected" -> Tile.STATE_INACTIVE

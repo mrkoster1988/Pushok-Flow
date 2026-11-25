@@ -65,6 +65,9 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'На плитке быстрых настроек Android теперь мордочка Пушка.',
+  ]),
+  AppReleaseNotes(versionName: '2.0.3', versionCode: 68, changes: [
     'Вход открывает Telegram на телефоне. Без Telegram кнопка подключения получает гостевой доступ на семь суток.',
   ]),
   AppReleaseNotes(versionName: '2.0.2', versionCode: 67, changes: [
