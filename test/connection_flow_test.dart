@@ -503,7 +503,8 @@ void main() {
     });
     addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      // Manual import/edit remains in Settings; Home power is reserved for account flow.
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const Key('paste_wireguard_profile')));
       await tester.tap(find.byKey(const Key('paste_wireguard_profile')));
@@ -1222,7 +1223,8 @@ void main() {
     final pendingImport = Completer<String?>();
     bridge.importGate = pendingImport;
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      // Manual import/edit remains in Settings; Home power is reserved for account flow.
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const Key('import_wireguard_profile')));
       await tester.tap(find.byKey(const Key('import_wireguard_profile')));
@@ -1293,7 +1295,8 @@ void main() {
     final pendingImport = Completer<String?>();
     bridge.importGate = pendingImport;
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      // Manual import/edit remains in Settings; Home power is reserved for account flow.
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
       expect(bridge.privacyTokens, hasLength(1));
       final scan = find.byKey(const Key('scan_wireguard_profile_qr'));
@@ -1339,7 +1342,8 @@ void main() {
     });
     addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      // Manual import/edit remains in Settings; Home power is reserved for account flow.
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const Key('paste_wireguard_profile')));
       await tester.tap(find.byKey(const Key('paste_wireguard_profile')));
@@ -1619,7 +1623,8 @@ void main() {
 
   testWidgets('Post-save refresh blocks a duplicate tap while Save and Connect completes once', (tester) async {
     await _withApp(tester, () async {
-      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      // Manual import/edit remains in Settings; Home power is reserved for account flow.
+      await _openProfileEditor(tester);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const Key('import_wireguard_profile')));
       await tester.tap(find.byKey(const Key('import_wireguard_profile')));
