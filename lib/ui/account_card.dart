@@ -126,18 +126,10 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
     } else if (_status?.pending != null && !_expired) {
       unawaited(_openLogin());
     } else {
-      unawaited(_beginAndOpenLogin());
+      // Native beginLogin already opens the Telegram confirmation exactly once
+      // after the pending code is committed. Do not issue a second openLogin.
+      unawaited(_run(_account.beginLogin));
     }
-  }
-
-  /// One power tap starts a verified login AND opens its confirmation.
-  /// The OS may background Flow while Telegram is open; on return the
-  /// authoritative native account snapshot is reread before Shop sync.
-  Future<void> _beginAndOpenLogin() async {
-    if (!await _run(_account.beginLogin)) return;
-    if (!mounted || !_foreground || !_connectRequested ||
-        _status?.state != FlowAccountState.pending || _expired) return;
-    await _openLogin();
   }
 
   void openRenewal() => unawaited(_openShop());
