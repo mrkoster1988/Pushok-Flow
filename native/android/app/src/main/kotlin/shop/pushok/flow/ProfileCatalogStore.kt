@@ -325,21 +325,9 @@ class ProfileCatalogStore(
             if (catalog.profiles.size - existing.size + feed.entries.size > MAX_PROFILES) {
                 throw ProfileCatalogFailure("PROFILE_LIMIT_REACHED")
             }
-            val previousIds = mutableMapOf<SubscriptionFeed.Identity, StoredWireGuardProfile>()
-            for (profile in existing.filter { sub.format == SubscriptionFeed.LEGACY_FORMAT }) {
-                // Older catalogs could contain equivalent links with different export
-                // formatting. Collapse only the refreshed list, retaining the selected
-                // matching ID (otherwise the first existing one), never an arbitrary last.
-                val identity = try { SubscriptionFeed.identity(profile.config) }
-                    catch (_: ProfileFormatFailure) { continue }
-                if (identity !in previousIds || profile.id == catalog.activeProfileId) {
-                    previousIds[identity] = profile
-                }
-            }
             val managedIds = existing.associateBy { it.providerId }
             val replacements = feed.entries.map { entry ->
-                val previous = if (feed.format == SubscriptionFeed.MANAGED_WIREGUARD_FORMAT)
-                    managedIds[entry.providerId] else previousIds[SubscriptionFeed.identity(entry.config)]
+                val previous = managedIds[entry.providerId]
                 StoredWireGuardProfile(previous?.id ?: newId(), entry.name, entry.config, id, entry.providerId)
             }
             val insertion = catalog.profiles.indexOfFirst { it.subscriptionId == id }
@@ -364,27 +352,7 @@ class ProfileCatalogStore(
 
     private fun validateFeed(feed: SubscriptionFeed.Parsed, now: Long) {
         if (now !in 0..SubscriptionPolicy.MAX_TIMESTAMP_MS) throw SubscriptionFailure("SUBSCRIPTION_INVALID")
-        if (feed.format == SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) {
-            SubscriptionFeed.validateManaged(feed)
-            return
-        }
-        if (feed.format != SubscriptionFeed.LEGACY_FORMAT || feed.state != "active" ||
-            feed.revision != null || feed.entries.any { it.providerId != null }) {
-            throw SubscriptionFailure("SUBSCRIPTION_INVALID")
-        }
-        if (feed.entries.isEmpty()) throw SubscriptionFailure("SUBSCRIPTION_EMPTY")
-        if (feed.entries.size > MAX_PROFILES) throw SubscriptionFailure("SUBSCRIPTION_TOO_LARGE")
-        if (feed.skippedProfileCount !in 0..SubscriptionPolicy.MAX_FEED_ENTRIES ||
-            feed.skippedProfileCount + feed.entries.size > SubscriptionPolicy.MAX_FEED_ENTRIES) {
-            throw SubscriptionFailure("SUBSCRIPTION_INVALID")
-        }
-        feed.entries.forEach {
-            normalizedName(it.name)
-            try { VlessProfile.parse(it.config) }
-            catch (_: ProfileFormatFailure) { throw SubscriptionFailure("SUBSCRIPTION_INVALID") }
-        }
-        if (feed.entries.map { SubscriptionFeed.identity(it.config) }.toSet().size != feed.entries.size) {
-            throw SubscriptionFailure("SUBSCRIPTION_INVALID")
-        }
+        if (feed.format != SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) throw SubscriptionFailure("SUBSCRIPTION_UNSUPPORTED")
+        SubscriptionFeed.validateManaged(feed)
     }
 }

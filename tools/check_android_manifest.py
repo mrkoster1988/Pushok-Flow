@@ -107,20 +107,8 @@ def validate(path: Path) -> None:
         raise ValueError('Update FileProvider must use the restricted update paths')
     xray = [item for item in app.findall('service')
             if activity_name(item.get(ANDROID + 'name', '')) == XRAY_SERVICE]
-    if len(xray) != 1 or xray[0].get(ANDROID + 'exported') != 'false' or \
-            xray[0].get(ANDROID + 'permission') != 'android.permission.BIND_VPN_SERVICE':
-        raise ValueError('Xray service must be single, private and protected by BIND_VPN_SERVICE')
-    if xray[0].get(ANDROID + 'process') != ':xray':
-        raise ValueError('Xray and WireGuard Go runtimes must use separate processes')
-    if xray[0].get(ANDROID + 'foregroundServiceType') != 'specialUse' or not {
-            'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
-            'android.permission.ACCESS_NETWORK_STATE', 'android.permission.CHANGE_NETWORK_STATE'} <= permissions:
-        raise ValueError('Xray foreground service or network permission missing')
-    if not any(item.get(ANDROID + 'name') == 'android.net.VpnService' for item in xray[0].findall('intent-filter/action')):
-        raise ValueError('Xray VPN service action missing')
-    if not any(item.get(ANDROID + 'name') == 'android.net.VpnService.SUPPORTS_ALWAYS_ON' and
-               item.get(ANDROID + 'value') == 'false' for item in xray[0].findall('meta-data')):
-        raise ValueError('Xray always-on must remain disabled without startup configuration')
+    if xray:
+        raise ValueError("WireGuard distribution contains an unexpected Xray service")
     features = {item.get(ANDROID + 'name'): item.get(ANDROID + 'required')
                 for item in manifest.findall('uses-feature')}
     for required in ('android.hardware.camera', 'android.hardware.camera.autofocus'):

@@ -75,7 +75,7 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.
   native/android/tests/ProfileImportReaderCheck.kt -include-runtime -d "$out/profile-import-tests.jar"
 java -jar "$out/profile-import-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
-  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt \
+  native/android/archived/multiprotocol/ConnectionProfile.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt \
   native/android/tests/VlessProfileCheck.kt -include-runtime -d "$out/vless-profile-tests.jar"
 java -jar "$out/vless-profile-tests.jar"
@@ -115,13 +115,13 @@ with zipfile.ZipFile(archive) as bundle:
 WIREGUARD_CHECK
 profile_import_core=(
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt
-  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt
+  native/android/archived/multiprotocol/ConnectionProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionPolicy.kt
-  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionFeed.kt
+  native/android/archived/multiprotocol/SubscriptionFeed.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ManagedWireGuardFeed.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardRouting.kt
-  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt
+  native/android/archived/multiprotocol/ProfileCatalogStore.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionLinks.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportPayload.kt
   native/android/tests/wireguard_runtime_stubs/AndroidBuild.kt
@@ -172,15 +172,27 @@ kotlinc "${profile_import_core[@]}" \
 java -cp "$out/qr-camera-tests.jar:$core:$embedded_core:$wireguard_core" shop.pushok.flow.ProfileQrCameraCheckKt
 subscription_core=(
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt
-  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt
+  native/android/archived/multiprotocol/ConnectionProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionPolicy.kt
-  native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionFeed.kt
+  native/android/archived/multiprotocol/SubscriptionFeed.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/ManagedWireGuardFeed.kt
   native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardRouting.kt
-  native/android/app/src/main/kotlin/shop/pushok/flow/ProfileCatalogStore.kt
+  native/android/archived/multiprotocol/ProfileCatalogStore.kt
   native/android/tests/wireguard_runtime_stubs/AndroidBuild.kt
 )
+# Compile the shipping WireGuard catalog and reject other wire formats at import.
+shipping_core=()
+for source in "${subscription_core[@]}"; do
+  case "$source" in
+    */VlessProfile.kt) continue ;;
+    native/android/archived/multiprotocol/*) source="native/android/app/src/main/kotlin/shop/pushok/flow/${source##*/}" ;;
+  esac
+  shipping_core+=("$source")
+done
+kotlinc "${shipping_core[@]}" native/android/tests/WireGuardOnlyCheck.kt \
+  -classpath "$wireguard_core" -include-runtime -d "$out/wireguard-only.jar"
+java -cp "$out/wireguard-only.jar:$wireguard_core" shop.pushok.flow.WireGuardOnlyCheckKt
 kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileOperationGate.kt \
   native/android/tests/ProfileCatalogCheck.kt -classpath "$wireguard_core" -include-runtime -d "$out/profile-catalog-tests.jar"
@@ -297,7 +309,7 @@ kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   -classpath "$json_core" -nowarn -include-runtime -d "$out/update-coordinator-tests.jar"
 java -cp "$out/update-coordinator-tests.jar:$json_core" shop.pushok.flow.UpdateCoordinatorCheckKt
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ProfileImportReader.kt \
-  native/android/app/src/main/kotlin/shop/pushok/flow/ConnectionProfile.kt \
+  native/android/archived/multiprotocol/ConnectionProfile.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/VlessProfile.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/XrayConfig.kt \
   native/android/tests/XrayConfigCheck.kt -classpath "$json_core" -include-runtime -d "$out/xray-config-tests.jar"

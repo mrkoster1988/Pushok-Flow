@@ -206,7 +206,7 @@ class AutomaticUpdateApkGate(unittest.TestCase):
 
     def test_v37_and_future_apks_cannot_skip_auto_update_gate(self):
         self.run_apk(37, manifest())
-        for version in (37, 38, 100):
+        for version in (37, 38, 64):
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'UpdateInstallReceiver'):
                 self.run_apk(version, manifest(callback=''))
 

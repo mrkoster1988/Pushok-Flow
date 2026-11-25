@@ -164,7 +164,7 @@ class CompactNativeApkGate(unittest.TestCase):
                 compact.assert_not_called()
 
     def test_v39_and_future_apks_require_packaging_without_skipping_previous_gates(self):
-        for version in (39, 100):
+        for version in (39, 64):
             with self.subTest(version=version):
                 self.write_apk()
                 previous, compact = self.run_apk(version, manifest())

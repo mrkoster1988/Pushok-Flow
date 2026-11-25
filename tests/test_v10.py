@@ -38,8 +38,8 @@ class SessionSafetyTests(TestCase):
         self.assertIn('Session.connection.observe(::readTunnelOccupied)', routes)
         read_state = src.split('private fun readTunnelOccupied()', 1)[1].split('private fun stopTunnels', 1)[0]
         self.assertIn('backend?.getState(tunnel)', read_state)
-        self.assertIn('xray.status()', read_state)
-        self.assertIn('wireGuardUp || xrayState.ownsTunnel', read_state)
+        self.assertNotIn('xray.status()', read_state)
+        self.assertIn('appUpdates.observeTunnel(occupied)', read_state)
         self.assertIn('Session.connection.observe', routes)
         self.assertIn('if (!state.known) throw RouteSettingsFailure("VPN_STATE_UNAVAILABLE")', routes)
         self.assertIn('if (state.occupied) throw RouteSettingsFailure("VPN_ACTIVE")', routes)

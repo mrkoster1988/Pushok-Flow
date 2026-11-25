@@ -19,7 +19,7 @@ open class MainActivity : FlutterActivity() {
     companion object {
         internal fun widgetState(context: android.content.Context): String {
             if (Session.backend?.getState(Session.tunnel) == Tunnel.State.UP) return "wireguard"
-            return XrayTunnelClient(context).status().state.wireName
+            return "disconnected"
         }
     }
 
@@ -38,9 +38,6 @@ open class MainActivity : FlutterActivity() {
             }
         }
         @Volatile var backend: GoBackend? = null
-        @Volatile var xray: XrayTunnelClient? = null
-        // Accessed on connection.io. Kept separate from the session ownership latch.
-        var xrayStatus: XrayTunnelStatus? = null
         var protocol = TunnelConnectionSession.Protocol.WIREGUARD
         val operationInProgress = ProfileOperationGate()
         val routeSettingsState = RouteSettingsState()
@@ -49,22 +46,9 @@ open class MainActivity : FlutterActivity() {
     private var backend: GoBackend?
         get() = Session.backend
         set(value) { Session.backend = value }
-    // Only accessed on the shared connection queue. The native Xray library is
-    // loaded exclusively by its private :xray service, never alongside GoBackend.
-    private val xray: XrayTunnelClient
-        get() = Session.xray ?: XrayTunnelClient(applicationContext).also { Session.xray = it }
-
-    /** Control-plane occupancy, including a VLESS connection waiting for a network. */
     private fun readTunnelOccupied(): Boolean {
         try {
-            val wireGuardUp = backend?.getState(tunnel) == Tunnel.State.UP
-            val xrayState = xray.status().also { Session.xrayStatus = it }
-            // Ambiguous service state must not authorize profile/route mutations or an automatic APK install.
-            if (wireGuardUp && xrayState.ownsTunnel) throw IllegalStateException("VPN_STATE_UNAVAILABLE")
-            if (wireGuardUp) Session.protocol = TunnelConnectionSession.Protocol.WIREGUARD
-            if (xrayState.ownsTunnel) Session.protocol = TunnelConnectionSession.Protocol.VLESS
-            if (!xrayState.known) throw XrayTunnelFailure("XRAY_STATE_UNAVAILABLE")
-            val occupied = wireGuardUp || xrayState.ownsTunnel
+            val occupied = backend?.getState(tunnel) == Tunnel.State.UP
             appUpdates.observeTunnel(occupied)
             return occupied
         } catch (error: Exception) {
@@ -79,12 +63,8 @@ open class MainActivity : FlutterActivity() {
     }
 
     private fun stopTunnels(): Boolean {
-        // Try both even when one state read or shutdown failed. A deliberate
-        // disconnect must remain available after a service/IPC failure.
         var failed = false
         try { backend?.setState(tunnel, Tunnel.State.DOWN, null) }
-        catch (_: Exception) { failed = true }
-        try { if (xray.stop()) failed = true }
         catch (_: Exception) { failed = true }
         if (failed) throw IllegalStateException("TUNNEL_STOP_FAILED")
         return readTunnelOccupied()
@@ -258,20 +238,15 @@ open class MainActivity : FlutterActivity() {
                     "Не удалось прочитать исключения приложений", null) }
                 return@execute
             }
-            var requestedProtocol = Session.protocol
+            val requestedProtocol = TunnelConnectionSession.Protocol.WIREGUARD
             try {
                 // Recheck after Android VPN permission: logout/account switch
                 // while that dialog is open must not start another user's tunnel.
                 shopBinding.requireConnectionAllowed(raw, expectedProfileId as? String,
                     secureStore, FlowAccountCoordinator.get(applicationContext))
-                val kind = validateConnectionProfile(raw)
-                requestedProtocol = if (kind == ConnectionProfile.Kind.VLESS)
-                    TunnelConnectionSession.Protocol.VLESS else TunnelConnectionSession.Protocol.WIREGUARD
-                val vlessProfile = if (kind == ConnectionProfile.Kind.VLESS) VlessProfile.parse(raw) else null
-                val config = if (kind == ConnectionProfile.Kind.WIREGUARD) {
-                    val cleaned = WireGuardRouting.prepare(raw, exclusions)
-                    Config.parse(ByteArrayInputStream(cleaned.toByteArray(StandardCharsets.UTF_8)))
-                } else null
+                validateConnectionProfile(raw)
+                val cleaned = WireGuardRouting.prepare(raw, exclusions)
+                val config = Config.parse(ByteArrayInputStream(cleaned.toByteArray(StandardCharsets.UTF_8)))
                 val active = Session.connection.connect(
                     protocol = requestedProtocol,
                     readState = ::readTunnelOccupied,
@@ -281,18 +256,12 @@ open class MainActivity : FlutterActivity() {
                         RouteAppAvailability.requireForConnection(exclusions, ::isRouteAppAvailable)
                         Session.protocol = requestedProtocol
                         try {
-                            if (vlessProfile != null) {
-                                xray.start(vlessProfile, exclusions)
-                            } else {
-                                if (backend == null) backend = GoBackend(applicationContext)
-                                backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
-                            }
+                            if (backend == null) backend = GoBackend(applicationContext)
+                            backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
                         } catch (_: PackageManager.NameNotFoundException) {
                             // The app may disappear between preflight and the
                             // backend's addDisallowedApplication call.
                             throw TunnelConnectionFailure("ROUTES_APPS_UNAVAILABLE")
-                        } catch (error: XrayTunnelFailure) {
-                            throw TunnelConnectionFailure(error.code)
                         }
                     },
                 )
@@ -546,17 +515,12 @@ open class MainActivity : FlutterActivity() {
                         // Every Activity uses the same queue. An external service stop
                         // can still invalidate a statistics sample before its second read.
                         if (sampledSessionStartMs != currentSessionStartMs) samples = null
-                        val isVless = Session.protocol == TunnelConnectionSession.Protocol.VLESS
-                        val xrayState = Session.xrayStatus.takeIf { isVless }
-                        val active = stateKnown && if (isVless) xrayState?.connected == true else occupied
-                        // Unknown observations may retain ownership, but cannot publish actual UP.
-                        occupied = occupied || (!stateKnown && xrayState?.ownsTunnel == true)
+                        val active = stateKnown && occupied
                         val status = TunnelHealth.snapshot(active, Session.operationInProgress.get(),
-                            currentSessionStartMs, SystemClock.elapsedRealtime(), xrayState?.lastErrorCode ?: lastErrorCode,
+                            currentSessionStartMs, SystemClock.elapsedRealtime(), lastErrorCode,
                             stateKnown = stateKnown, peerSamples = samples,
                             nowEpochMs = System.currentTimeMillis(),
-                            isVless = isVless, ownsTunnel = occupied,
-                            networkState = xrayState?.state?.wireName)
+                            ownsTunnel = occupied)
                         runOnUiThread { result.success(status) }
                     }
                     "listWireGuardProfiles" -> io.execute {

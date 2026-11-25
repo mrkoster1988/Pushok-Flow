@@ -65,6 +65,9 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'Подключения через WireGuard. Вход через кабинет MTProxy в браузере.',
+  ]),
+  AppReleaseNotes(versionName: '0.64.0', versionCode: 64, changes: [
     'Теперь большая кнопка «Подключить» сама запускает вход через Telegram, проверку личной подписки Shop и подключение после её выдачи.',
     'При повторном входе в тот же подтверждённый аккаунт Flow проверяет сохранённую личную подписку без лишнего обмена одноразовыми ключами.',
     'Убраны отдельная кнопка входа и «Добавить сервер» с главной; продление подписки перенесено ниже статуса соединения.',

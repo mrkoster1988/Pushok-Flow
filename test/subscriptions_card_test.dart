@@ -482,15 +482,10 @@ void main() {
       (tester) async {
     await _pump(tester, SubscriptionsCard(status: _status()));
     await _tap(tester, 'subscriptions_info');
-    expect(find.textContaining('Из смешанного списка VLESS добавляются совместимые подключения'),
-      findsOneWidget);
-    expect(find.textContaining('Записи других протоколов и неподдерживаемых вариантов подключения'),
-      findsOneWidget);
-    expect(find.textContaining('Если ответ повреждён или в нём нет совместимых серверов, прежний список сохраняется.'),
-      findsOneWidget);
+    expect(find.textContaining('Для подписки откройте HTTPS-ссылку вашего провайдера'), findsOneWidget);
     expect(find.textContaining('Для управляемого WireGuard нужна подписка в формате Flow'), findsOneWidget);
     expect(find.textContaining('Flow не отключает уже работающий туннель автоматически'), findsOneWidget);
-    expect(find.textContaining('Для обычного списка VLESS срок остаётся информационной подсказкой.'), findsOneWidget);
+
     expect(tester.takeException(), isNull);
   });
 

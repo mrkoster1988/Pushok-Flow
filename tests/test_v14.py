@@ -22,7 +22,10 @@ class BuildSafetyTests(unittest.TestCase):
         self.assertLess(self.workflow.index('flutter build apk'), self.workflow.index('python tools/verify_android_apk.py'))
 
     def test_version(self):
-        self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.(?:1[5-9]|[2-9]\d)\.\d+\+\d+')
+        version = re.search(r'(?m)^version: (\d+)\.(\d+)\.(\d+)\+(\d+)$', (ROOT / 'pubspec.yaml').read_text())
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(tuple(map(int, version.groups()[:3])), (0, 14, 0))
+        self.assertGreaterEqual(int(version[4]), 14)
 
 if __name__ == '__main__':
     unittest.main()

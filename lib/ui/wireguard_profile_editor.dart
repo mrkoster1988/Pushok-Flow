@@ -484,8 +484,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
           file ? 'Файл слишком большой: максимум 65 536 байт.'
               : 'Профиль слишком большой: максимум 65 536 байт.',
         'PROFILE_IMPORT_INVALID' => file
-            ? 'Нужен текстовый профиль WireGuard .conf или полная ссылка VLESS из 3x-ui.'
-            : 'В QR-коде нет поддерживаемого профиля. Нужен WireGuard .conf или полная ссылка VLESS.',
+            ? 'Нужен текстовый профиль WireGuard .conf.'
+            : 'В QR-коде нет поддерживаемого профиля. Нужен WireGuard .conf.',
         'UNSUPPORTED_PROFILE' => _unsupportedProfile,
         'SUBSCRIPTION_URL_INVALID' =>
           'Для подписки нужна полная HTTPS-ссылка на публичный сервер, без логина и пароля в адресе. Проверьте ссылку в панели.',
@@ -538,11 +538,6 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         title: const Text('Как добавить профиль'),
         scrollable: true,
         content: const Text(
-          'В 3x-ui откройте нужного клиента и скопируйте его полную ссылку VLESS '
-          'или откройте QR-код. Поддерживаются TCP (Raw) с TLS или REALITY, '
-          'включая XTLS Vision. WebSocket и gRPC поддерживаются только с TLS, без Vision. '
-          'Проверка сертификата TLS обязательна. REALITY доступен только с TCP (Raw). '
-          'Другие протоколы и транспорты пока не поддерживаются.\n\n'
           'Если QR содержит HTTPS-ссылку подписки, Flow предложит добавить её как подписку. '
           'Ссылка остаётся скрытой, а серверы загружаются только после нажатия «Добавить подписку». '
           'Можно вернуться к исходному черновику профиля без изменений.\n\n'
@@ -714,7 +709,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     ),
                   ]),
                   const SizedBox(height: 8),
-                  const Text('WireGuard .conf, VLESS или HTTPS-ссылка подписки: используйте QR-код, файл или буфер обмена. '
+                  const Text('WireGuard .conf или HTTPS-ссылка подписки WireGuard: используйте QR-код, файл или буфер обмена. '
                     'Профиль сохраняется только на этом устройстве.',
                     style: TextStyle(color: PushokPalette.muted)),
                   const SizedBox(height: 8),

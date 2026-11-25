@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'release-requests/flow-v0.64.0-publish'
+      - 'release-requests/flow-v2.0.0-publish'
   workflow_dispatch:
     inputs:
       release_version:
@@ -28,7 +28,7 @@ jobs:
       actions: read
       contents: write
     env:
-      RELEASE_VERSION: ${{ inputs.release_version || '0.64.0' }}
+      RELEASE_VERSION: ${{ inputs.release_version || '2.0.0' }}
       RELEASE_CERTIFICATE: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
     steps:
       - uses: actions/checkout@v4

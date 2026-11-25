@@ -1,11 +1,15 @@
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 class FlutterGateTests(unittest.TestCase):
     def test_version(self):
-        self.assertRegex((ROOT/'pubspec.yaml').read_text(), r'version: 0\.(?:1[5-9]|[2-9]\d)\.\d+\+\d+')
+        version = re.search(r'(?m)^version: (\d+)\.(\d+)\.(\d+)\+(\d+)$', (ROOT / 'pubspec.yaml').read_text())
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(tuple(map(int, version.groups()[:3])), (0, 15, 0))
+        self.assertGreaterEqual(int(version[4]), 15)
 
     def test_widget_test_is_real_flutter_test(self):
         t = (ROOT/'test/app_smoke_test.dart').read_text()

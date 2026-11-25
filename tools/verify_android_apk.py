@@ -230,7 +230,13 @@ def check_apk(path: Path, aapt: str | None = None, expected_abi: str | None = No
     if version_code >= QR_IMPORT_VERSION_CODE:
         check_qr_import_manifest(manifest.stdout, declared_permissions)
         print('APK private QR scanner, camera permission and optional hardware checks passed')
-    if version_code >= XRAY_VERSION_CODE:
+    if version_code >= 65:
+        if any(string_attribute(item, 'name') in {XRAY_SERVICE, '.XrayVpnService', 'XrayVpnService'} for item in element_attributes(manifest.stdout, 'service')):
+            raise ValueError('Unexpected Xray service in WireGuard APK')
+        with zipfile.ZipFile(path) as apk:
+            if any(name.endswith('/libgojni.so') or 'libxray' in name.lower() for name in apk.namelist()):
+                raise ValueError('Unexpected Xray library in WireGuard APK')
+    elif version_code >= XRAY_VERSION_CODE:
         check_xray_manifest(manifest.stdout, declared_permissions)
         if version_code >= XRAY_NETWORK_HANDOVER_VERSION_CODE:
             check_xray_network_binding_permission(manifest.stdout, declared_permissions)
@@ -248,7 +254,9 @@ def check_apk(path: Path, aapt: str | None = None, expected_abi: str | None = No
     # The separate JIT debug workflow has no AOT libapp.so. The persistent
     # release verifier independently rejects every debuggable APK.
     if version_code >= COMPACT_NATIVE_VERSION_CODE and not debuggable:
-        if expected_abi is None:
+        if version_code >= 65:
+            check_compact_native_packaging(path, manifest.stdout, expected_abi, wireguard_only=True)
+        elif expected_abi is None:
             check_compact_native_packaging(path, manifest.stdout)
         else:
             check_compact_native_packaging(path, manifest.stdout, expected_abi)
@@ -401,7 +409,7 @@ def check_xray_libraries(path: Path, expected_abi: str | None = None) -> None:
                 raise ValueError('Empty Xray redistribution notice')
 
 
-def check_compact_native_packaging(path: Path, tree: str, expected_abi: str | None = None) -> None:
+def check_compact_native_packaging(path: Path, tree: str, expected_abi: str | None = None, *, wireguard_only=False) -> None:
     """Require complete compressed native entries and installer extraction metadata."""
     abis = expected_native_abis(expected_abi)
     applications = element_attributes(tree, 'application')
@@ -416,7 +424,7 @@ def check_compact_native_packaging(path: Path, tree: str, expected_abi: str | No
         if len(names) != len(entries):
             raise ValueError('Duplicate APK ZIP entries are not supported')
         required = {f'lib/{abi}/{library}'
-                    for abi in abis for library in REQUIRED_NATIVE_LIBRARIES}
+                    for abi in abis for library in REQUIRED_NATIVE_LIBRARIES if not wireguard_only or library != 'libgojni.so'}
         missing = required - names
         if missing:
             raise ValueError('Required native library missing: ' + sorted(missing)[0])

@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -5,7 +6,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Version13Tests(unittest.TestCase):
     def test_version(self):
-        self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.[0-9]+\.[0-9]+\+[0-9]+')
+        version = re.search(r'(?m)^version: (\d+)\.(\d+)\.(\d+)\+(\d+)$', (ROOT / 'pubspec.yaml').read_text())
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(tuple(map(int, version.groups()[:3])), (0, 13, 0))
+        self.assertGreaterEqual(int(version[4]), 13)
     def test_kotlin_executable_suite_present(self):
         cases = (ROOT / 'native/android/tests/WireGuardRoutingCheck.kt').read_text()
         self.assertIn('WireGuardRouting.prepare', cases)

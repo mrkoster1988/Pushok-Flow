@@ -1,3 +1,4 @@
+import re
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,10 @@ class ReleaseV12Tests(unittest.TestCase):
         self.assertIn("if: steps.local_time.outputs.run_audit == 'true'", workflow)
 
     def test_release_version(self):
-        self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.(?:1[2-9]|[2-9][0-9])\.[0-9]+\+[0-9]+')
+        version = re.search(r'(?m)^version: (\d+)\.(\d+)\.(\d+)\+(\d+)$', (ROOT / 'pubspec.yaml').read_text())
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(tuple(map(int, version.groups()[:3])), (0, 12, 0))
+        self.assertGreaterEqual(int(version[4]), 12)
 
 if __name__ == '__main__':
     unittest.main()

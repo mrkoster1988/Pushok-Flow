@@ -242,10 +242,7 @@ class FlowAccount(activity: Activity) {
         val activity = activityReference.get()
         if (disposed.get() || !foreground.get() || foregroundEpoch.get() != launchEpoch ||
             activity == null || activity.isFinishing || activity.isDestroyed) throw FlowAccountFailure("FLOW_INTERRUPTED")
-        try { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(FlowAccountPolicy.telegram(code)))) }
-        catch (_: Exception) {
-            try { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(FlowAccountPolicy.browser(code)))) }
-            catch (_: Exception) { throw FlowAccountFailure("FLOW_LOGIN_OPEN_FAILED") }
-        }
+        try { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(FlowAccountPolicy.browser(code)))) }
+        catch (_: Exception) { throw FlowAccountFailure("FLOW_LOGIN_OPEN_FAILED") }
     }
 }

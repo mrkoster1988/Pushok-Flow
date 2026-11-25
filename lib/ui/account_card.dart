@@ -559,7 +559,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
       title: const Text('Восстановить вход?'),
       content: const SingleChildScrollView(child: Text(
         'Flow удалит сохранённый вход в аккаунт на этом устройстве. '
-        'После восстановления нужно будет снова войти через Telegram.\n\n'
+        'После восстановления нужно будет снова войти в кабинет MTProxy.\n\n'
         'Аккаунт и баланс в кабинете MTProxy, добавленные серверы и подписки сохранятся.'
       )),
       actions: [
@@ -648,7 +648,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
       // authorization panel or second required "Get config" tap.
       if (pending != null) PushokPanel(child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('Подтвердите вход через Telegram. Сверьте код:',
+          const Text('Подтвердите вход в кабинете MTProxy. Сверьте код:',
             style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
           const SizedBox(height: 8),
           SelectableText(pending.displayCode,
@@ -817,12 +817,12 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
             _LocalAccountClear.cancelLogin, userCode: pending.userCode)) : null,
           child: const Text('Отменить вход')),
       ] else ...[
-        const Text('Войдите через Telegram, чтобы видеть свой профиль и баланс кабинета MTProxy.',
+        const Text('Войдите в свой кабинет MTProxy. Если кабинет уже открыт в браузере, достаточно подтвердить вход.',
           style: TextStyle(color: PushokPalette.muted)),
         const SizedBox(height: 12),
         FilledButton.icon(key: const Key('begin_flow_login'),
           onPressed: enabled && status != null ? () => unawaited(_run(_account.beginLogin)) : null,
-          icon: const Icon(Icons.login), label: const Text('Войти через Telegram')),
+          icon: const Icon(Icons.login), label: const Text('Войти через MTProxy')),
       ],
       if (recoveryAvailable && clearing != _LocalAccountClear.recoverAccount) ...[
         const SizedBox(height: 12),

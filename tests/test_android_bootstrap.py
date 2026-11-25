@@ -261,7 +261,7 @@ dependencies {
                 app = self.patch().find("application")
                 self.assertEqual(app.get(ANDROID + "allowBackup"), "false")
                 self.assertEqual([service.get(ANDROID + "name") for service in app.findall("service")],
-                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, PATCH.XRAY_SERVICE, "shop.pushok.flow.FlowPush"])
+                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, "shop.pushok.flow.FlowPush"])
 
     def test_update_receivers_are_private_deduplicated_and_keep_unrelated_receiver(self):
         self.write_manifest(services='''<receiver android:name=".UpdateInstallReceiver"
@@ -322,13 +322,12 @@ dependencies {
                 with self.assertRaisesRegex(ValueError, 'Background update'):
                     MANIFEST_CHECK.validate(self.manifest)
 
-    def test_source_gate_requires_physical_network_binding_permission(self):
+    def test_source_gate_rejects_retired_xray_service(self):
         self.write_manifest()
         manifest = self.patch()
-        manifest.remove(next(item for item in manifest.findall('uses-permission')
-                             if item.get(ANDROID + 'name') == 'android.permission.CHANGE_NETWORK_STATE'))
+        ET.SubElement(manifest.find('application'), 'service', {ANDROID + 'name': PATCH.XRAY_SERVICE})
         ET.ElementTree(manifest).write(self.manifest)
-        with self.assertRaisesRegex(ValueError, 'Xray foreground service or network permission'):
+        with self.assertRaisesRegex(ValueError, 'unexpected Xray service'):
             MANIFEST_CHECK.validate(self.manifest)
 
     def test_source_gate_rejects_exposed_or_wrong_update_provider(self):
@@ -590,6 +589,9 @@ sys.exit(int(os.environ.get("FLOW_STUB_EXIT", "0")))
         self.assertEqual((android / "app/src/main/res/xml/update_paths.xml").read_text(),
                          '<paths><files-path name="updates" path="updates/" /></paths>\n')
         for name in self.native_names:
+            if name.startswith("Xray") or name == "VlessProfile.kt":
+                self.assertFalse((android / "app/src/main/kotlin/shop/pushok/flow" / name).exists())
+                continue
             self.assertEqual((android / "app/src/main/kotlin/shop/pushok/flow" / name).read_text(),
                              f"// Pushok native {name}\n")
         initial = {str(path.relative_to(android)): path.read_bytes()

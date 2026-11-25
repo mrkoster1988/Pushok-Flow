@@ -33,14 +33,11 @@ object ConnectionProfile {
     /** WireGuard's complete grammar must still be checked with the native Config.parse. */
     fun validateShape(raw: String): Kind {
         val type = kind(raw)
-        if (type == Kind.VLESS) {
-            VlessProfile.parse(raw)
-        } else {
-            val text = boundedText(raw)
-            if (!Regex("(?m)^\\s*\\[Interface]\\s*(?:#.*)?$").containsMatchIn(text) ||
-                !Regex("(?m)^\\s*\\[Peer]\\s*(?:#.*)?$").containsMatchIn(text)) {
-                throw ProfileFormatFailure("PROFILE_IMPORT_INVALID")
-            }
+        if (type != Kind.WIREGUARD) throw ProfileFormatFailure("UNSUPPORTED_PROFILE")
+        val text = boundedText(raw)
+        if (!Regex("(?m)^\\s*\\[Interface]\\s*(?:#.*)?$").containsMatchIn(text) ||
+            !Regex("(?m)^\\s*\\[Peer]\\s*(?:#.*)?$").containsMatchIn(text)) {
+            throw ProfileFormatFailure("PROFILE_IMPORT_INVALID")
         }
         return type
     }

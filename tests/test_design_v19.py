@@ -18,6 +18,6 @@ class ApprovedVisualContract(unittest.TestCase):
     def test_version(self):
         version = (ROOT/'pubspec.yaml').read_text().split('version: ', 1)[1].splitlines()[0]
         name, build = version.split('+')
-        self.assertRegex(name, r'^0\.\d+\.0$')
-        self.assertGreaterEqual(int(name.split('.')[1]), 19)
+        self.assertRegex(name, r'^\d+\.\d+\.\d+$')
+        self.assertGreaterEqual(tuple(map(int, name.split('.'))), (0, 19, 0))
         self.assertGreaterEqual(int(build), 19)

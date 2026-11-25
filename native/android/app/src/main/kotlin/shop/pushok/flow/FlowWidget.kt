@@ -64,7 +64,6 @@ class FlowWidget : AppWidgetProvider() {
 
         fun render(context: Context, state: String) {
             val text = when (state) {
-                "connected" -> "Подключено · VLESS"
                 "wireguard" -> "Подключено · WireGuard"
                 "disconnected" -> "Отключено"
                 "waiting_network" -> "Ожидание сети"

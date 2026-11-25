@@ -127,26 +127,9 @@ def patch_manifest(path: Path) -> None:
     foreground.set(ANDROID + "foregroundServiceType", "dataSync")
     foreground.set("{" + TOOLS_URI + "}node", "merge")
 
-    xray_services = [item for item in app.findall("service")
-                     if item.get(ANDROID + "name") in (XRAY_SERVICE, ".XrayVpnService", "XrayVpnService")]
-    xray = xray_services[0] if xray_services else ET.SubElement(app, "service")
-    for duplicate in xray_services[1:]:
-        app.remove(duplicate)
-    xray.clear()
-    xray.set(ANDROID + "name", XRAY_SERVICE)
-    xray.set(ANDROID + "exported", "false")
-    xray.set(ANDROID + "permission", "android.permission.BIND_VPN_SERVICE")
-    xray.set(ANDROID + "process", ":xray")
-    xray.set(ANDROID + "foregroundServiceType", "specialUse")
-    intent = ET.SubElement(xray, "intent-filter")
-    ET.SubElement(intent, "action", {ANDROID + "name": "android.net.VpnService"})
-    ET.SubElement(xray, "property", {
-        ANDROID + "name": "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
-        ANDROID + "value": "User initiated encrypted VLESS tunnel with per-app routing",
-    })
-    ET.SubElement(xray, "meta-data", {
-        ANDROID + "name": "android.net.VpnService.SUPPORTS_ALWAYS_ON", ANDROID + "value": "false",
-    })
+    for service in app.findall("service"):
+        if service.get(ANDROID + "name") in (XRAY_SERVICE, ".XrayVpnService", "XrayVpnService"):
+            app.remove(service)
 
     # Scanning is optional: importing a file/image and the rest of the app also work without a camera.
     for feature_name in ("android.hardware.camera", "android.hardware.camera.any",
@@ -280,13 +263,13 @@ def patch_project(root: Path) -> None:
     if not gradle.exists():
         raise SystemExit("Run flutter create first")
     s = gradle.read_text(encoding="utf-8")
+    s = re.sub(r'(?m)^\s*implementation\(files\("libs/libXray-[^"]+\.aar"\)\)\s*$', "", s)
     for dep in ('implementation("com.wireguard.android:tunnel:1.0.20260102")',
                 'implementation("com.google.firebase:firebase-messaging:24.1.2")',
                 'implementation("androidx.core:core:1.17.0")',
                 'implementation("androidx.work:work-runtime:2.11.2")',
                 'implementation("com.journeyapps:zxing-android-embedded:4.3.0")',
-                'implementation("com.google.zxing:core:3.5.4")',
-                'implementation(files("libs/libXray-v26.11.9.aar"))'):
+                'implementation("com.google.zxing:core:3.5.4")'):
         if dep not in s:
             if re.search(r"dependencies\s*\{", s):
                 s = re.sub(r"dependencies\s*\{", lambda m: m.group(0) + "\n    " + dep, s, count=1)

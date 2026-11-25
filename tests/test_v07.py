@@ -32,7 +32,10 @@ class AndroidPackagingTests(unittest.TestCase):
         self.assertIn('test -s build/app/outputs/flutter-apk/app-debug.apk', ci)
 
     def test_version(self):
-        self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.(?:[7-9]|[1-9][0-9])\.0\+(?:[7-9]|[1-9][0-9])')
+        version = re.search(r'(?m)^version: (\d+)\.(\d+)\.(\d+)\+(\d+)$', (ROOT / 'pubspec.yaml').read_text())
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(tuple(map(int, version.groups()[:3])), (0, 7, 0))
+        self.assertGreaterEqual(int(version[4]), 7)
 
 if __name__ == '__main__':
     unittest.main()

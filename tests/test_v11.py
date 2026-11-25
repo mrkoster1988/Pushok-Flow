@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,10 @@ class PrivacyRegressionTests(unittest.TestCase):
         self.assertIn('WireGuard service not explicitly exported=false', src)
 
     def test_version_is_incremented(self):
-        self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.[0-9]+\.[0-9]+\+[0-9]+')
+        version = re.search(r'(?m)^version: (\d+)\.(\d+)\.(\d+)\+(\d+)$', (ROOT / 'pubspec.yaml').read_text())
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(tuple(map(int, version.groups()[:3])), (0, 11, 0))
+        self.assertGreaterEqual(int(version[4]), 11)
 
 if __name__ == '__main__':
     unittest.main()

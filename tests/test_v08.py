@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,19 +48,11 @@ def manifest(service='', backup='false'):
             '</provider>'
             '<service android:name="androidx.work.impl.foreground.SystemForegroundService" '
             'android:exported="false" android:foregroundServiceType="dataSync" />'
-            '<service android:name="shop.pushok.flow.XrayVpnService" android:exported="false" '
-            'android:permission="android.permission.BIND_VPN_SERVICE" android:process=":xray" '
-            'android:foregroundServiceType="specialUse">'
-            '<intent-filter><action android:name="android.net.VpnService" /></intent-filter>'
-            '<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" '
-            'android:value="User initiated encrypted VLESS tunnel with per-app routing" />'
-            '<meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />'
-            '</service>'
             f'{service}</application></manifest>')
 
 
 class V08Tests(unittest.TestCase):
-    def test_library_wireguard_and_private_xray_declarations_are_valid(self):
+    def test_library_wireguard_only_declarations_are_valid(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / 'AndroidManifest.xml'
             f.write_text(manifest())
@@ -86,7 +79,10 @@ class V08Tests(unittest.TestCase):
         self.assertNotIn('android:exported="true"', src)
 
     def test_version_in_ui(self):
-        self.assertRegex((ROOT / 'pubspec.yaml').read_text(), r'version: 0\.(?:[89]|[1-9][0-9])\.0\+(?:[89]|[1-9][0-9])')
+        version = re.search(r'(?m)^version: (\d+)\.(\d+)\.(\d+)\+(\d+)$', (ROOT / 'pubspec.yaml').read_text())
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(tuple(map(int, version.groups()[:3])), (0, 8, 0))
+        self.assertGreaterEqual(int(version[4]), 8)
         version, build = (ROOT / 'pubspec.yaml').read_text().split('version: ', 1)[1].splitlines()[0].split('+')
         constants = (ROOT / 'lib/models/app_version.dart').read_text()
         self.assertIn(f"const appVersionName = '{version}';", constants)

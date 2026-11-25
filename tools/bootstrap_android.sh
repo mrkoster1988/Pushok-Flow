@@ -13,14 +13,15 @@ if [[ ! -f android/app/build.gradle.kts ]]; then
   cp -a "$scaffold_dir/project/android/." android/
 fi
 mkdir -p android/app/src/main/kotlin/shop/pushok/flow
-cp native/android/app/src/main/kotlin/shop/pushok/flow/{MainActivity.kt,FlowWidget.kt,FlowPush.kt,WireGuardRouting.kt,ConnectionProfile.kt,VlessProfile.kt,XrayConfig.kt,XrayLifecycle.kt,XrayNetworkPolicy.kt,XrayNetworkMonitor.kt,XrayDnsWire.kt,XrayDnsBridge.kt,XrayTunnelStatus.kt,XrayTunnelClient.kt,XrayVpnService.kt,SecureWireGuardStore.kt,LocalDecisionMemory.kt,TunnelHealth.kt,TunnelConnectionSession.kt,AppUpdates.kt,BoundedNetworkCall.kt,FlowAccount.kt,FlowAccountPolicy.kt,FlowAccountSessionManager.kt,FlowAccountStore.kt,FlowAccountClient.kt,FlowShopBridgePolicy.kt,FlowShopBridgeClient.kt,FlowShopBindingStore.kt,UpdatePolicy.kt,UpdateCoordinator.kt,UpdateWorker.kt,UpdateInstallReceiver.kt,UpdateReplacedReceiver.kt,UpdateAutomationPolicy.kt,ProfileScreenProtection.kt,ProfileProtectionPolicy.kt,WireGuardProfileImport.kt,ProfileImportWork.kt,ProfileImportReader.kt,ProfileImportPayload.kt,ProfileQrDecoder.kt,ProfileQrCameraDecoder.kt,ProfileQrImageReader.kt,ProfileQrSession.kt,WireGuardQrActivity.kt,ProfileCatalogStore.kt,ProfileOperationGate.kt,SubscriptionPolicy.kt,SubscriptionFeed.kt,ManagedWireGuardFeed.kt,SubscriptionLinks.kt,SubscriptionDownloader.kt,ProfileSubscriptions.kt,RouteSettingsStore.kt,RouteAppAvailability.kt,RouteRecommendationPolicy.kt,RouteRecommendationStore.kt,RecommendationAutomation.kt,RouteRecommendations.kt} android/app/src/main/kotlin/shop/pushok/flow/
+cp native/android/app/src/main/kotlin/shop/pushok/flow/{MainActivity.kt,FlowWidget.kt,FlowPush.kt,WireGuardRouting.kt,ConnectionProfile.kt,SecureWireGuardStore.kt,LocalDecisionMemory.kt,TunnelHealth.kt,TunnelConnectionSession.kt,AppUpdates.kt,BoundedNetworkCall.kt,FlowAccount.kt,FlowAccountPolicy.kt,FlowAccountSessionManager.kt,FlowAccountStore.kt,FlowAccountClient.kt,FlowShopBridgePolicy.kt,FlowShopBridgeClient.kt,FlowShopBindingStore.kt,UpdatePolicy.kt,UpdateCoordinator.kt,UpdateWorker.kt,UpdateInstallReceiver.kt,UpdateReplacedReceiver.kt,UpdateAutomationPolicy.kt,ProfileScreenProtection.kt,ProfileProtectionPolicy.kt,WireGuardProfileImport.kt,ProfileImportWork.kt,ProfileImportReader.kt,ProfileImportPayload.kt,ProfileQrDecoder.kt,ProfileQrCameraDecoder.kt,ProfileQrImageReader.kt,ProfileQrSession.kt,WireGuardQrActivity.kt,ProfileCatalogStore.kt,ProfileOperationGate.kt,SubscriptionPolicy.kt,SubscriptionFeed.kt,ManagedWireGuardFeed.kt,SubscriptionLinks.kt,SubscriptionDownloader.kt,ProfileSubscriptions.kt,RouteSettingsStore.kt,RouteAppAvailability.kt,RouteRecommendationPolicy.kt,RouteRecommendationStore.kt,RecommendationAutomation.kt,RouteRecommendations.kt} android/app/src/main/kotlin/shop/pushok/flow/
 # Remove the retired app-owned resolver from previously generated projects.
-rm -f android/app/src/main/kotlin/shop/pushok/flow/XrayBootstrapDns.kt
+rm -f android/app/src/main/kotlin/shop/pushok/flow/{Xray*.kt,VlessProfile.kt}
 mkdir -p android/app/src/main/res
 cp -a native/android/app/src/main/res/. android/app/src/main/res/
 if [[ -d native/android/app/src/main/assets ]]; then
   mkdir -p android/app/src/main/assets
   cp -a native/android/app/src/main/assets/. android/app/src/main/assets/
+  rm -f android/app/src/main/assets/licenses/{libXray-*,xray-*}
 fi
 # flutter create --org shop.pushok --project-name pushok_flow generates a stub
 # in shop/pushok/pushok_flow. Remove it: one launcher Activity only.
