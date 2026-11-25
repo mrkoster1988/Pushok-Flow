@@ -233,6 +233,17 @@ class FlowSubscriptions {
   }
 
   Future<SubscriptionStatus> status() => _status('status');
+  Future<String> telegramProxyState() async =>
+      await _channel.invokeMethod<String>('telegramProxyState') ?? 'ready';
+
+  Future<void> openTelegramProxy() async {
+    await _channel.invokeMethod<bool>('openTelegramProxy');
+  }
+
+  Future<void> confirmTelegramProxy(bool confirmed) async {
+    await _channel.invokeMethod<bool>('setTelegramProxyConfirmed', confirmed);
+  }
+
   Future<bool> hasTelegram() async {
     try { return await _channel.invokeMethod<bool>('hasTelegram') ?? true; }
     on MissingPluginException { return true; }

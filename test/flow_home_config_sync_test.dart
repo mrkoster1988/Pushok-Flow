@@ -162,6 +162,36 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('An installed Telegram without connectivity can use the same guest trial', (tester) async {
+    final key = GlobalKey<PushokAccountCardState>();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var claims = 0;
+    var ready = 0;
+    final accountCalls = <String>[];
+    messenger.setMockMethodCallHandler(_accountChannel, (call) async {
+      accountCalls.add(call.method);
+      return {'state':'signed_out','busy':false,'errorCode':null,'pending':null,
+        'recoveryAvailable':false,'stale':false,'sessionExpiresAt':null,'refreshedAt':null,'profile':null};
+    });
+    messenger.setMockMethodCallHandler(_subscriptionChannel, (call) async {
+      if (call.method == 'hasTelegram') return true;
+      if (call.method == 'syncGuest') return _shopState(++claims == 1 ? 'pending' : 'active');
+      throw MissingPluginException(call.method);
+    });
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PushokAccountCard(
+      key:key, isAndroid:true, compactHome:true, onReadyToConnect:()=>ready++))));
+    for (var i=0;i<4;i++) await tester.pump();
+    await tester.tap(find.byKey(const Key('home_guest_without_telegram')));
+    for (var i=0;i<5;i++) await tester.pump();
+    expect(claims,1);
+    expect(find.textContaining('Готовим гостевое'),findsOneWidget);
+    await tester.pump(const Duration(seconds:8));
+    for (var i=0;i<4;i++) await tester.pump();
+    expect(ready,1);
+    expect(accountCalls, isNot(contains('beginLogin')));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('One power intent opens Telegram confirmation and continues after login',
       (tester) async {
     final key = GlobalKey<PushokAccountCardState>();

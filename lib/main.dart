@@ -20,6 +20,7 @@ import 'ui/subscriptions_card.dart';
 import 'ui/subscription_editor.dart';
 import 'ui/app_updates_card.dart';
 import 'ui/account_card.dart';
+import 'ui/telegram_proxy_action.dart';
 import 'ui/flow_connection_vitals.dart';
 import 'ui/flow_settings_menu.dart';
 import 'ui/device_traffic_page.dart';
@@ -1650,6 +1651,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
                 ? null : _openInformation,
           ),
         ] : !_settingsOpen ? [
+          if (_isAndroid) TelegramProxyAction(subscriptions: _subscriptionBridge),
           Center(child: Text(appVersionName, style: const TextStyle(fontWeight: FontWeight.w600))),
           if (_updateOffered) TextButton(onPressed: () => _selectTab(6), child: const Text('Обновить')),
           IconButton(
@@ -1657,7 +1659,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           icon: const Icon(Icons.settings_outlined),
           tooltip: 'Настройки',
           onPressed: _openSettings,
-        )] : [],
+        )] : _settingsLanding && _isAndroid ? [TelegramProxyAction(subscriptions: _subscriptionBridge, inSettings: true)] : [],
       ),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
         padding: EdgeInsets.fromLTRB(14, _settingsOpen ? 14 : kToolbarHeight + 4, 14, 12),

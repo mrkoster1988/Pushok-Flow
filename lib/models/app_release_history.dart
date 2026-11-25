@@ -65,6 +65,10 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'Если Telegram не выходит на связь, на главной можно получить гостевое подключение на семь суток.',
+    'Кнопка MTProxy открывает действующий прокси Pushok в Telegram. Подтвердите подключение после возврата в Flow.',
+  ]),
+  AppReleaseNotes(versionName: '2.0.5', versionCode: 70, changes: [
     'В настройках видны IP-адреса телефона и расход трафика по приложениям за 24 часа.',
     'Системный жест «Назад» возвращает из раздела в настройки, затем на главную.',
   ]),

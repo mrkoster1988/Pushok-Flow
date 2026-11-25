@@ -29,3 +29,5 @@ class Preferences {
         fun apply() { commit() }
     }
 }
+
+class ActivityNotFoundException : RuntimeException()

@@ -32,3 +32,7 @@ internal class FlowShopBridgeClient(context: Context) {
         return response
     }
 }
+
+internal object TelegramProxyLink {
+    fun fetch() = android.net.Uri.parse("tg://proxy?server=proxy.example&port=443&secret=fixture")
+}

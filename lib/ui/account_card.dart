@@ -681,6 +681,17 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       // The power button starts login and provisioning. No separate large
       // authorization panel or second required "Get config" tap.
+      if (!connected && status != null && !status.recoveryAvailable &&
+          !(_guest && _shopSyncState == 'active'))
+        TextButton.icon(
+          key: const Key('home_guest_without_telegram'),
+          onPressed: enabled && !_shopBusy ? () {
+            setState(() { _guest = true; _connectRequested = true; });
+            unawaited(_syncShop());
+          } : null,
+          icon: const Icon(Icons.hourglass_bottom, size: 16),
+          label: const Text('Без входа в Telegram · 7 дней'),
+        ),
       if (pending != null && !_guest) PushokPanel(child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const Text('Подтвердите вход в кабинете MTProxy. Сверьте код:', textAlign: TextAlign.center,

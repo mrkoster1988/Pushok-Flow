@@ -65,6 +65,13 @@ class ProfileSubscriptions(
             registered.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "status" -> status(result)
+                    "telegramProxyState" -> result.success(settings.getString("mtproxy_choice", "ready"))
+                    "setTelegramProxyConfirmed" -> {
+                        val state = if (call.arguments == true) "confirmed" else "ready"
+                        if (settings.edit().putString("mtproxy_choice", state).commit()) result.success(true)
+                        else failure(result,"SUBSCRIPTION_STORE_FAILED")
+                    }
+                    "openTelegramProxy" -> openTelegramProxy(result)
                     "hasTelegram" -> result.success(shopBridge.telegramAvailable())
                     "syncGuest" -> request(result) { operationEpoch ->
                         syncGuest(operationEpoch)
@@ -190,6 +197,27 @@ class ProfileSubscriptions(
             val draft = pendingDraft
             pendingDraft = null
             draft?.metadata()
+        }
+    }
+
+    private fun openTelegramProxy(result: MethodChannel.Result) {
+        val operation = epoch.get()
+        reads.execute {
+            val link = runCatching { TelegramProxyLink.fetch() }.getOrNull()
+            main.post {
+                try {
+                    ensureActive(operation)
+                    if (link == null) { failure(result, "MTPROXY_UNAVAILABLE"); return@post }
+                    val activity = activityReference.get() ?: throw SubscriptionFailure("SUBSCRIPTION_INTERRUPTED")
+                    activity.startActivity(Intent(Intent.ACTION_VIEW, link))
+                    settings.edit().putString("mtproxy_choice", "pending").commit()
+                    result.success(true)
+                } catch (_: android.content.ActivityNotFoundException) {
+                    failure(result,"MTPROXY_NO_TELEGRAM")
+                } catch (_: Exception) {
+                    failure(result,"SUBSCRIPTION_INTERRUPTED")
+                }
+            }
         }
     }
 
