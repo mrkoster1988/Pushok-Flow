@@ -21,8 +21,9 @@ void main() {
     expect(find.text('трафик'), findsNothing);
     expect(find.byKey(const Key('flow_settings_button')), findsOneWidget);
     expect(find.byType(NavigationBar), findsNothing);
-    expect(find.byKey(const Key('home_authorize_button')), findsOneWidget);
-    expect(find.byKey(const Key('home_get_config_button')), findsOneWidget);
+    expect(find.byKey(const Key('home_authorize_button')), findsNothing);
+    expect(find.byKey(const Key('home_selected_server')), findsNothing);
+    expect(find.byKey(const Key('pushok_connect_button')), findsOneWidget);
     expect(tester.binding.transientCallbackCount, greaterThan(0));
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
