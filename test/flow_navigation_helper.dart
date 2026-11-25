@@ -47,8 +47,11 @@ Future<void> flowNavigate(WidgetTester tester, String destination) async {
     await tester.pump();
   }
   if (destination == 'Pushok ИИ' && target.evaluate().isEmpty) {
-    await tester.ensureVisible(find.text('Дополнительно'));
-    await tester.tap(find.text('Дополнительно'));
+    final more = find.text('Дополнительно');
+    await tester.dragUntilVisible(more.hitTestable(),
+      find.byKey(const Key('flow_settings_menu')), const Offset(0, -120));
+    await tester.pumpAndSettle();
+    await tester.tap(more);
     await tester.pumpAndSettle();
   }
   if (target.evaluate().isEmpty) {

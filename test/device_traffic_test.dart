@@ -39,7 +39,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('VPN · 2001:db8::2'), findsOneWidget);
     await tester.tap(find.text('Открыть доступ'));
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(find.text('Браузер'), findsOneWidget);
