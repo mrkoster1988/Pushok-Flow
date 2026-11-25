@@ -487,6 +487,13 @@ open class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         Session.app = applicationContext
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shop.pushok.flow/push")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "enable", "disable" -> FlowPush.configure(this, call.method == "enable", result)
+                    else -> result.notImplemented()
+                }
+            }
         profileScreenProtection.register(flutterEngine)
         appUpdates.register(flutterEngine.dartExecutor.binaryMessenger)
         flowAccount.register(flutterEngine.dartExecutor.binaryMessenger)

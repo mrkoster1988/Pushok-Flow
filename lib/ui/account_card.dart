@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 
 import 'package:material_ui/material_ui.dart';
 
@@ -130,6 +131,19 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       setState(() {});
       _scheduleViewUpdate();
     });
+  }
+
+  Future<void> _pushSettings(bool enable) async {
+    String message;
+    try {
+      await const MethodChannel('shop.pushok.flow/push').invokeMethod<void>(enable ? 'enable' : 'disable');
+      message = enable ? 'Уведомления аккаунта включены' : 'Уведомления аккаунта отключены';
+    } on PlatformException catch (error) {
+      message = error.message ?? 'Не удалось изменить уведомления';
+    } on MissingPluginException {
+      message = 'Для уведомлений требуется обновление Flow';
+    }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _read() async {
@@ -717,7 +731,18 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
             onPressed: canClear ? () => unawaited(_clearAccount(_LocalAccountClear.logout)) : null,
             icon: const Icon(Icons.logout), label: const Text('Выйти')),
         ]),
-        if (status.profile != null) _shopControls(enabled),
+        if (status.profile != null) ...[
+          PopupMenuButton<bool>(
+            enabled: enabled,
+            onSelected: (value) => unawaited(_pushSettings(value)),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: true, child: Text('Включить уведомления')),
+              PopupMenuItem(value: false, child: Text('Отключить уведомления')),
+            ],
+            child: const ListTile(leading: Icon(Icons.notifications_outlined), title: Text('Уведомления аккаунта')),
+          ),
+          _shopControls(enabled),
+        ],
       ] else if (pending != null) ...[
         const Text('Подтвердите вход в кабинете MTProxy и вернитесь в Flow.'),
         const SizedBox(height: 12),

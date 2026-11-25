@@ -237,6 +237,16 @@ def patch_manifest(path: Path) -> None:
             element.set(ANDROID + "excludeFromRecents", "true")
             element.set(ANDROID + "taskAffinity", "shop.pushok.flow.widget")
 
+    push = next((service for service in app.findall("service")
+                 if service.get(ANDROID + "name") == "shop.pushok.flow.FlowPush"), None)
+    if push is None:
+        push = ET.SubElement(app, "service")
+    push.clear()
+    push.set(ANDROID + "name", "shop.pushok.flow.FlowPush")
+    push.set(ANDROID + "exported", "false")
+    event_filter = ET.SubElement(push, "intent-filter")
+    ET.SubElement(event_filter, "action", {ANDROID + "name": "com.google.firebase.MESSAGING_EVENT"})
+
     # Flutter already adds PROCESS_TEXT queries. Merge launcher visibility into
     # that block rather than treating any existing queries as sufficient.
     queries = manifest.findall("queries")
@@ -255,6 +265,7 @@ def patch_manifest(path: Path) -> None:
 
     # Keystore keys cannot be restored: enforce this even for older scaffolds
     # which explicitly enabled Android Auto Backup.
+    app.set(ANDROID + "name", "shop.pushok.flow.FlowPushApplication")
     app.set(ANDROID + "allowBackup", "false")
     app.set(ANDROID + "label", "Pushok Flow")
     # AGP's useLegacyPackaging owns the merged extraction flag. A stale source
@@ -270,6 +281,7 @@ def patch_project(root: Path) -> None:
         raise SystemExit("Run flutter create first")
     s = gradle.read_text(encoding="utf-8")
     for dep in ('implementation("com.wireguard.android:tunnel:1.0.20260102")',
+                'implementation("com.google.firebase:firebase-messaging:24.1.2")',
                 'implementation("androidx.core:core:1.17.0")',
                 'implementation("androidx.work:work-runtime:2.11.2")',
                 'implementation("com.journeyapps:zxing-android-embedded:4.3.0")',

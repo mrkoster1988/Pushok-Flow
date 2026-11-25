@@ -67,6 +67,7 @@ const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
     'Добавлен виджет домашнего экрана для подключения и отключения выбранного профиля.',
     'В шторке Android отображается состояние WireGuard с кнопкой отключения.',
+    'В настройках аккаунта можно разрешить уведомления о балансе и кампаниях после подключения Firebase на сервере.',
   ]),
   AppReleaseNotes(versionName: '0.62.0', versionCode: 62, changes: [
     'Личная подписка Shop привязана к подтверждённому аккаунту Pushok, а не телефону: передаётся только одноразовый билет входа.',

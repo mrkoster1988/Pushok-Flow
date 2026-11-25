@@ -88,7 +88,7 @@ dependencies {
             for action in intent.findall("action")))
         self.assertEqual(process_text.find("data").get(ANDROID + "mimeType"), "text/plain")
         app = manifest.find("application")
-        self.assertEqual(app.get(ANDROID + "name"), "${applicationName}")
+        self.assertEqual(app.get(ANDROID + "name"), "shop.pushok.flow.FlowPushApplication")
         self.assertEqual(app.find("meta-data").get(ANDROID + "value"), "2")
         self.assertIn("Keep Flutter metadata", self.manifest.read_text())
 
@@ -261,7 +261,7 @@ dependencies {
                 app = self.patch().find("application")
                 self.assertEqual(app.get(ANDROID + "allowBackup"), "false")
                 self.assertEqual([service.get(ANDROID + "name") for service in app.findall("service")],
-                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, PATCH.XRAY_SERVICE])
+                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, PATCH.XRAY_SERVICE, "shop.pushok.flow.FlowPush"])
 
     def test_update_receivers_are_private_deduplicated_and_keep_unrelated_receiver(self):
         self.write_manifest(services='''<receiver android:name=".UpdateInstallReceiver"
@@ -480,7 +480,7 @@ class BootstrapScriptTests(unittest.TestCase):
             shutil.copy2(ROOT / "tools" / tool, self.project / "tools" / tool)
 
         self.native_names = (
-            "MainActivity.kt", "FlowWidget.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
+            "MainActivity.kt", "FlowWidget.kt", "FlowPush.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
             "XrayConfig.kt", "XrayNetworkPolicy.kt", "XrayNetworkMonitor.kt", "XrayDnsWire.kt", "XrayDnsBridge.kt", "XrayTunnelStatus.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
             "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",

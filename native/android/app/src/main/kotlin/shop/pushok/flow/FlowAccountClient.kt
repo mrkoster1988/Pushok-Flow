@@ -50,8 +50,8 @@ internal class FlowAccountClient(private val call: FlowAccountCall,
     }
     override fun request(method: String, path: String, token: String?, body: Map<String, Any?>?): FlowAccountResponse {
         val expected = mapOf("/capabilities" to "GET", "/device" to "POST", "/device/token" to "POST",
-            "/me" to "GET", "/logout" to "POST")
-        if (expected[path] != method || (path in setOf("/me", "/logout")) != (token != null))
+            "/me" to "GET", "/logout" to "POST", "/push-config" to "GET", "/push-device" to "POST")
+        if (expected[path] != method || (path in setOf("/me", "/logout", "/push-device")) != (token != null))
             throw FlowAccountFailure("FLOW_PROTOCOL_UNSUPPORTED")
         token?.let(FlowAccountPolicy::requireAccessToken)
         call.check()
