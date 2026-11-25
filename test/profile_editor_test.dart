@@ -1055,15 +1055,15 @@ void main() {
 
   for (final failure in [
     ('INVALID_CONFIG', 'Некорректный профиль подключения. Проверьте конфигурацию или ссылку.'),
-    ('INVALID_VLESS_CONFIG', 'Некорректная ссылка VLESS. Скопируйте полную ссылку клиента из 3x-ui.'),
+    ('INVALID_VLESS_CONFIG', 'В этой версии доступен WireGuard. Импортируйте профиль .conf.'),
     ('UNSUPPORTED_PROFILE',
-      'Этот формат пока не поддерживается. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.'),
+      'Этот формат пока не поддерживается. Добавьте профиль WireGuard .conf.'),
     ('UNSUPPORTED_TRANSPORT',
-      'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY либо WebSocket или gRPC с TLS.'),
+      'Для подключения нужен профиль WireGuard .conf.'),
     ('UNSUPPORTED_SECURITY',
-      'Для VLESS нужен TLS с проверкой сертификата или REALITY. REALITY доступен только с TCP (Raw).'),
+      'Для подключения нужен профиль WireGuard .conf.'),
     ('UNSUPPORTED_PROFILE_OPTION',
-      'В ссылке VLESS есть параметры, которые пока не поддерживаются. Проверьте варианты подключения в подсказке ⓘ.'),
+      'Для подключения нужен профиль WireGuard .conf.'),
     ('PROFILE_SAVE_FAILED',
       'Не удалось сохранить профиль. Проверьте конфигурацию и попробуйте снова.'),
     ('UNEXPECTED_NATIVE_CODE', 'Не удалось сохранить профиль. Попробуйте ещё раз.'),
@@ -1301,7 +1301,7 @@ void main() {
     for (final failure in [
       ('PROFILE_IMPORT_TOO_LARGE', 'Файл слишком большой: максимум 65 536 байт.'),
       ('PROFILE_IMPORT_INVALID',
-        'Нужен текстовый профиль WireGuard .conf или полная ссылка VLESS из 3x-ui.'),
+        'Нужен текстовый профиль WireGuard .conf.'),
       ('PROFILE_IMPORT_BUSY', 'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.'),
       ('PROFILE_IMPORT_SOURCE_BUSY',
         'Источник файлов пока занят. Попробуйте QR камерой или вставьте текст профиля.'),
@@ -1575,11 +1575,11 @@ void main() {
         'Нужен один полный QR-код. Части составного кода и несколько кодов одновременно не поддерживаются.'),
       ('PROFILE_QR_IMAGE_TOO_LARGE', 'Изображение слишком большое.'),
       ('PROFILE_IMPORT_INVALID', 'В QR-коде нет поддерживаемого профиля.'),
-      ('INVALID_VLESS_CONFIG', 'Некорректная ссылка VLESS.'),
+      ('INVALID_VLESS_CONFIG', 'В этой версии доступен WireGuard.'),
       ('UNSUPPORTED_PROFILE', 'Этот формат пока не поддерживается.'),
-      ('UNSUPPORTED_TRANSPORT', 'Этот вариант VLESS пока не поддерживается.'),
-      ('UNSUPPORTED_SECURITY', 'Для VLESS нужен TLS с проверкой сертификата или REALITY.'),
-      ('UNSUPPORTED_PROFILE_OPTION', 'В ссылке VLESS есть параметры, которые пока не поддерживаются.'),
+      ('UNSUPPORTED_TRANSPORT', 'Для подключения нужен профиль WireGuard .conf.'),
+      ('UNSUPPORTED_SECURITY', 'Для подключения нужен профиль WireGuard .conf.'),
+      ('UNSUPPORTED_PROFILE_OPTION', 'Для подключения нужен профиль WireGuard .conf.'),
       ('UNKNOWN_QR_ERROR', 'Не удалось прочитать QR-код.'),
     ]) {
       var saves = 0;
@@ -2087,9 +2087,8 @@ void main() {
     await _tapEditorKey(tester, _info);
     await tester.pumpAndSettle();
     expect(find.textContaining('QR WireGuard из WGDashboard'), findsOneWidget);
-    expect(find.textContaining('В 3x-ui'), findsOneWidget);
-    expect(find.textContaining('TCP (Raw) с TLS или REALITY'), findsOneWidget);
-    expect(find.textContaining('WebSocket и gRPC поддерживаются только с TLS, без Vision.'), findsOneWidget);
+    expect(find.textContaining('WireGuard нужен полный профиль .conf'), findsOneWidget);
+    expect(find.textContaining('В 3x-ui'), findsNothing);
     expect(find.textContaining('на видео он может выглядеть чёрным'), findsOneWidget);
     expect(find.textContaining('Конфигурация и ключи в него не входят.'), findsOneWidget);
     expect(find.textContaining('QR из фото'), findsWidgets);

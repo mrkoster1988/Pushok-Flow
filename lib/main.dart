@@ -199,15 +199,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         case 'INVALID_CONFIG':
           return 'Профиль подключения некорректен. Откройте его настройки и проверьте данные.';
         case 'INVALID_VLESS_CONFIG':
-          return 'Ссылка VLESS некорректна. Скопируйте полную ссылку клиента из 3x-ui.';
         case 'UNSUPPORTED_PROFILE':
-          return 'Этот формат пока не поддерживается. Добавьте профиль WireGuard .conf.';
         case 'UNSUPPORTED_TRANSPORT':
-          return 'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY либо WebSocket или gRPC с TLS.';
         case 'UNSUPPORTED_SECURITY':
-          return 'Для VLESS нужен TLS с проверкой сертификата или REALITY. REALITY доступен только с TCP (Raw).';
         case 'UNSUPPORTED_PROFILE_OPTION':
-          return 'В ссылке VLESS есть параметры, которые пока не поддерживаются. Откройте подсказку ⓘ в редакторе профиля.';
+          return 'В этой версии доступен WireGuard. Добавьте профиль .conf.';
         case 'PROFILE_LOAD_FAILED':
           return 'Не удалось открыть сохранённый профиль. Откройте «Серверы» и повторите проверку.';
         case 'PROFILE_READ_TIMEOUT':

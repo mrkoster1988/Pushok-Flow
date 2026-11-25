@@ -287,7 +287,7 @@ String subscriptionErrorMessage(Object error) {
     'SUBSCRIPTION_EMPTY' =>
       'В подписке нет подключений. Уточните срок доступа в магазине.',
     'SUBSCRIPTION_UNSUPPORTED' =>
-      'В подписке нет поддерживаемых подключений. Поддерживаются VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS, а также подписки WireGuard в формате Flow.',
+      'В подписке нет поддерживаемых подключений. Нужна подписка WireGuard в формате Flow.',
     'UNSUPPORTED_TRANSPORT' ||
     'UNSUPPORTED_SECURITY' || 'UNSUPPORTED_PROFILE_OPTION' =>
       'Подписка содержит неподдерживаемые подключения. Нужны ссылки VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS.',

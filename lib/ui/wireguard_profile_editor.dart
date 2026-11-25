@@ -72,15 +72,15 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     with WidgetsBindingObserver {
   static const _maxConfigLength = 65536;
   static const _unsupportedProfile =
-      'Этот формат пока не поддерживается. Добавьте WireGuard .conf или ссылку VLESS из 3x-ui.';
+      'Этот формат пока не поддерживается. Добавьте профиль WireGuard .conf.';
   static const _unsupportedTransport =
-      'Этот вариант VLESS пока не поддерживается. Нужен TCP (Raw) с TLS или REALITY либо WebSocket или gRPC с TLS.';
+      'Для подключения нужен профиль WireGuard .conf.';
   static const _invalidVless =
-      'Некорректная ссылка VLESS. Скопируйте полную ссылку клиента из 3x-ui.';
+      'В этой версии доступен WireGuard. Импортируйте профиль .conf.';
   static const _unsupportedSecurity =
-      'Для VLESS нужен TLS с проверкой сертификата или REALITY. REALITY доступен только с TCP (Raw).';
+      'Для подключения нужен профиль WireGuard .conf.';
   static const _unsupportedOption =
-      'В ссылке VLESS есть параметры, которые пока не поддерживаются. Проверьте варианты подключения в подсказке ⓘ.';
+      'Для подключения нужен профиль WireGuard .conf.';
   static const _safeImportCodes = {
     'PROFILE_IMPORT_TOO_LARGE',
     'PROFILE_IMPORT_INVALID',
@@ -490,13 +490,13 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         'SUBSCRIPTION_URL_INVALID' =>
           'Для подписки нужна полная HTTPS-ссылка на публичный сервер, без логина и пароля в адресе. Проверьте ссылку в панели.',
         'PROFILE_TELEGRAM_LINK' =>
-          'Это ссылка прокси Telegram. Она подключается внутри Telegram; для Flow нужен профиль WireGuard, VLESS или HTTPS-ссылка подписки.',
+          'Это ссылка прокси Telegram. Она подключается внутри Telegram; для Flow нужен профиль WireGuard или HTTPS-ссылка на подписку WireGuard.',
         'PROFILE_VMESS_LINK' =>
-          'Обнаружена ссылка VMess. Этот протокол пока не поддерживается в Flow. В 3x-ui выберите VLESS и скопируйте ссылку или QR этого клиента.',
+          'Обнаружена ссылка VMess. Этот протокол пока не поддерживается в Flow. Импортируйте профиль WireGuard .conf.',
         'PROFILE_TROJAN_LINK' =>
-          'Обнаружена ссылка Trojan. Этот протокол пока не поддерживается в Flow. Добавьте VLESS, WireGuard или подписку с серверами VLESS.',
+          'Обнаружена ссылка Trojan. Этот протокол пока не поддерживается в Flow. Добавьте профиль WireGuard .conf.',
         'PROFILE_SHADOWSOCKS_LINK' =>
-          'Обнаружена ссылка Shadowsocks или ShadowsocksR. Эти протоколы пока не поддерживаются в Flow. Добавьте VLESS, WireGuard или подписку с серверами VLESS.',
+          'Обнаружена ссылка Shadowsocks или ShadowsocksR. Эти протоколы пока не поддерживаются в Flow. Добавьте профиль WireGuard .conf.',
         'UNSUPPORTED_TRANSPORT' => _unsupportedTransport,
         'UNSUPPORTED_SECURITY' => _unsupportedSecurity,
         'UNSUPPORTED_PROFILE_OPTION' => _unsupportedOption,

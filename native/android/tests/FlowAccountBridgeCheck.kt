@@ -99,7 +99,7 @@ fun main() {
         val reply = test.invoke("openLogin")
         test.idle(); test.reply()
         check(reply.completions == 1 && reply.errorCode == null && reply.value == null)
-        check(test.activity.opened.single().uri.value == FlowAccountPolicy.telegram(OLD_CODE))
+        check(test.activity.opened.single().uri.value == FlowAccountPolicy.browser(OLD_CODE))
         check(test.remoteCalls.isEmpty())
     }
 
@@ -130,7 +130,7 @@ fun main() {
         }
         test.idle(); test.reply()
         check(begin.metadata()["state"] == "pending")
-        check(test.activity.opened.single().uri.value == FlowAccountPolicy.telegram(NEW_CODE))
+        check(test.activity.opened.single().uri.value == FlowAccountPolicy.browser(NEW_CODE))
     }
 
     // The initial beginLogin automatic opening obeys the same cancellation epoch.
@@ -189,7 +189,7 @@ fun main() {
         test.activity.rejectTelegram = true
         val open = test.invoke("openLogin")
         test.idle(); test.reply()
-        check(open.errorCode == null && test.activity.attempts.size == 2)
+        check(open.errorCode == null && test.activity.attempts.size == 1)
         check(test.activity.opened.single().uri.value == FlowAccountPolicy.browser(OLD_CODE))
         check(test.activity.attempts.none { fixtureDevice in it.uri.value || fixtureToken in it.uri.value })
     }
