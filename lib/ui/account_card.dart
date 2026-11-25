@@ -11,7 +11,8 @@ enum _LocalAccountClear { cancelLogin, logout, recoverAccount }
 
 class PushokAccountCard extends StatefulWidget {
   const PushokAccountCard({super.key, required this.isAndroid, this.account,
-    this.subscriptions, this.onShopSynced, this.compactHome = false,
+    this.subscriptions, this.onShopSynced, this.onReadyToConnect,
+    this.onAccountChanged, this.compactHome = false,
     this.onOpenCabinet, this.onOpenHub, this.now});
   final bool isAndroid;
   /// A short login -> config flow under the main power button.
@@ -20,15 +21,18 @@ class PushokAccountCard extends StatefulWidget {
   final FlowAccount? account;
   final FlowSubscriptions? subscriptions;
   final VoidCallback? onShopSynced;
+  /// Only fires after a confirmed, active Shop feed following the power tap.
+  final VoidCallback? onReadyToConnect;
+  final ValueChanged<bool>? onAccountChanged;
   final VoidCallback? onOpenCabinet;
   final VoidCallback? onOpenHub;
   final DateTime Function()? now;
 
   @override
-  State<PushokAccountCard> createState() => _PushokAccountCardState();
+  State<PushokAccountCard> createState() => PushokAccountCardState();
 }
 
-class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindingObserver {
+class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindingObserver {
   late final FlowAccount _account;
   late final FlowSubscriptions _shop;
   bool _shopAutoSync = false;
@@ -38,6 +42,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   int _shopEpoch = 0;
   String? _shopAccountId;
   DateTime? _shopLastAttempt;
+  DateTime? _shopRateLimitUntil;
+  bool _connectRequested = false;
   FlowAccountStatus? _status;
   String? _error;
   bool _busy = false;
@@ -73,6 +79,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     _poll?.cancel();
     _viewTimer?.cancel();
     _shopPendingPoll?.cancel();
+    _connectRequested = false;
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -91,6 +98,39 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
     _busy = false;
     if (_foreground && widget.isAndroid) unawaited(_read());
   }
+
+  bool get hasActiveAccount => _status?.state == FlowAccountState.connected &&
+      _status?.profile != null && !_expired && _clearingAccount == null;
+
+  /// Called by the large power button when the selected profile belongs to
+  /// Shop or no profile is installed. The login request is user-initiated;
+  /// returning from Telegram continues the same short-lived connection intent.
+  void requestConnection() {
+    if (!mounted || !_foreground || !widget.isAndroid || _clearingAccount != null) return;
+    _connectRequested = true;
+    if (_status == null) {
+      unawaited(_read().then((_) => _continueConnectionRequest()));
+    } else {
+      _continueConnectionRequest();
+    }
+  }
+
+  void _continueConnectionRequest() {
+    if (!mounted || !_foreground || _busy || _clearingAccount != null) return;
+    if (hasActiveAccount) {
+      if (!_shopBusy) unawaited(_syncShop());
+      return;
+    }
+    if (_status?.recoveryAvailable ?? false) {
+      unawaited(_confirmRecovery());
+    } else if (_status?.pending != null && !_expired) {
+      unawaited(_openLogin());
+    } else {
+      unawaited(_run(_account.beginLogin));
+    }
+  }
+
+  void openRenewal() => unawaited(_openShop());
 
   void _schedulePoll() {
     _poll?.cancel();
@@ -184,6 +224,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
           _shopSyncState = 'idle';
           _shopError = null;
           _shopLastAttempt = null;
+          _shopRateLimitUntil = null;
           _shopPendingPoll?.cancel();
         }
         // Keep identity/code hidden until native code confirms a durable local
@@ -210,6 +251,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
           _cancellingUserCode = null;
         }
       });
+      widget.onAccountChanged?.call(hasActiveAccount);
       return true;
     } catch (error) {
       if (!mounted || !_foreground || epoch != _epoch) return false;
@@ -242,8 +284,8 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         _shopAutoSync = value.shopAutoSyncEnabled;
         _shopSyncState = value.shopSyncState;
       });
-      if (automatic && value.shopAutoSyncEnabled) {
-        unawaited(_syncShop(automatic: true));
+      if (automatic && (value.shopAutoSyncEnabled || _connectRequested)) {
+        unawaited(_syncShop(automatic: !_connectRequested));
       }
     } catch (_) {
       // On old APKs the channel may be absent; this read must not affect login.
@@ -256,7 +298,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   // The signed MTProxy ticket is acquired afresh for every attempt; never cache it.
   void _schedulePendingShopPoll() {
     _shopPendingPoll?.cancel();
-    if (!mounted || !_foreground || !_shopAutoSync ||
+    if (!mounted || !_foreground || (!_shopAutoSync && !_connectRequested) ||
         _shopSyncState != 'pending' || _shopBusy || _busy || _expired ||
         _clearingAccount != null || _status?.state != FlowAccountState.connected ||
         _status?.profile?.id == null) return;
@@ -301,9 +343,18 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
         _status?.profile == null || _expired) return;
     final accountId = _status!.profile!.id;
     final now = widget.now?.call() ?? DateTime.now();
+    if (_shopRateLimitUntil != null && now.isBefore(_shopRateLimitUntil!)) {
+      if (!automatic) {
+        setState(() => _shopError = 'Shop ограничил частоту запросов. '
+          'Повторим проверку позже без повторного входа.');
+      }
+      _scheduleShopRateLimitRetry();
+      return;
+    }
     // Pending retries are paced by the 45-second timer, not wall-clock DateTime.
     // This also remains correct when app timers use a monotonic/fake clock.
-    if (automatic && _shopSyncState != 'pending' && _shopLastAttempt != null &&
+    if (automatic && !_connectRequested && _shopSyncState != 'pending' &&
+        _shopLastAttempt != null &&
         now.difference(_shopLastAttempt!) < const Duration(minutes: 5)) return;
     _shopLastAttempt = now;
     _shopPendingPoll?.cancel();
@@ -316,18 +367,48 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
       final status = await _shop.syncShop();
       if (!mounted || !_foreground || epoch != _shopEpoch ||
           _status?.profile?.id != accountId) return;
-      setState(() => _shopSyncState = status.shopSyncState);
-      if (status.shopSyncState == 'active') widget.onShopSynced?.call();
+      setState(() {
+        _shopSyncState = status.shopSyncState;
+        _shopRateLimitUntil = null;
+      });
+      if (status.shopSyncState == 'active') {
+        if (_connectRequested) {
+          _connectRequested = false;
+          widget.onReadyToConnect?.call();
+        } else {
+          widget.onShopSynced?.call();
+        }
+      } else if (status.shopSyncState != 'pending') {
+        _connectRequested = false;
+      }
     } catch (error) {
       if (mounted && _foreground && epoch == _shopEpoch) {
-        setState(() => _shopError = subscriptionErrorMessage(error));
+        setState(() {
+          _shopError = subscriptionErrorMessage(error);
+          if (error is PlatformException && error.code == 'SHOP_RATE_LIMITED') {
+            _shopRateLimitUntil = now.add(const Duration(seconds: 70));
+          } else {
+            _connectRequested = false;
+          }
+        });
       }
     } finally {
       if (mounted && epoch == _shopEpoch) {
         setState(() => _shopBusy = false);
-        _schedulePendingShopPoll();
+        if (_shopRateLimitUntil != null) _scheduleShopRateLimitRetry();
+        else _schedulePendingShopPoll();
       }
     }
+  }
+
+  void _scheduleShopRateLimitRetry() {
+    _shopPendingPoll?.cancel();
+    final due = _shopRateLimitUntil;
+    if (due == null || (!_shopAutoSync && !_connectRequested) ||
+        !hasActiveAccount || !_foreground || _shopBusy) return;
+    final delay = due.difference(widget.now?.call() ?? DateTime.now());
+    _shopPendingPoll = Timer(delay.isNegative ? Duration.zero : delay,
+      () => unawaited(_syncShop(automatic: true)));
   }
 
   Future<void> _unlinkShop() async {
@@ -458,6 +539,7 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
   Future<void> _clearAccount(_LocalAccountClear clearing, {String? userCode}) async {
     final cancelCode = userCode ?? _cancellingUserCode;
     if (clearing == _LocalAccountClear.cancelLogin && cancelCode == null) return;
+    _connectRequested = false;
     await _run(switch (clearing) {
       _LocalAccountClear.logout => _account.logout,
       _LocalAccountClear.recoverAccount => _account.recoverLocalAccount,
@@ -551,114 +633,81 @@ class _PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindi
 
   Widget _compactHome() {
     final status = _status;
-    final expired = _expired;
-    final pending = expired ? null : status?.pending;
-    final connected = status?.state == FlowAccountState.connected &&
-        !expired && status?.profile != null;
-    final clearing = _clearingAccount;
-    final recoveryAvailable = status?.recoveryAvailable ?? false;
+    final pending = _expired ? null : status?.pending;
+    final connected = hasActiveAccount;
     final enabled = widget.isAndroid && _foreground && !_busy &&
-        !_recoveryDialogOpen && clearing == null && !(status?.busy ?? false);
-    final errorCode = expired
+        _clearingAccount == null && !(status?.busy ?? false);
+    final errorCode = _expired
         ? status?.pending != null ? 'FLOW_LOGIN_EXPIRED' : 'FLOW_SESSION_EXPIRED'
         : status?.errorCode;
     final error = _error ?? (errorCode == null ? null : flowAccountErrorMessage(errorCode));
-    final authLabel = connected
-        ? 'Вход выполнен'
-        : recoveryAvailable ? 'Восстановить вход'
-        : pending != null ? 'Открыть подтверждение входа'
-        : 'Войти через Telegram';
-    final authAction = !enabled
-        ? null : recoveryAvailable ? () => unawaited(_confirmRecovery())
-        : pending != null ? () => unawaited(_openLogin())
-        : connected || status == null ? null
-        : () => unawaited(_run(_account.beginLogin));
-    final canReceive = connected && enabled && !_shopBusy;
-    return PushokPanel(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        OutlinedButton.icon(
-          key: const Key('home_authorize_button'),
-          onPressed: authAction,
-          icon: Icon(connected ? Icons.verified_user_outlined : Icons.login),
-          label: Text(authLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          key: const Key('home_get_config_button'),
-          // A manual request must work even when background sync is disabled.
-          // Do not silently turn on automatic retries as a side effect.
-          onPressed: canReceive ? () => unawaited(_syncShop()) : null,
-          icon: _shopBusy
-              ? const SizedBox(width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.download_outlined),
-          label: Text(_shopBusy ? 'Получаем конфиг…'
-              : _shopSyncState == 'active' ? 'Обновить конфиг'
-              : 'Получить конфиг'),
-        ),
-        if (connected) ...[
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(
-              key: const Key('home_renew_subscription'),
-              onPressed: enabled && !_shopBusy ? () => unawaited(_openShop()) : null,
-              icon: const Icon(Icons.event_repeat_outlined),
-              label: const Text('Продлить'),
-            )),
-            const SizedBox(width: 8),
-            Expanded(child: OutlinedButton.icon(
-              key: const Key('home_delete_config'),
-              onPressed: enabled && !_shopBusy ? () => unawaited(_unlinkShop()) : null,
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Удалить конфиг'),
-            )),
-          ]),
-        ],
-        if (pending != null) ...[
-          const SizedBox(height: 8),
-          const Text('Подтверди вход через MTProxy. Код:',
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // The power button starts login and provisioning. No separate large
+      // authorization panel or second required "Get config" tap.
+      if (pending != null) PushokPanel(child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Подтвердите вход через Telegram. Сверьте код:',
             style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
+          const SizedBox(height: 8),
           SelectableText(pending.displayCode,
             key: const Key('home_account_code'),
             textAlign: TextAlign.center,
             style: const TextStyle(color: PushokPalette.glowCyan,
               fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 1)),
           TextButton(
+            key: const Key('home_reopen_login'),
+            onPressed: enabled ? () => unawaited(_openLogin()) : null,
+            child: const Text('Открыть подтверждение')),
+          TextButton(
             key: const Key('home_cancel_login'),
-            onPressed: widget.isAndroid && _foreground && clearing == null
-                ? () => unawaited(_clearAccount(
-                    _LocalAccountClear.cancelLogin, userCode: pending.userCode))
-                : null,
-            child: const Text('Отменить вход'),
-          ),
+            onPressed: enabled ? () => unawaited(_clearAccount(
+              _LocalAccountClear.cancelLogin, userCode: pending.userCode)) : null,
+            child: const Text('Отменить вход')),
         ],
-        if (connected || _shopSyncState != 'idle') ...[
-          const SizedBox(height: 6),
-          Text(switch (_shopSyncState) {
-            'active' => 'Личная подписка получена',
-            'pending' => 'Создаём подключение в Shop…',
-            'expired' => 'Срок подписки истёк',
-            'revoked' => 'Подписка отозвана',
-            'disabled' => 'Выдача пока отключена в Shop',
-            'unavailable' => 'Подключение пока недоступно',
-            'link_disabled' => 'Личная ссылка отключена в Shop',
-            _ => 'Вход выполнен · можно получить конфиг',
-          }, key: const Key('home_shop_status'),
-            style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
-        ],
-        if (_busy && status != null) const Padding(
-          padding: EdgeInsets.only(top: 6),
-          child: LinearProgressIndicator(minHeight: 2)),
-        if (clearing != null) const Text('Подтверждаем действие с аккаунтом…',
-          style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
-        if (error != null) Text(error, key: const Key('home_auth_error'),
-          style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
-        if (_shopError != null) Text(_shopError!,
-          key: const Key('home_config_error'),
-          style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
+      )),
+      if (_busy || _shopBusy) ...[
+        const LinearProgressIndicator(minHeight: 2),
+        const SizedBox(height: 8),
+        Text(_shopBusy ? 'Проверяем подписку и получаем профиль…'
+            : 'Проверяем аккаунт…',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
       ],
-    ));
+      if (connected && !_shopBusy && _shopSyncState != 'idle') ...[
+        const SizedBox(height: 6),
+        Text(switch (_shopSyncState) {
+          'active' => 'Ваше личное подключение готово',
+          'pending' => 'Shop создаёт WireGuard-профиль. Подключение появится после выдачи.',
+          'expired' => 'Срок подключения истёк. Продлите подписку в Shop.',
+          'revoked' => 'Доступ отозван в Shop.',
+          'disabled' => 'Автовыдача отключена в Shop. Включить её может разработчик.',
+          'unavailable' => 'Для этого аккаунта пока нет активной подписки Shop.',
+          'link_disabled' => 'Личная ссылка отключена в Shop.',
+          _ => 'Проверяем доступ к Shop…',
+        }, key: const Key('home_shop_status'), textAlign: TextAlign.center,
+          style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
+      ],
+      if (error != null) Text(error, key: const Key('home_auth_error'),
+        style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
+      if (_shopError != null) Text(_shopError!, key: const Key('home_config_error'),
+        style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
+      if (connected && !(_shopBusy || _busy) && _shopSyncState != 'active') ...[
+        const SizedBox(height: 6),
+        OutlinedButton.icon(
+          key: const Key('home_get_config_button'),
+          onPressed: enabled ? () => unawaited(_syncShop()) : null,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Повторить получение конфига')),
+      ],
+      if (connected && const {'disabled','unavailable','expired','revoked','link_disabled'}
+          .contains(_shopSyncState)) ...[
+        TextButton.icon(
+          key: const Key('home_open_shop'),
+          onPressed: enabled ? openRenewal : null,
+          icon: const Icon(Icons.open_in_new),
+          label: const Text('Проверить подписку в Shop')),
+      ],
+    ]);
   }
 
   @override
