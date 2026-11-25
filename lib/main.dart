@@ -332,16 +332,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
   }
 
-  /// One-tap connection: preserve explicit offline/manual profiles; an
-  /// account-managed profile or empty catalog needs an authenticated Shop feed.
+  /// Existing profiles (manual or subscribed) still use the established
+  /// connection path and its server-side entitlement checks. Only an empty
+  /// catalog starts the verified account → Shop → import → connect sequence.
   void _handlePowerTap() {
     if (!_canToggleTunnel) return;
-    if (_ownsTunnel) {
-      unawaited(_toggleTunnel());
-      return;
-    }
-    final selected = _profiles?.activeProfile;
-    if (selected != null && !selected.isManaged) {
+    if (_ownsTunnel || _profiles?.activeProfile != null) {
       unawaited(_toggleTunnel());
     } else {
       _homeAccountKey.currentState?.requestConnection();
