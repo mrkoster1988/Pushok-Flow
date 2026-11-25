@@ -137,11 +137,16 @@ void main() {
     final key = GlobalKey<PushokAccountCardState>();
     var phase = 'signed_out';
     var begins = 0;
+    var opened = 0;
     var ready = 0;
     var requests = 0;
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(_accountChannel, (call) async {
       requests++;
+      if (call.method == 'openLogin') {
+        opened++;
+        return null;
+      }
       final now = DateTime.now().millisecondsSinceEpoch;
       if (call.method == 'beginLogin') {
         begins++;
@@ -176,6 +181,7 @@ void main() {
     key.currentState!.requestConnection();
     for (var i = 0; i < 4; i++) await tester.pump();
     expect(begins, 1);
+    expect(opened, 1, reason: 'One power tap must open Telegram automatically.');
     expect(syncCalls, 0);
     expect(find.byKey(const Key('home_account_code')), findsOneWidget);
     expect(find.byKey(const Key('home_authorize_button')), findsNothing);
