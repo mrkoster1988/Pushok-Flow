@@ -406,29 +406,22 @@ void main() {
     });
   });
 
-  testWidgets('Connect without a profile opens setup without requesting VPN', (tester) async {
+  testWidgets('Power without a profile starts account flow, not a manual editor',
+      (tester) async {
     await _withApp(tester, () async {
       await tester.tap(find.byKey(const Key('pushok_connect_button')));
-      await tester.pumpAndSettle();
-      expect(find.byType(WireGuardProfileEditor), findsOneWidget);
-      expect(find.text('Сохранить и подключить'), findsOneWidget);
-      expect(bridge.named('connectWireGuard'), isEmpty);
-
-      await tester.ensureVisible(find.byKey(const Key('save_wireguard_profile')));
-      await tester.tap(find.byKey(const Key('save_wireguard_profile')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('wireguard_profile_error')), findsOneWidget);
+      await tester.pump();
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
       expect(bridge.named('saveWireGuardProfile'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
-      await tester.tap(find.byKey(const Key('close_wireguard_profile')));
-      await tester.pumpAndSettle();
-      await _openRoutes(tester);
-      expect(find.byKey(const Key('wireguard_profile_error')), findsNothing);
-      expect(find.text('Test browser'), findsOneWidget);
+      expect(bridge.named('acquire'), isEmpty);
+      // A user can still add a manually imported profile in Settings.
+      await _openServers(tester);
+      expect(find.byKey(const Key('add_wireguard_profile')), findsOneWidget);
     });
   });
 
-  testWidgets('Initial status must finish before a missing profile can open setup', (tester) async {
+  testWidgets('Initial status must finish before the account flow can start', (tester) async {
     final pending = Completer<Object?>();
     bridge.statusGate = pending;
     await _withApp(tester, () async {
@@ -448,10 +441,9 @@ void main() {
       expect(find.byType(WireGuardProfileEditor), findsNothing);
       expect(tester.widget<InkWell>(connect).onTap, isNotNull);
       await tester.tap(connect);
-      await tester.pumpAndSettle();
-      expect(find.byType(WireGuardProfileEditor), findsOneWidget);
-      expect(find.text('Сохранить и подключить'), findsOneWidget);
-      expect(bridge.named('acquire'), hasLength(1));
+      await tester.pump();
+      expect(find.byType(WireGuardProfileEditor), findsNothing);
+      expect(bridge.named('acquire'), isEmpty);
       expect(bridge.named('connectWireGuard'), isEmpty);
     });
   });
