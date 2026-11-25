@@ -379,6 +379,8 @@ private fun checkPushokExternalLinks() {
             "tg://resolve?domain=mtproxy_pushok_bot", "https://pushok.shop/"),
         PushokExternalLinks.Destination.HUB to listOf(
             "tg://resolve?domain=pushok_app", "https://t.me/pushok_app"),
+        PushokExternalLinks.Destination.SHOP to listOf(
+            "https://pushok.shop/shop/", "https://pushok.shop/shop/"),
     )
     check(PushokExternalLinks.Destination.entries.toSet() == destinations.keys)
     for ((destination, expected) in destinations) {
