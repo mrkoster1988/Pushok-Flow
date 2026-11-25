@@ -24,6 +24,7 @@ targets:
     sources:
       - App
       - Shared/Profile.swift
+      - Shared/Traffic.swift
       - .build/parser
       - path: ../assets/mascot/pushok.png
         buildPhase: resources
@@ -44,12 +45,14 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         FlowKeychainGroup: $(AppIdentifierPrefix)$(FLOW_APP_ID).profiles
+        LSApplicationQueriesSchemes: [tg]
+        NSCameraUsageDescription: Камера считывает QR-код профиля WireGuard или подписки Pushok.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
   PacketTunnel:
     type: app-extension
     platform: iOS
-    sources: [Tunnel, Shared/Profile.swift, .build/parser]
+    sources: [Tunnel, Shared/Profile.swift, Shared/Traffic.swift, .build/parser]
     dependencies:
       - package: WireGuardKit
     settings:

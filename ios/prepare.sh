@@ -24,7 +24,7 @@ make -C "$source_dir/Sources/WireGuardKitGo" ARCHS=arm64 PLATFORM_NAME=iphoneos 
   CONFIGURATION_TEMP_DIR="$root/tmp" DEPLOYMENT_TARGET_CLANG_FLAG_NAME=miphoneos-version-min \
   DEPLOYMENT_TARGET_CLANG_ENV_NAME=IPHONEOS_DEPLOYMENT_TARGET IPHONEOS_DEPLOYMENT_TARGET=16.0
 swift make-icon.swift ../assets/mascot/pushok.png App/AppAssets.xcassets/AppIcon.appiconset/icon.png
-version=$(sed -n 's/^version: //p' ../pubspec.yaml)
+version=$(cat VERSION)
 [[ "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$ ]]
 export MARKETING_VERSION="${BASH_REMATCH[1]}" CURRENT_PROJECT_VERSION="${BASH_REMATCH[2]}"
 xcodegen generate --spec project.yml

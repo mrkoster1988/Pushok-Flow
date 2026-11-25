@@ -21,6 +21,10 @@ jobs:
           cache: false
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
+      - name: Test iPhone access contracts
+        run: |
+          swiftc ios/App/Access.swift ios/Shared/Traffic.swift ios/Tests/Contracts.swift -o "$RUNNER_TEMP/test-flow-access"
+          "$RUNNER_TEMP/test-flow-access"
       - name: Prepare WireGuard and Xcode project
         run: bash ios/prepare.sh
       - name: Archive for a physical iPhone
