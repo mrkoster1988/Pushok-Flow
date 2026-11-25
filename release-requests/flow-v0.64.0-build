@@ -1,0 +1,11 @@
+Release: 0.64.0
+
+One-time request to build and publish the universal Android APK using the
+existing GitHub Actions private signing configuration and full release gates.
+
+Safety conditions:
+- Source tests, Flutter analysis/tests, Kotlin regression checks and APK
+  verification must all pass on the exact publish commit.
+- Certificate SHA-256 must match the installed v0.63.0 release.
+- Missing private signing configuration must fail without creating a release.
+- Never publish the temporary candidate APK as an installable update.

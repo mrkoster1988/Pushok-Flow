@@ -2,6 +2,10 @@ name: Android release with in-app updates
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'release-requests/flow-v0.64.0-build'
 
 permissions:
   contents: read
@@ -31,6 +35,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify explicit v0.64.0 release request
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          test -f release-requests/flow-v0.64.0-build
+          grep -Fxq 'Release: 0.64.0' release-requests/flow-v0.64.0-build
+          grep -Fxq 'version: 0.64.0+64' pubspec.yaml
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Resolve release version and refuse existing tags
         id: version
         env:
