@@ -666,7 +666,10 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
         ],
       )),
       if (_busy || _shopBusy) ...[
-        const LinearProgressIndicator(minHeight: 2),
+        // Use a determinate checkpoint until the native operation resolves.
+        // An indeterminate ticker would animate forever when Android is waiting
+        // for a Telegram/OS response, obscuring a still-usable manual profile.
+        const LinearProgressIndicator(value: 0.4, minHeight: 2),
         const SizedBox(height: 8),
         Text(_shopBusy ? 'Проверяем подписку и получаем профиль…'
             : 'Проверяем аккаунт…',
