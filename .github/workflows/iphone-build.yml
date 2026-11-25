@@ -35,8 +35,9 @@ jobs:
           ext="$app/PlugIns/PacketTunnel.appex"
           for target in "$app" "$ext"; do
             binary=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$target/Info.plist")
-            lipo -verify_arch arm64 "$target/$binary"
-            xcrun vtool -show-build "$target/$binary" | grep -Eq 'platform +IOS$'
+            lipo "$target/$binary" -verify_arch arm64
+            xcrun vtool -show-build "$target/$binary" | tee "$RUNNER_TEMP/device-build.txt"
+            grep -Eiq 'platform[[:space:]]+(ios|2)[[:space:]]*$' "$RUNNER_TEMP/device-build.txt"
           done
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$ext/Info.plist")" = com.apple.networkextension.packet-tunnel
           ditto -c -k --keepParent "$archive" "$RUNNER_TEMP/PushokFlow-iPhone-unsigned.xcarchive.zip"
