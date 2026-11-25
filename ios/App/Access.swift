@@ -121,7 +121,10 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 
 final class AccessAPI {
     private let session: URLSession
-    init(configuration config: URLSessionConfiguration = .ephemeral) {
+    private let guestCredentials: () throws -> (device: String, proof: String)
+    init(configuration config: URLSessionConfiguration = .ephemeral,
+         guestCredentials: @escaping () throws -> (device: String, proof: String) = PrivateStore.guest) {
+        self.guestCredentials = guestCredentials
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 20
         config.httpShouldSetCookies = false
@@ -221,7 +224,7 @@ final class AccessAPI {
             guard let ticket = result["ticket"] as? String, ticket.matches("psb1\\.[A-Za-z0-9_-]{20,720}\\.[a-f0-9]{64}") else { throw AccessError.invalid }
             reply = try await json("/shop/api/flow/bridge/exchange", body: ["ticket":ticket])
         } else {
-            let guest = try PrivateStore.guest()
+            let guest = try guestCredentials()
             reply = try await json("/shop/api/flow/guest", body: ["device":guest.device], token: guest.proof)
         }
         switch reply["status"] as? String {

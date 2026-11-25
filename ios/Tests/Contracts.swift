@@ -8,6 +8,7 @@ enum FlowProfile {
 }
 
 final class FixtureTransport: URLProtocol {
+    static var guestStatus = "active"
     static let token = "pfa_" + String(repeating: "a", count: 64)
     static let feed = "https://pushok.shop/shop/flow/wireguard/" + String(repeating: "b", count: 43)
     static let code = "pfd_" + String(repeating: "c", count: 43)
@@ -35,6 +36,9 @@ final class FixtureTransport: URLProtocol {
         case "/shop/api/flow/bridge/exchange":
             precondition(bearer == nil)
             reply = ["status":"active","subscription_url":Self.feed]
+        case "/shop/api/flow/guest":
+            precondition(request.httpMethod == "POST" && bearer == "Bearer " + String(repeating:"a", count:64))
+            reply = ["status":Self.guestStatus, "subscription_url":Self.guestStatus == "active" ? Self.feed as Any : NSNull() as Any]
         case "/api/v1/public-config":
             reply = ["proxy_url":"https://t.me/proxy?server=proxy.example.org&port=443&secret=" + String(repeating:"a",count:32)]
         default:
@@ -55,13 +59,19 @@ final class FixtureTransport: URLProtocol {
     static func main() async throws {
         let c = URLSessionConfiguration.ephemeral
         c.protocolClasses = [FixtureTransport.self]
-        let api = AccessAPI(configuration: c)
+        let api = AccessAPI(configuration: c) { (String(repeating:"c", count:64), String(repeating:"a", count:64)) }
         let challenge = try await api.begin()
         let session = try await api.poll(challenge)
         precondition(session.token == FixtureTransport.token)
         let url = try await api.shopURL(token: session.token)
         let feed = try await api.feed(url)
         precondition(feed.profiles.first?.id == "one")
+        let guestURL = try await api.shopURL(token: nil)
+        precondition(guestURL == url)
+        FixtureTransport.guestStatus = "pending"
+        do { _ = try await api.shopURL(token: nil); preconditionFailure("Pending guest accepted") } catch AccessError.pending {}
+        FixtureTransport.guestStatus = "expired"
+        do { _ = try await api.shopURL(token: nil); preconditionFailure("Expired guest accepted") } catch AccessError.expired {}
         let proxy = try await api.proxyURL()
         precondition(proxy.scheme == "tg" && proxy.host == "proxy")
         for bad in [FixtureTransport.feed + "?x=y",FixtureTransport.feed.replacingOccurrences(of:"pushok.shop",with:"pushok.shop.example"),

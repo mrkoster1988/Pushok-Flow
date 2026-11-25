@@ -21,6 +21,7 @@ private struct Home: View {
     private var active: Bool { [.connected, .connecting, .reasserting].contains(connection.status) }
     private var status: String {
         if !connection.operation.isEmpty { return connection.operation }
+        if connection.preparing != nil { return "Shop готовит профиль. Flow подключится автоматически." }
         switch connection.status {
         case .connected: return "Туннель включён"
         case .connecting: return "Подключение…"
@@ -58,7 +59,7 @@ private struct Home: View {
                         } label: {
                             VStack(spacing: 8) {
                                 Image(systemName: "power").font(.system(size: 38, weight: .medium))
-                                Text(active ? "Отключить" : "Подключить").font(.headline)
+                                Text(connection.preparing != nil ? "Отменить" : (active ? "Отключить" : "Подключить")).font(.headline)
                             }
                             .frame(width: 152, height: 152)
                             .background(Circle().fill(accent.opacity(0.10)))
@@ -148,6 +149,9 @@ private struct FlowSettings: View {
     @State private var remove = false
     @State private var showingHelp = false
     @State private var confirmLogout = false
+    @State private var deleteSaved: SavedProfile?
+    @AppStorage("connection-helpful") private var helpful = 0
+    @AppStorage("connection-unhelpful") private var unhelpful = 0
     private var canEdit: Bool { connection.mayImport && connection.login.pending == nil }
     var body: some View {
         List {
@@ -202,7 +206,35 @@ private struct FlowSettings: View {
                 }
                 PhotosPicker(selection: $picture, matching: .images) { Text("Считать QR из фото") }.disabled(!canEdit)
             }
+            if !connection.saved.isEmpty {
+                Section("Мои профили") {
+                    ForEach(connection.saved) { profile in
+                        Button { Task { await connection.selectSaved(profile) } } label: {
+                            Label(profile.name, systemImage: profile.isLink ? "link" : "network")
+                        }
+                        .disabled(!canEdit)
+                        .swipeActions {
+                            Button("Удалить", role: .destructive) { deleteSaved = profile }.disabled(!canEdit)
+                        }
+                    }
+                }
+            }
             Section("Telegram") { Button("Открыть MTProxy Pushok", action: proxy) }
+            Section("Pushok ИИ") {
+                if connection.status == .connected && connection.metrics?.handshake == nil {
+                    Text("Туннель включён. Пока сервер не ответил, проверь срок подписки и доступность сети.")
+                } else if connection.login.pending != nil {
+                    Text("Вернись из Telegram после подтверждения. Если Telegram недоступен, можно подключиться как гость.")
+                } else {
+                    Text("На iPhone маршруты берутся из профиля WireGuard. Изменения применяются при следующем подключении.")
+                }
+                HStack {
+                    Button("Помогло · \(helpful)") { helpful = min(99999, helpful + 1) }
+                    Spacer()
+                    Button("Не помогло · \(unhelpful)") { unhelpful = min(99999, unhelpful + 1) }
+                }.buttonStyle(.borderless)
+                if helpful + unhelpful > 0 { Button("Очистить оценки") { helpful = 0; unhelpful = 0 } }
+            }
         }
         .navigationTitle("Настройки")
         .task { if connection.loggedIn { await connection.refreshAccount() } }
@@ -231,6 +263,9 @@ private struct FlowSettings: View {
             SecureField("https://…", text: $text).textInputAutocapitalization(.never)
             Button("Добавить") { let value = text; text = ""; Task { await connection.importCode(value) } }
             Button("Отмена", role: .cancel) { text = "" }
+        }
+        .confirmationDialog("Удалить сохранённый профиль?", isPresented: Binding(get: { deleteSaved != nil }, set: { if !$0 { deleteSaved = nil } }), presenting: deleteSaved) { profile in
+            Button("Удалить", role: .destructive) { Task { await connection.forgetSaved(profile) } }
         }
         .confirmationDialog("Удалить профиль с iPhone?", isPresented: $remove) {
             Button("Удалить профиль", role: .destructive) { Task { await connection.remove() } }

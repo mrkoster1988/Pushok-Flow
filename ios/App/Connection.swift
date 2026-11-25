@@ -14,11 +14,15 @@ final class Connection: ObservableObject {
     @Published private(set) var kind = "manual"
     @Published private(set) var expires: Date?
     @Published private(set) var server = ""
+    @Published private(set) var saved: [SavedProfile] = []
     @Published private(set) var servers: [ShopFeed.Server] = []
     @Published private(set) var metrics: Traffic?
     @Published private(set) var latency: Int?
     @Published private(set) var account: AccessAPI.Account?
     @Published var message: String?
+    @Published private(set) var preparing: String?
+    private var nextShopPoll = Date.distantPast
+    private var queuedStart = false
     private var manager: NETunnelProviderManager?
     private let api = AccessAPI()
     private let providerID = (Bundle.main.bundleIdentifier ?? "") + ".PacketTunnel"
@@ -36,6 +40,7 @@ final class Connection: ObservableObject {
         defer { busy = false; operation = "" }
         do { try await work() }
         catch let error as AccessError { message = error.errorDescription }
+        catch let error as SavedProfiles.CatalogError { message = error.errorDescription }
         catch is FlowProfileError { message = "Проверь конфигурацию WireGuard и разрешение iOS на добавление подключения." }
         catch is CancellationError { }
         catch { message = "Не удалось завершить действие. Проверь сеть и разрешение iOS, затем повтори." }
@@ -56,6 +61,7 @@ final class Connection: ObservableObject {
             login = try LoginState.load()
             if let challenge = login.pending, challenge.deadline <= Date() { try setLogin(LoginState()) }
             try await readPreferences()
+            saved = try SavedProfiles.load()
         }
     }
     private func setLogin(_ state: LoginState) throws { try state.save(); if state.token != login.token { account = nil }; login = state }
@@ -66,6 +72,7 @@ final class Connection: ObservableObject {
     }
 
     func primary() async {
+        if preparing != nil { preparing = nil; queuedStart = false; return }
         await run("Подключение…") {
             try await readPreferences()
             switch status {
@@ -92,6 +99,7 @@ final class Connection: ObservableObject {
         guard await UIApplication.shared.open(URL(string: "https://pushok.shop/?flow=" + code)!) else { throw AccessError.unavailable }
     }
     private func beginLogin() async throws {
+        preparing = nil; queuedStart = false
         let challenge = try await api.begin()
         try setLogin(LoginState(pending: challenge))
         try await openTelegram(challenge)
@@ -107,11 +115,25 @@ final class Connection: ObservableObject {
         guard mayImport else { return }
         await run("Получаем гостевой профиль…") {
             if login.pending != nil { try setLogin(LoginState()) }
+            preparing = nil; queuedStart = false
             try await sync("guest", startAfter: true)
         }
     }
     func poll() async {
-        guard !busy, UIApplication.shared.applicationState == .active, var challenge = login.pending else { return }
+        guard !busy, UIApplication.shared.applicationState == .active else { return }
+        if queuedStart {
+            queuedStart = false
+            await run("Подключение…") { try await start() }
+            return
+        }
+        if let source = preparing {
+            if Date() >= nextShopPoll {
+                preparing = nil
+                await run("Проверяем профиль…") { try await sync(source, startAfter: true) }
+            }
+            return
+        }
+        guard var challenge = login.pending else { return }
         if Date() >= challenge.deadline {
             await run("") { try setLogin(LoginState()); throw AccessError.denied }; return
         }
@@ -149,8 +171,30 @@ final class Connection: ObservableObject {
             if let token { try? await api.logout(token) }
         }
     }
-    func remove() async { guard mayImport else { return }; await run("") { try await removeProfile() } }
+    func remove() async {
+        guard mayImport else { return }
+        await run("") {
+            let id = meta["localID"] as? String
+            try await removeProfile()
+            if let id { try SavedProfiles.forget(id); saved = try SavedProfiles.load() }
+        }
+    }
+    func selectSaved(_ profile: SavedProfile) async {
+        guard mayImport else { return }
+        await run("Выбираем профиль…") {
+            try await importData(Data(profile.value.utf8), name: profile.name)
+        }
+    }
+    func forgetSaved(_ profile: SavedProfile) async {
+        guard mayImport else { return }
+        await run("") {
+            if meta["localID"] as? String == profile.id { try await removeProfile() }
+            try SavedProfiles.forget(profile.id)
+            saved = try SavedProfiles.load()
+        }
+    }
     private func removeProfile() async throws {
+        preparing = nil; queuedStart = false
         guard let manager else { return }
         try ensureStopped()
         let ref = manager.protocolConfiguration?.passwordReference
@@ -173,14 +217,19 @@ final class Connection: ObservableObject {
         if source == "link" {
             if let imported { url = imported }
             else {
-                guard let data = try PrivateStore.read("feed-" + (meta["feedID"] as? String ?? "")),
-                      let value = String(data: data, encoding: .utf8), let saved = AccessAPI.feedURL(value) else { throw AccessError.invalid }
-                url = saved
+                guard let localID = meta["localID"] as? String,
+                      let profile = try SavedProfiles.load().first(where: { $0.id == localID && $0.isLink }),
+                      let link = AccessAPI.feedURL(profile.value) else { throw AccessError.invalid }
+                url = link
             }
         } else {
             if source == "account" && !loggedIn { throw AccessError.login }
             do {
                 url = try await api.shopURL(token: source == "account" ? login.token : nil)
+            } catch AccessError.pending where startAfter {
+                preparing = source
+                nextShopPoll = Date().addingTimeInterval(source == "guest" ? 8 : 45)
+                return
             } catch AccessError.login {
                 if source == "account" { try setLogin(LoginState()) }
                 throw AccessError.login
@@ -209,7 +258,11 @@ final class Connection: ObservableObject {
             info["authUntil"] = deadline.timeIntervalSince1970
             info["sessionTag"] = sessionTag
         }
-        if source == "link" { try PrivateStore.write(Data(url.absoluteString.utf8), "feed-" + feedID) }
+        if source == "link" {
+            let entry = try SavedProfiles.remember(url.absoluteString, name: profile.name, isLink: true)
+            info["localID"] = entry.id
+            saved = try SavedProfiles.load()
+        }
         if !same || meta["kind"] as? String != source || meta["fingerprint"] as? String != fingerprint ||
             meta["selected"] as? String != profile.id || (source == "account" && meta["sessionTag"] as? String != sessionTag) {
             try await install(Data(profile.config.utf8), info: info)
@@ -225,6 +278,10 @@ final class Connection: ObservableObject {
         try ensureStopped()
         let target = manager ?? NETunnelProviderManager()
         let previous = target.protocolConfiguration?.passwordReference
+        if let previous, kind == "manual", meta["localID"] == nil, let oldText = String(data: try FlowProfile.load(previous), encoding: .utf8) {
+            _ = try SavedProfiles.remember(oldText, name: server.isEmpty ? "WireGuard" : server, isLink: false)
+            saved = try SavedProfiles.load()
+        }
         let reference = try FlowProfile.save(data)
         let settings = NETunnelProviderProtocol()
         settings.providerBundleIdentifier = providerID
@@ -240,7 +297,9 @@ final class Connection: ObservableObject {
         try await readPreferences()
     }
     private func start() async throws {
-        guard let manager, UIApplication.shared.applicationState == .active else { return }
+        guard let manager else { throw AccessError.invalid }
+        guard UIApplication.shared.applicationState == .active else { queuedStart = true; return }
+        queuedStart = false
         try await manager.loadFromPreferences()
         try ensureStopped()
         if !manager.isEnabled {
@@ -248,16 +307,22 @@ final class Connection: ObservableObject {
             try await manager.saveToPreferences()
             try await manager.loadFromPreferences()
         }
+        guard canStartManagedProfile(meta) else { throw AccessError.expired }
         try manager.connection.startVPNTunnel()
         updateStatus()
     }
-    private func importData(_ data: Data) async throws {
+    private func importData(_ data: Data, name: String = "WireGuard") async throws {
+        preparing = nil; queuedStart = false
         guard data.count <= FlowProfile.maximumSize else { throw FlowProfileError.invalid }
         if let text = String(data: data, encoding: .utf8),
            let url = AccessAPI.feedURL(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
             try await sync("link", startAfter: false, imported: url)
         } else {
-            try await install(data, info: ["kind":"manual", "name":"WireGuard"])
+            _ = try FlowProfile.parse(data)
+            guard let text = String(data: data, encoding: .utf8) else { throw FlowProfileError.invalid }
+            let entry = try SavedProfiles.remember(text, name: name, isLink: false)
+            saved = try SavedProfiles.load()
+            try await install(data, info: ["kind":"manual", "localID":entry.id, "name":entry.name])
             servers = []
         }
         if login.pending != nil { try setLogin(LoginState()) }
@@ -274,7 +339,7 @@ final class Connection: ObservableObject {
             let file = try FileHandle(forReadingFrom: url)
             defer { try? file.close() }
             guard let data = try file.read(upToCount: FlowProfile.maximumSize + 1) else { throw FlowProfileError.invalid }
-            try await importData(data)
+            try await importData(data, name: url.deletingPathExtension().lastPathComponent)
         }
     }
     func proxyURL() async throws -> URL { try await api.proxyURL() }
