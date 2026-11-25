@@ -420,7 +420,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
     final accepted = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: const Text('Отвязать подключение?'),
       content: const SingleChildScrollView(child: Text(
-        'Личная WireGuard-подписка будет удалена только с этого телефона. '
+        'Личная подписка будет удалена только с этого телефона. '
         'Остальные серверы и настройки аккаунта сохранятся. '
         'Перед отвязкой отключите туннель. '
         'Это действие не отзывает уже выданный ключ на сервере Shop.'
@@ -459,13 +459,13 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
 
   String _shopStateText() => switch (_shopSyncState) {
     'active' => 'Личная подписка добавлена. Выберите сервер и нажмите «Подключить».',
-    'pending' => 'WGDashboard готовит подключение. Flow проверит готовность автоматически.',
+    'pending' => 'Сервер готовит подключение. Flow проверит готовность автоматически.',
     'expired' => 'Срок личного подключения истёк. Продлите его в Shop.',
     'revoked' => 'Личное подключение отозвано на сервере.',
     'disabled' => 'Автоматическая выдача доступа пока не включена владельцем Shop.',
     'unavailable' => 'В Shop пока нет доступного подключения для вашего аккаунта.',
     'link_disabled' => 'Личная ссылка отключена в Shop. Включите её в кабинете.',
-    _ => 'Получайте действующую подписку WireGuard без QR-кода.',
+    _ => 'Получайте действующую подписку Flow без QR-кода.',
   };
 
   Widget _shopControls(bool enabled) => Column(
@@ -588,7 +588,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
         'кабинета MTProxy. Списание денег и управление рекламой отсюда недоступны. '
         'Сессия действует 12 часов.\n\n'
         'Баланс MTProxy и подключение серверов Flow учитываются отдельно. '
-        'Свою WireGuard-подписку можно получить в этом профиле после отдельного согласия. '
+        'Свою подписку можно получить в этом профиле после отдельного согласия. '
         'Серверы можно также добавлять в разделе «Серверы».'
       )),
       actions: [TextButton(onPressed: () => Navigator.of(context).pop(),
@@ -682,7 +682,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
         const SizedBox(height: 6),
         Text(switch (_shopSyncState) {
           'active' => 'Ваше личное подключение готово',
-          'pending' => 'Shop создаёт WireGuard-профиль. Подключение появится после выдачи.',
+          'pending' => 'Shop создаёт профиль. Подключение появится после выдачи.',
           'expired' => 'Срок подключения истёк. Продлите подписку в Shop.',
           'revoked' => 'Доступ отозван в Shop.',
           'disabled' => 'Автовыдача отключена в Shop. Включить её может разработчик.',

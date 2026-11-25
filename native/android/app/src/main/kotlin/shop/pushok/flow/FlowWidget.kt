@@ -22,6 +22,9 @@ class WidgetControlActivity : MainActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         consumed = savedInstanceState != null
         super.onCreate(savedInstanceState)
+        // A quick action needs the existing profile and approval flow but no Flutter screen.
+        setContentView(android.widget.FrameLayout(this))
+        if (consumed || intent.action !in setOf(FlowWidget.CONNECT, FlowWidget.STOP)) finish()
     }
 
     override fun onPostResume() {
@@ -52,11 +55,11 @@ class FlowWidget : AppWidgetProvider() {
 
     companion object {
         const val CONNECT = "shop.pushok.flow.widget.CONNECT"
-        private const val STOP = "shop.pushok.flow.widget.STOP"
+        const val STOP = "shop.pushok.flow.widget.STOP"
         private const val NOTICE = 3602
         private val worker = Executors.newSingleThreadExecutor()
 
-        private fun action(context: Context, command: String): PendingIntent {
+        internal fun action(context: Context, command: String): PendingIntent {
             val intent = if (command == "open") Intent(context, MainActivity::class.java)
                 else Intent(context, WidgetControlActivity::class.java).setAction(command)
             return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
@@ -64,7 +67,7 @@ class FlowWidget : AppWidgetProvider() {
 
         fun render(context: Context, state: String) {
             val text = when (state) {
-                "wireguard" -> "Подключено · WireGuard"
+                "wireguard", "connected" -> "Подключено"
                 "disconnected" -> "Отключено"
                 "waiting_network" -> "Ожидание сети"
                 "starting" -> "Подключение…"
@@ -77,14 +80,15 @@ class FlowWidget : AppWidgetProvider() {
                 else -> "open"
             }
             val views = RemoteViews(context.packageName, R.layout.flow_widget)
-            views.setTextViewText(R.id.flow_status, "Pushok Flow · " + text)
-            views.setTextViewText(R.id.flow_action, when (command) {
+            views.setTextViewText(R.id.flow_status, text)
+            views.setTextColor(R.id.flow_action, if (command == STOP) 0xFF53E9D2.toInt() else 0xFFBBD7E4.toInt())
+            views.setContentDescription(R.id.flow_action, "Pushok Flow. $text. " + when (command) {
                 CONNECT -> "Подключить"
                 STOP -> "Отключить"
-                else -> "Открыть Flow"
+                else -> "Открыть"
             })
             views.setOnClickPendingIntent(R.id.flow_action, action(context, command))
-            views.setOnClickPendingIntent(R.id.flow_status, action(context, "open"))
+            views.setOnClickPendingIntent(R.id.flow_status, action(context, command))
             AppWidgetManager.getInstance(context).updateAppWidget(ComponentName(context, FlowWidget::class.java), views)
         }
 
@@ -98,10 +102,12 @@ class FlowWidget : AppWidgetProvider() {
                 Notification.Builder(context, channel)
             } else Notification.Builder(context)
             val notice = builder.setSmallIcon(R.drawable.ic_flow_tunnel).setContentTitle("Pushok Flow")
-                .setContentText("Подключено · WireGuard").setContentIntent(action(context, "open"))
+                .setContentText("Подключено").setContentIntent(action(context, "open"))
                 .setOngoing(true).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_SECRET)
                 .addAction(Notification.Action.Builder(null, "Отключить", action(context, STOP)).build()).build()
-            manager.notify(NOTICE, notice)
+            try { manager.notify(NOTICE, notice) } catch (_: SecurityException) {
+                // The user may have disabled notifications; the tunnel is already running.
+            }
         }
     }
 }

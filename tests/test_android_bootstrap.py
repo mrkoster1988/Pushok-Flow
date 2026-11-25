@@ -261,7 +261,7 @@ dependencies {
                 app = self.patch().find("application")
                 self.assertEqual(app.get(ANDROID + "allowBackup"), "false")
                 self.assertEqual([service.get(ANDROID + "name") for service in app.findall("service")],
-                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, "shop.pushok.flow.FlowPush"])
+                                 [".OtherService", PATCH.UPDATE_FOREGROUND_SERVICE, "shop.pushok.flow.FlowTile", "shop.pushok.flow.FlowPush"])
 
     def test_update_receivers_are_private_deduplicated_and_keep_unrelated_receiver(self):
         self.write_manifest(services='''<receiver android:name=".UpdateInstallReceiver"

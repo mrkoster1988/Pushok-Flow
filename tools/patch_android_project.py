@@ -69,6 +69,9 @@ def patch_manifest(path: Path) -> None:
     if app is None:
         raise ValueError("Android manifest has no application element")
 
+    app.set(ANDROID + "icon", "@mipmap/flow_launcher")
+    app.set(ANDROID + "roundIcon", "@mipmap/flow_launcher")
+
     # A custom link opens an import draft in our existing Activity. Flutter's router
     # must not receive the bearer URL as an initial route before native validation.
     main_activities = [item for item in app.findall("activity")
@@ -217,8 +220,22 @@ def patch_manifest(path: Path) -> None:
             ET.SubElement(element, "meta-data", {ANDROID + "name": "android.appwidget.provider",
                                                  ANDROID + "resource": "@xml/flow_widget"})
         else:
+            element.set(ANDROID + "theme", "@style/FlowQuickControl")
+            element.set(ANDROID + "configChanges", "orientation|screenSize|keyboardHidden")
             element.set(ANDROID + "excludeFromRecents", "true")
             element.set(ANDROID + "taskAffinity", "shop.pushok.flow.widget")
+
+    tile_name = "shop.pushok.flow.FlowTile"
+    tile = next((s for s in app.findall("service") if s.get(ANDROID + "name") == tile_name), None)
+    if tile is None:
+        tile = ET.SubElement(app, "service")
+    tile.clear()
+    for attribute, value in {"name": tile_name, "exported": "true",
+                             "icon": "@drawable/ic_flow_tunnel", "label": "Pushok Flow",
+                             "permission": "android.permission.BIND_QUICK_SETTINGS_TILE"}.items():
+        tile.set(ANDROID + attribute, value)
+    tile_filter = ET.SubElement(tile, "intent-filter")
+    ET.SubElement(tile_filter, "action", {ANDROID + "name": "android.service.quicksettings.action.QS_TILE"})
 
     push = next((service for service in app.findall("service")
                  if service.get(ANDROID + "name") == "shop.pushok.flow.FlowPush"), None)

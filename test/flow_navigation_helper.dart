@@ -46,6 +46,11 @@ Future<void> flowNavigate(WidgetTester tester, String destination) async {
     }
     await tester.pump();
   }
+  if (destination == 'Pushok ИИ' && target.evaluate().isEmpty) {
+    await tester.ensureVisible(find.text('Дополнительно'));
+    await tester.tap(find.text('Дополнительно'));
+    await tester.pumpAndSettle();
+  }
   if (target.evaluate().isEmpty) {
     await tester.scrollUntilVisible(target, 130,
       scrollable: find.descendant(

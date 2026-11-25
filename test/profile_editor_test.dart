@@ -1032,11 +1032,11 @@ void main() {
   });
 
   for (final invalid in [
-    ('blank', ' \n ', 'Добавьте конфигурацию WireGuard перед сохранением.'),
+    ('blank', ' \n ', 'Добавьте конфигурацию подключения перед сохранением.'),
     ('oversized', 'x' * 65537, 'Профиль слишком большой: максимум 65 536 символов.'),
     ('UUID', ' 00000000-0000-4000-8000-000000000000\n',
       'Вставлен только UUID. '
-          'Нужен профиль WireGuard .conf с разделами [Interface] и [Peer].'),
+          'Нужен профиль .conf с разделами [Interface] и [Peer].'),
   ]) {
     testWidgets('${invalid.$1} input never reaches the save callback', (tester) async {
       var saves = 0;
@@ -1055,15 +1055,15 @@ void main() {
 
   for (final failure in [
     ('INVALID_CONFIG', 'Некорректный профиль подключения. Проверьте конфигурацию или ссылку.'),
-    ('INVALID_VLESS_CONFIG', 'В этой версии доступен WireGuard. Импортируйте профиль .conf.'),
+    ('INVALID_VLESS_CONFIG', 'Импортируйте профиль .conf.'),
     ('UNSUPPORTED_PROFILE',
-      'Этот формат пока не поддерживается. Добавьте профиль WireGuard .conf.'),
+      'Этот формат пока не поддерживается. Добавьте профиль .conf.'),
     ('UNSUPPORTED_TRANSPORT',
-      'Для подключения нужен профиль WireGuard .conf.'),
+      'Для подключения нужен профиль .conf.'),
     ('UNSUPPORTED_SECURITY',
-      'Для подключения нужен профиль WireGuard .conf.'),
+      'Для подключения нужен профиль .conf.'),
     ('UNSUPPORTED_PROFILE_OPTION',
-      'Для подключения нужен профиль WireGuard .conf.'),
+      'Для подключения нужен профиль .conf.'),
     ('PROFILE_SAVE_FAILED',
       'Не удалось сохранить профиль. Проверьте конфигурацию и попробуйте снова.'),
     ('UNEXPECTED_NATIVE_CODE', 'Не удалось сохранить профиль. Попробуйте ещё раз.'),
@@ -1301,7 +1301,7 @@ void main() {
     for (final failure in [
       ('PROFILE_IMPORT_TOO_LARGE', 'Файл слишком большой: максимум 65 536 байт.'),
       ('PROFILE_IMPORT_INVALID',
-        'Нужен текстовый профиль WireGuard .conf.'),
+        'Нужен текстовый профиль .conf.'),
       ('PROFILE_IMPORT_BUSY', 'Выбор файла уже открыт. Завершите его и попробуйте ещё раз.'),
       ('PROFILE_IMPORT_SOURCE_BUSY',
         'Источник файлов пока занят. Попробуйте QR камерой или вставьте текст профиля.'),
@@ -1577,9 +1577,9 @@ void main() {
       ('PROFILE_IMPORT_INVALID', 'В QR-коде нет поддерживаемого профиля.'),
       ('INVALID_VLESS_CONFIG', 'В этой версии доступен WireGuard.'),
       ('UNSUPPORTED_PROFILE', 'Этот формат пока не поддерживается.'),
-      ('UNSUPPORTED_TRANSPORT', 'Для подключения нужен профиль WireGuard .conf.'),
-      ('UNSUPPORTED_SECURITY', 'Для подключения нужен профиль WireGuard .conf.'),
-      ('UNSUPPORTED_PROFILE_OPTION', 'Для подключения нужен профиль WireGuard .conf.'),
+      ('UNSUPPORTED_TRANSPORT', 'Для подключения нужен профиль .conf.'),
+      ('UNSUPPORTED_SECURITY', 'Для подключения нужен профиль .conf.'),
+      ('UNSUPPORTED_PROFILE_OPTION', 'Для подключения нужен профиль .conf.'),
       ('UNKNOWN_QR_ERROR', 'Не удалось прочитать QR-код.'),
     ]) {
       var saves = 0;
@@ -2086,7 +2086,7 @@ void main() {
     expect(saved, isNull);
     await _tapEditorKey(tester, _info);
     await tester.pumpAndSettle();
-    expect(find.textContaining('QR WireGuard из WGDashboard'), findsOneWidget);
+    expect(find.textContaining('QR из панели сервера'), findsOneWidget);
     expect(find.textContaining('WireGuard нужен полный профиль .conf'), findsOneWidget);
     expect(find.textContaining('В 3x-ui'), findsNothing);
     expect(find.textContaining('на видео он может выглядеть чёрным'), findsOneWidget);

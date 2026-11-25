@@ -226,7 +226,7 @@ class WireGuardQrActivity : Activity() {
         val camera = scanner ?: return
         if (!camera.barcodeView.isPreviewActive) return
         val activeEpoch = epoch
-        scanStatus?.text = "QR WireGuard или VLESS: поместите код целиком в рамку."
+        scanStatus?.text = "QR подключения: поместите код целиком в рамку."
         clearScanHint()
         scanHint = Runnable {
             scanHint = null

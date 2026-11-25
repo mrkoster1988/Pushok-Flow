@@ -141,7 +141,7 @@ class WireGuardProfilesCard extends StatelessWidget {
             if (profiles != null && !loading && error == null) ...[
               const SizedBox(height: 12),
               Text(profiles.isEmpty
-                  ? 'Профилей пока нет. Добавьте профиль WireGuard .conf.'
+                  ? 'Профилей пока нет. Добавьте профиль .conf.'
                   : 'Сохранено ${profiles.length} из ${WireGuardProfiles.maxProfiles}',
                 key: const Key('wireguard_profiles_count'),
                 style: const TextStyle(color: PushokPalette.muted)),

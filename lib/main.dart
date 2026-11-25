@@ -2,7 +2,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'design/pushok_theme.dart';
 import 'models/app_version.dart';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, Socket, SocketException;
+import 'platform/app_updates.dart';
 import 'dart:async' show Timer, unawaited;
 import 'platform/android_app_routes.dart';
 import 'platform/route_recommendations.dart';
@@ -203,7 +204,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         case 'UNSUPPORTED_TRANSPORT':
         case 'UNSUPPORTED_SECURITY':
         case 'UNSUPPORTED_PROFILE_OPTION':
-          return 'В этой версии доступен WireGuard. Добавьте профиль .conf.';
+          return 'Добавьте профиль .conf.';
         case 'PROFILE_LOAD_FAILED':
           return 'Не удалось открыть сохранённый профиль. Откройте «Серверы» и повторите проверку.';
         case 'PROFILE_READ_TIMEOUT':
@@ -342,6 +343,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   /// connection path and its server-side entitlement checks. Only an empty
   /// catalog starts the verified account → Shop → import → connect sequence.
   void _handlePowerTap() {
+    _linkEpoch++;
+    _lastPing = null;
+    _pingMs = null;
     if (!_canToggleTunnel) return;
     if (_ownsTunnel || _profiles?.activeProfile != null) {
       unawaited(_toggleTunnel());
@@ -434,10 +438,52 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     _startHealthPolling();
   }
 
+  bool _updateOffered = false;
+  int? _pingMs;
+  bool _pingPending = false;
+  DateTime? _lastPing;
+  int _linkEpoch = 0;
+
+  Future<void> _homeUpdateStatus() async {
+    if (!_isAndroid) return;
+    try {
+      final status = await AppUpdates(isAndroid: true).updateStatus();
+      if (mounted && _foreground && _updateOffered != status.hasNewerVersion) {
+        setState(() => _updateOffered = status.hasNewerVersion);
+      }
+    } catch (_) { /* Offline: retain the last confirmed update state. */ }
+  }
+
+  Future<void> _measurePing() async {
+    if (!Platform.isAndroid || !_foreground || !_tunnelConfirmed || _pingPending) return;
+    final now = DateTime.now();
+    if (_lastPing != null && now.difference(_lastPing!) < const Duration(seconds: 8)) return;
+    _lastPing = now;
+    final epoch = _linkEpoch;
+    _pingPending = true;
+    Socket? socket;
+    int? elapsed;
+    try {
+      final clock = Stopwatch()..start();
+      socket = await Socket.connect('pushok.shop', 443, timeout: const Duration(seconds: 3));
+      elapsed = clock.elapsedMilliseconds;
+    } on SocketException {
+      elapsed = null;
+    } finally {
+      socket?.destroy();
+      _pingPending = false;
+      if (mounted && _foreground && _tunnelConfirmed && epoch == _linkEpoch && _pingMs != elapsed) {
+        setState(() => _pingMs = elapsed);
+      }
+    }
+  }
+
   void _startHealthPolling() {
     _healthPoll?.cancel();
+    unawaited(_homeUpdateStatus());
     if (!_isAndroid || !_foreground) return;
     _healthPoll = Timer.periodic(const Duration(seconds: 10), (_) {
+      unawaited(_homeUpdateStatus());
       if ((_ownsTunnel || _nativeBusy || !_diagnostics.isKnown) &&
           !connecting && mounted && _foreground) _refreshProfileStatus();
     });
@@ -445,6 +491,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _linkEpoch++;
+    _lastPing = null;
+    _pingMs = null;
     _foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _startHealthPolling();
@@ -1054,6 +1103,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     } finally {
       if (mounted) {
         setState(() => _statusRefreshing = false);
+        if (_tunnelConfirmed) {
+          unawaited(_measurePing());
+        } else {
+          _linkEpoch++;
+          _pingMs = null;
+        }
         _notifyInformation();
         // Coalesce a resume/connect refresh behind an older in-flight sample.
         if (_foreground && !connecting && epoch != _statusEpoch) {
@@ -1543,12 +1598,14 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     3 => 'Pushok ИИ',
     4 => 'Аккаунт и обновления',
     5 => 'Справка',
+    6 => 'Обновление',
     _ => 'Настройки',
   };
 
   Widget _settingsContent() {
     if (_settingsLanding) return FlowSettingsMenu(onSelect: _selectTab);
     return switch (tab) {
+      6 => ListView(children: [AppUpdatesCard(isAndroid: _isAndroid)]),
       1 => routes(),
       2 => servers(),
       3 => assistant(),
@@ -1563,7 +1620,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: !_settingsOpen,
       appBar: AppBar(
+        backgroundColor: _settingsOpen ? null : Colors.transparent,
         leading: _settingsOpen ? IconButton(
           key: const Key('flow_settings_back'),
           tooltip: _settingsLanding ? 'На главную' : 'Назад к настройкам',
@@ -1582,7 +1641,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
             onPressed: connecting || _profileBusy || _profileEditorOpen
                 ? null : _openInformation,
           ),
-        ] : !_settingsOpen ? [IconButton(
+        ] : !_settingsOpen ? [
+          Center(child: Text(appVersionName, style: const TextStyle(fontWeight: FontWeight.w600))),
+          if (_updateOffered) TextButton(onPressed: () => _selectTab(6), child: const Text('Обновить')),
+          IconButton(
           key: const Key('flow_settings_button'),
           icon: const Icon(Icons.settings_outlined),
           tooltip: 'Настройки',
@@ -1590,7 +1652,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         )] : [],
       ),
       body: PushokNeonBackdrop(child: SafeArea(child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: EdgeInsets.fromLTRB(14, _settingsOpen ? 14 : kToolbarHeight + 4, 14, 12),
         child: _settingsOpen ? _settingsContent() : home(),
       ))),
     );
@@ -1599,13 +1661,20 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
 
   Widget home() => LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(
     key: const Key('flow_home_screen'),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    child: ConstrainedBox(constraints: BoxConstraints(minHeight: constraints.maxHeight),
+      child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Column(children: [
       Center(child: AnimatedPushokMascot(
         key: const Key('pushok_mascot'),
         height: constraints.maxHeight < 590 ? 84 : 112,
         connected: _tunnelConfirmed)),
       const SizedBox(height: 10),
-      Center(child: AnimatedContainer(
+      Center(child: GestureDetector(
+        onVerticalDragEnd: (drag) {
+          if ((drag.primaryVelocity ?? 0) < -220 && _canToggleTunnel && !_ownsTunnel) _handlePowerTap();
+        },
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 450),
         width: constraints.maxWidth < 340 ? 152 : 174,
         height: constraints.maxWidth < 340 ? 152 : 174,
@@ -1632,7 +1701,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
                 fontWeight: FontWeight.w800, fontSize: 18)),
           ]),
         )),
-      )),
+      ))),
       const SizedBox(height: 13),
       // The power button controls login, provisioning and eventual connect.
       // The compact status below is informational, not another login step.
@@ -1655,8 +1724,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         onOpenHub: _isAndroid && _foreground && !_openingPushok
             ? _openPushokHub : null,
       ),
-      const SizedBox(height: 11),
-      FlowConnectionVitals(
+      ]),
+      Padding(padding: const EdgeInsets.only(top: 10), child: FlowConnectionVitals(
+        pingMs: _tunnelConfirmed ? _pingMs : null,
+        renew: _isAndroid && _homeAccountAuthorized && _foreground
+            ? () => _homeAccountKey.currentState?.openRenewal() : null,
         selected: _profiles?.activeProfile,
         selectionCurrent: _foreground && !_statusRefreshing &&
             !_profileBusy && !_profileEditorOpen && !_diagnosticsStale &&
@@ -1672,20 +1744,9 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         recovery: _recovery,
         isAndroid: _isAndroid,
       ),
-      if (_isAndroid && _homeAccountAuthorized) ...[
-        const SizedBox(height: 7),
-        OutlinedButton.icon(
-          key: const Key('home_renew_subscription'),
-          onPressed: _foreground
-              ? () => _homeAccountKey.currentState?.openRenewal() : null,
-          icon: const Icon(Icons.event_repeat_outlined),
-          label: const Text('Продлить подписку через Shop'),
-        ),
-      ],
-    ]),
+      ),
+    ])),
   ));
-
-
 
   Widget routes() => AppRoutesView(
     apps: installed,

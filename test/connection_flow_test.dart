@@ -1439,7 +1439,7 @@ void main() {
       await tester.tap(find.byKey(const Key('open_app_information')));
       await tester.pumpAndSettle();
       expect(find.text('VLESS'), findsOneWidget);
-      expect(find.text('Рукопожатие WireGuard'), findsNothing);
+      expect(find.text('Последний отклик'), findsNothing);
       expect(find.textContaining('example.invalid'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -1548,8 +1548,8 @@ void main() {
   });
 
   for (final entry in {
-    'SUBSCRIPTION_EXPIRED': 'Срок доступа WireGuard истёк. Обновите подписку после продления доступа.',
-    'SUBSCRIPTION_REVOKED': 'Доступ WireGuard отозван сервисом. Проверьте подписку в панели провайдера.',
+    'SUBSCRIPTION_EXPIRED': 'Срок доступа истёк. Обновите подписку после продления доступа.',
+    'SUBSCRIPTION_REVOKED': 'Доступ отозван сервисом. Проверьте подписку в панели провайдера.',
   }.entries) {
     testWidgets('Managed access failure ${entry.key} stops loading and explains recovery', (tester) async {
       bridge.savedProfile = _profile;

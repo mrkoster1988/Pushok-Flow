@@ -104,7 +104,7 @@ class TunnelDiagnosticsCard extends StatelessWidget {
 
   void _showHelp(BuildContext context) {
     final transportHelp = _wireGuard
-        ? 'Рукопожатие WireGuard означает, что туннель обменялся ключами '
+        ? 'Последний отклик показывает, когда туннель обменялся ключами '
           'хотя бы с одним узлом. Здесь показано последнее известное '
           'рукопожатие среди узлов профиля.\n\n'
           'Даже недавнее рукопожатие не подтверждает доступность сайтов, '
@@ -177,7 +177,7 @@ class TunnelDiagnosticsCard extends StatelessWidget {
             ),
           ],
           if (_wireGuard)
-            _metric('Рукопожатие WireGuard', _handshake,
+            _metric('Последний отклик', _handshake,
                 const Key('tunnel_handshake_value')),
           if (diagnostics.protocol == TunnelProtocol.vless)
             _metric('Протокол', 'VLESS', const Key('tunnel_protocol_value')),

@@ -17,8 +17,6 @@ class FlowSettingsMenu extends StatelessWidget {
       leading: Icon(icon, color: PushokPalette.glowCyan, size: 26),
       title: Text(title, style: const TextStyle(fontSize: 16,
         fontWeight: FontWeight.w700)),
-      subtitle: Text(caption, style: const TextStyle(
-        color: PushokPalette.muted, fontSize: 12)),
       trailing: const Icon(Icons.chevron_right, color: PushokPalette.muted),
       onTap: () => onSelect(section),
     ),
@@ -28,10 +26,6 @@ class FlowSettingsMenu extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     key: const Key('flow_settings_menu'),
     children: [
-      const Padding(padding: EdgeInsets.fromLTRB(4, 4, 4, 13),
-        child: Text('На главной осталось только подключение. '
-          'Все остальные функции доступны здесь.',
-          style: TextStyle(color: PushokPalette.muted, fontSize: 13))),
       _entry('settings_help','Справка',
         'Как начать, управление доступом и диагностика', Icons.help_outline,5),
       const SizedBox(height: 9),
@@ -44,8 +38,9 @@ class FlowSettingsMenu extends StatelessWidget {
       _entry('settings_profile','Аккаунт и обновления',
         'MTProxy, баланс и новая версия Flow',Icons.person_outline,4),
       const SizedBox(height: 9),
-      _entry('settings_assistant','Pushok ИИ',
-        'Оценка связи и локальная память',Icons.auto_awesome_outlined,3),
+      ExpansionTile(title: const Text('Дополнительно'), children: [
+        _entry('settings_assistant','Pushok ИИ', '', Icons.auto_awesome_outlined,3),
+      ]),
     ],
   );
 }
@@ -65,7 +60,7 @@ class FlowHelpPage extends StatelessWidget {
           const Text('Как подключиться',
             style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
           const SizedBox(height: 12),
-          const Text('1. На главной нажмите «Войти через Telegram». '
+          const Text('1. На главной нажмите «Подключить». '
             'Подтвердите код в MTProxy.'),
           const SizedBox(height: 8),
           const Text('2. Нажмите «Получить конфиг». '
@@ -85,9 +80,9 @@ class FlowHelpPage extends StatelessWidget {
           const Text('Показатели и диагностика',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
           const SizedBox(height: 9),
-          const Text('Пинг на главной не показывается числом, пока '
-            'его реально не измерили. Возраст последнего '
-            'WireGuard-рукопожатия — не пинг. Срок доступа относится '
+          const Text('Пинг показывает время подключения к pushok.shop по TCP. '
+            'Прочерк означает, что замера пока нет. Возраст последнего '
+            'обмена ключами — не пинг. Срок доступа относится '
             'только к выбранному профилю.',
             style: TextStyle(color: PushokPalette.muted)),
           const SizedBox(height: 12),

@@ -90,14 +90,14 @@ void main() {
     });
   }
 
-  testWidgets('VLESS shows local tunnel status without a WireGuard handshake or invented counters',
+  testWidgets('VLESS shows local tunnel status without a Последний отклик or invented counters',
       (tester) async {
     await _showCard(tester, diagnostics: const TunnelDiagnostics(
       isKnown: true, connected: true, protocol: TunnelProtocol.vless,
       uptimeSeconds: 90,
     ));
     expect(find.text('VLESS'), findsOneWidget);
-    expect(find.text('Рукопожатие WireGuard'), findsNothing);
+    expect(find.text('Последний отклик'), findsNothing);
     expect(find.byKey(const Key('tunnel_handshake_value')), findsNothing);
     expect(_value(tester, 'tunnel_rx_value'), '—');
     expect(_value(tester, 'tunnel_tx_value'), '—');
@@ -107,14 +107,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Состояние VLESS'), findsOneWidget);
     expect(find.textContaining('не подтверждает доступность сайтов'), findsOneWidget);
-    expect(find.textContaining('Рукопожатие WireGuard'), findsNothing);
+    expect(find.textContaining('Последний отклик'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('Unknown protocol never renders a guessed VLESS or WireGuard label', (tester) async {
     await _showCard(tester, diagnostics: const TunnelDiagnostics.unavailable(connected: true));
     expect(find.text('VLESS'), findsNothing);
-    expect(find.text('Рукопожатие WireGuard'), findsNothing);
+    expect(find.text('Последний отклик'), findsNothing);
     await tester.tap(find.byKey(const Key('info_tunnel_diagnostics')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Протокол и свежие показатели пока неизвестны.'), findsOneWidget);

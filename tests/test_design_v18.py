@@ -8,8 +8,8 @@ class DesignV18Tests(unittest.TestCase):
         self.assertIn('theme: buildPushokTheme()', main)
         self.assertIn('PushokPanel', main)
     def test_mascot_asset(self):
-        self.assertTrue((ROOT / 'assets/mascot/pushok.png').is_file())
-        self.assertIn('assets/mascot/pushok.png', (ROOT / 'pubspec.yaml').read_text())
+        self.assertTrue((ROOT / 'assets/mascot/pushok.webp').is_file())
+        self.assertIn('assets/mascot/pushok.webp', (ROOT / 'pubspec.yaml').read_text())
     def test_buttons_and_tones(self):
         theme = (ROOT / 'lib/design/pushok_theme.dart').read_text()
         for token in ('0xFF061827','0xFF102D40','0xFF39C8C3','0xFF087C56','0xFFA92F45','NavigationBarThemeData'):

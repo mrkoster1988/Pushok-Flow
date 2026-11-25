@@ -116,7 +116,7 @@ void main() {
     await tester.pump();
     expect(syncCalls, 1, reason: 'First tap must make the native Shop request.');
     expect(preferenceWrites, 0);
-    expect(find.textContaining('Shop создаёт WireGuard-профиль'), findsOneWidget);
+    expect(find.textContaining('Shop создаёт профиль'), findsOneWidget);
 
     // Automatic polling must remain disabled if the user opted out.
     await tester.pump(const Duration(seconds: 90));

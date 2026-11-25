@@ -67,9 +67,9 @@ class SubscriptionsCard extends StatelessWidget {
       content: const SingleChildScrollView(child: Text(
         'Для подписки откройте HTTPS-ссылку вашего провайдера или отсканируйте её QR-код. '
         'Проверьте название и нажмите «Добавить подписку».\n\n'
-        'Для управляемого WireGuard нужна подписка в формате Flow от вашего сервиса. '
-        'Обычный QR WireGuard или файл .conf добавляется как отдельный профиль. '
-        'Сервис сообщает состояние и срок доступа WireGuard. По истечении срока '
+        'Для управления доступом нужна подписка в формате Flow от вашего сервиса. '
+        'Обычный QR подключения или файл .conf добавляется как отдельный профиль. '
+        'Сервис сообщает состояние и срок доступа. По истечении срока '
         'новые подключения недоступны, даже если настройки ещё сохранены на устройстве. '
         'Ответ сервиса об истечении или отзыве доступа удаляет серверы этой подписки. '
         'Flow не отключает уже работающий туннель автоматически; '
@@ -325,18 +325,18 @@ class _SubscriptionAccessDetailsState extends State<_SubscriptionAccessDetails>
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (entry.isWireGuard) ...[
         Semantics(liveRegion: true, child: Text(switch (state) {
-          SubscriptionAccessState.active => 'Доступ WireGuard активен.',
+          SubscriptionAccessState.active => 'Доступ активен.',
           SubscriptionAccessState.expired =>
-            'Срок доступа WireGuard истёк. Новые подключения недоступны.',
+            'Срок доступа истёк. Новые подключения недоступны.',
           SubscriptionAccessState.revoked =>
-            'Доступ WireGuard отозван сервисом. Новые подключения недоступны.',
+            'Доступ отозван сервисом. Новые подключения недоступны.',
         }, key: ValueKey('subscription_access_state_${entry.id}'),
           style: TextStyle(color: state == SubscriptionAccessState.active
               ? PushokPalette.mint : PushokPalette.orange))),
         const SizedBox(height: 6),
       ],
       Text(entry.isWireGuard && expiry != null
-          ? 'Срок WireGuard: до ${_subscriptionDate(expiry, includeTime: true)}.'
+          ? 'Срок доступа: до ${_subscriptionDate(expiry, includeTime: true)}.'
           : expiry == null ? 'Сервис не передал срок подписки.'
               : expired ? 'По данным сервиса срок истёк ${_subscriptionDate(expiry)}.'
                   : 'Срок по данным сервиса: до ${_subscriptionDate(expiry)}.',

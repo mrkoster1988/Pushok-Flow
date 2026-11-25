@@ -20,8 +20,8 @@ class AnimatedPushokMascot extends StatefulWidget {
 
 class _AnimatedPushokMascotState extends State<AnimatedPushokMascot>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  static const _idleImage = AssetImage('assets/mascot/pushok.png');
-  static const _blinkImage = AssetImage('assets/mascot/pushok_blink.png');
+  static const _idleImage = AssetImage('assets/mascot/pushok.webp');
+  static const _blinkImage = AssetImage('assets/mascot/pushok_blink.webp');
   static const _cycleSeconds = 20.0;
   late final AnimationController _phase;
   bool _foreground = true;

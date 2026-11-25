@@ -80,15 +80,15 @@ void main() {
         onRefresh: (_) { refreshes++; }, onDelete: (_) { deletes++; }));
       final access = tester.widget<Text>(find.byKey(const ValueKey('subscription_access_state_$_id')));
       expect(access.data, contains(switch (state) {
-        'active' => 'Доступ WireGuard активен.',
-        'expired' => 'Срок доступа WireGuard истёк.',
-        _ => 'Доступ WireGuard отозван сервисом.',
+        'active' => 'Доступ активен.',
+        'expired' => 'Срок доступа истёк.',
+        _ => 'Доступ отозван сервисом.',
       }));
       expect(access.style!.color, state == 'active' ? PushokPalette.mint : PushokPalette.orange);
       expect(find.text('example.invalid · Сохранено серверов: ${state == 'active' ? 2 : 0}'),
         findsOneWidget);
       final expiry = tester.widget<Text>(find.byKey(const ValueKey('subscription_expiry_$_id'))).data!;
-      expect(expiry, startsWith('Срок WireGuard: до '));
+      expect(expiry, startsWith('Срок доступа: до '));
       expect(expiry, matches(RegExp(r'\d{2}:\d{2}')));
       expect(find.textContaining('Подписка проверена:'), findsOneWidget);
       expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
@@ -112,8 +112,8 @@ void main() {
     expect(status.subscriptions.single.state, SubscriptionAccessState.active);
     expect(status.subscriptions.single.profileCount, 2);
     expect(find.text('example.invalid · Сохранено серверов: 2'), findsOneWidget);
-    expect(find.text('Срок доступа WireGuard истёк. Новые подключения недоступны.'), findsOneWidget);
-    expect(find.text('Доступ WireGuard активен.'), findsNothing);
+    expect(find.text('Срок доступа истёк. Новые подключения недоступны.'), findsOneWidget);
+    expect(find.text('Доступ активен.'), findsNothing);
     expect(find.byKey(const Key('subscriptions_refresh_warning')), findsNothing);
     expect(find.textContaining('туннель отключён'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -128,13 +128,13 @@ void main() {
     var refreshes = 0;
     await _pump(tester, SubscriptionsCard(status: status, clock: () => now,
       mutationsEnabled: true, onRefresh: (_) { refreshes++; }));
-    expect(find.text('Доступ WireGuard активен.'), findsOneWidget);
+    expect(find.text('Доступ активен.'), findsOneWidget);
     now = now.add(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
-    expect(find.text('Доступ WireGuard активен.'), findsOneWidget);
+    expect(find.text('Доступ активен.'), findsOneWidget);
     now = expiry;
     await tester.pump(const Duration(seconds: 1));
-    expect(find.text('Срок доступа WireGuard истёк. Новые подключения недоступны.'), findsOneWidget);
+    expect(find.text('Срок доступа истёк. Новые подключения недоступны.'), findsOneWidget);
     expect(status.subscriptions.single.state, SubscriptionAccessState.active);
     expect(status.subscriptions.single.profileCount, 2);
     expect(refreshes, 0);
@@ -159,7 +159,7 @@ void main() {
     expect(refreshes, 0);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
-    expect(find.text('Срок доступа WireGuard истёк. Новые подключения недоступны.'), findsOneWidget);
+    expect(find.text('Срок доступа истёк. Новые подключения недоступны.'), findsOneWidget);
     expect(refreshes, 0);
     expect(tester.takeException(), isNull);
   });
@@ -176,8 +176,8 @@ void main() {
       clock: () => now));
     now = expiry;
     await tester.pump(const Duration(seconds: 10));
-    expect(find.text('Доступ WireGuard отозван сервисом. Новые подключения недоступны.'), findsOneWidget);
-    expect(find.textContaining('Срок доступа WireGuard истёк.'), findsNothing);
+    expect(find.text('Доступ отозван сервисом. Новые подключения недоступны.'), findsOneWidget);
+    expect(find.textContaining('Срок доступа истёк.'), findsNothing);
     await _pump(tester, SubscriptionsCard(status: _wireGuardStatus(
       expiresAt: now.add(const Duration(seconds: 10)).millisecondsSinceEpoch), clock: () => now));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -483,7 +483,7 @@ void main() {
     await _pump(tester, SubscriptionsCard(status: _status()));
     await _tap(tester, 'subscriptions_info');
     expect(find.textContaining('Для подписки откройте HTTPS-ссылку вашего провайдера'), findsOneWidget);
-    expect(find.textContaining('Для управляемого WireGuard нужна подписка в формате Flow'), findsOneWidget);
+    expect(find.textContaining('Для управления доступом нужна подписка в формате Flow'), findsOneWidget);
     expect(find.textContaining('Flow не отключает уже работающий туннель автоматически'), findsOneWidget);
 
     expect(tester.takeException(), isNull);

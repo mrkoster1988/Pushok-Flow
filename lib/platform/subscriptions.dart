@@ -287,7 +287,7 @@ String subscriptionErrorMessage(Object error) {
     'SUBSCRIPTION_EMPTY' =>
       'В подписке нет подключений. Уточните срок доступа в магазине.',
     'SUBSCRIPTION_UNSUPPORTED' =>
-      'В подписке нет поддерживаемых подключений. Нужна подписка WireGuard в формате Flow.',
+      'В подписке нет поддерживаемых подключений. Нужна подписка Flow в формате Flow.',
     'UNSUPPORTED_TRANSPORT' ||
     'UNSUPPORTED_SECURITY' || 'UNSUPPORTED_PROFILE_OPTION' =>
       'Подписка содержит неподдерживаемые подключения. Нужны ссылки VLESS: TCP с TLS или REALITY, WebSocket или gRPC с TLS.',
@@ -313,9 +313,9 @@ String subscriptionErrorMessage(Object error) {
     'SUBSCRIPTION_TLS_ERROR' =>
       'Не удалось проверить защищённое соединение с сервером подписки. Уточните у поставщика HTTPS-адрес и сертификат.',
     'SUBSCRIPTION_EXPIRED' =>
-      'Срок доступа WireGuard истёк. Обновите подписку после продления доступа.',
+      'Срок доступа истёк. Обновите подписку после продления доступа.',
     'SUBSCRIPTION_REVOKED' =>
-      'Доступ WireGuard отозван сервисом. Проверьте подписку в панели провайдера.',
+      'Доступ отозван сервисом. Проверьте подписку в панели провайдера.',
     'SUBSCRIPTION_HTTP_ERROR' || 'SUBSCRIPTION_ACCESS_DENIED' ||
     'SUBSCRIPTION_AUTH_REQUIRED' =>
       'Сервис не предоставил список серверов. Проверьте подписку в магазине.',

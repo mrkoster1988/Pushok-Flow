@@ -72,15 +72,15 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
     with WidgetsBindingObserver {
   static const _maxConfigLength = 65536;
   static const _unsupportedProfile =
-      'Этот формат пока не поддерживается. Добавьте профиль WireGuard .conf.';
+      'Этот формат пока не поддерживается. Добавьте профиль .conf.';
   static const _unsupportedTransport =
-      'Для подключения нужен профиль WireGuard .conf.';
+      'Для подключения нужен профиль .conf.';
   static const _invalidVless =
-      'В этой версии доступен WireGuard. Импортируйте профиль .conf.';
+      'Импортируйте профиль .conf.';
   static const _unsupportedSecurity =
-      'Для подключения нужен профиль WireGuard .conf.';
+      'Для подключения нужен профиль .conf.';
   static const _unsupportedOption =
-      'Для подключения нужен профиль WireGuard .conf.';
+      'Для подключения нужен профиль .conf.';
   static const _safeImportCodes = {
     'PROFILE_IMPORT_TOO_LARGE',
     'PROFILE_IMPORT_INVALID',
@@ -204,7 +204,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
   ({String code, String message})? _validationError(String config) {
     if (config.trim().isEmpty) {
       return (code: 'PROFILE_IMPORT_INVALID',
-          message: 'Добавьте конфигурацию WireGuard перед сохранением.');
+          message: 'Добавьте конфигурацию подключения перед сохранением.');
     }
     if (config.length > _maxConfigLength) {
       return (code: 'PROFILE_IMPORT_TOO_LARGE',
@@ -214,7 +214,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
         r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(config.trim())) {
       return (code: 'INVALID_VLESS_CONFIG',
           message: 'Вставлен только UUID. '
-              'Нужен профиль WireGuard .conf с разделами [Interface] и [Peer].');
+              'Нужен профиль .conf с разделами [Interface] и [Peer].');
     }
     // Only reject unsupported schemes here. Native code validates every VLESS
     // field; UI parsing must not normalize, log, or partly accept credentials.
@@ -484,19 +484,19 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
           file ? 'Файл слишком большой: максимум 65 536 байт.'
               : 'Профиль слишком большой: максимум 65 536 байт.',
         'PROFILE_IMPORT_INVALID' => file
-            ? 'Нужен текстовый профиль WireGuard .conf.'
-            : 'В QR-коде нет поддерживаемого профиля. Нужен WireGuard .conf.',
+            ? 'Нужен текстовый профиль .conf.'
+            : 'В QR-коде нет поддерживаемого профиля. Нужен файл .conf.',
         'UNSUPPORTED_PROFILE' => _unsupportedProfile,
         'SUBSCRIPTION_URL_INVALID' =>
           'Для подписки нужна полная HTTPS-ссылка на публичный сервер, без логина и пароля в адресе. Проверьте ссылку в панели.',
         'PROFILE_TELEGRAM_LINK' =>
-          'Это ссылка прокси Telegram. Она подключается внутри Telegram; для Flow нужен профиль WireGuard или HTTPS-ссылка на подписку WireGuard.',
+          'Это ссылка прокси Telegram. Она подключается внутри Telegram; для Flow нужен профиль подключения или HTTPS-ссылка на подписку Flow.',
         'PROFILE_VMESS_LINK' =>
-          'Обнаружена ссылка VMess. Этот протокол пока не поддерживается в Flow. Импортируйте профиль WireGuard .conf.',
+          'Обнаружена ссылка VMess. Этот протокол пока не поддерживается в Flow. Импортируйте профиль .conf.',
         'PROFILE_TROJAN_LINK' =>
-          'Обнаружена ссылка Trojan. Этот протокол пока не поддерживается в Flow. Добавьте профиль WireGuard .conf.',
+          'Обнаружена ссылка Trojan. Этот протокол пока не поддерживается в Flow. Добавьте профиль .conf.',
         'PROFILE_SHADOWSOCKS_LINK' =>
-          'Обнаружена ссылка Shadowsocks или ShadowsocksR. Эти протоколы пока не поддерживаются в Flow. Добавьте профиль WireGuard .conf.',
+          'Обнаружена ссылка Shadowsocks или ShadowsocksR. Эти протоколы пока не поддерживаются в Flow. Добавьте профиль .conf.',
         'UNSUPPORTED_TRANSPORT' => _unsupportedTransport,
         'UNSUPPORTED_SECURITY' => _unsupportedSecurity,
         'UNSUPPORTED_PROFILE_OPTION' => _unsupportedOption,
@@ -544,8 +544,8 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
           'Если код открыт на другом устройстве, нажмите «Сканировать QR». '
           'Если он сохранён на этом телефоне, нажмите «QR из фото» и выберите изображение. '
           'Ссылку можно вставить кнопкой «Вставить» или импортировать из текстового файла.\n\n'
-          'Для WireGuard нужен полный профиль .conf с разделами [Interface] и [Peer]. '
-          'Подходит обычный QR WireGuard из WGDashboard, файл .conf или его полный текст. '
+          'Для подключения нужен полный профиль .conf с разделами [Interface] и [Peer]. '
+          'Подходит обычный QR из панели сервера, файл .conf или его полный текст. '
           'Профили Amnezia пока не поддерживаются.\n\n'
           'Распознавание выполняется на устройстве. Профиль сначала появляется '
           'как скрытый черновик: проверьте название и нажмите «Сохранить профиль» '
@@ -709,7 +709,7 @@ class _WireGuardProfileEditorState extends State<WireGuardProfileEditor>
                     ),
                   ]),
                   const SizedBox(height: 8),
-                  const Text('WireGuard .conf или HTTPS-ссылка подписки WireGuard: используйте QR-код, файл или буфер обмена. '
+                  const Text('файл .conf или HTTPS-ссылка подписки Flow: используйте QR-код, файл или буфер обмена. '
                     'Профиль сохраняется только на этом устройстве.',
                     style: TextStyle(color: PushokPalette.muted)),
                   const SizedBox(height: 8),

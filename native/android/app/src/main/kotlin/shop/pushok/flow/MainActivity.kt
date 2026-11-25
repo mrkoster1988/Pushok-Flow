@@ -18,6 +18,7 @@ import io.flutter.plugin.common.MethodChannel
 open class MainActivity : FlutterActivity() {
     companion object {
         internal fun widgetState(context: android.content.Context): String {
+            if (Session.operationInProgress.get()) return "starting"
             if (Session.backend?.getState(Session.tunnel) == Tunnel.State.UP) return "wireguard"
             return "disconnected"
         }
@@ -60,6 +61,8 @@ open class MainActivity : FlutterActivity() {
     private fun releaseOperation(token: Long) {
         Session.operationInProgress.release(token)
         appUpdates.endConnection(token)
+        try { FlowWidget.render(applicationContext, widgetState(applicationContext)) } catch (_: Exception) { }
+
     }
 
     private fun stopTunnels(): Boolean {
@@ -124,6 +127,12 @@ open class MainActivity : FlutterActivity() {
     }
 
     protected fun widgetAction(connecting: Boolean, result: MethodChannel.Result) {
+        val current = try { widgetState(applicationContext) } catch (_: Exception) { "unknown" }
+        if (current == "starting" || current == "unknown") {
+            result.error("VPN_BUSY", "Состояние подключения уточняется", null)
+            return
+        }
+        if (connecting == (current == "wireguard")) { result.success(null); return }
         if (!connecting) { disconnect(result); return }
         io.execute {
             try {

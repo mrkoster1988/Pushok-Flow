@@ -17,12 +17,16 @@ class FlowConnectionVitals extends StatelessWidget {
     required this.ownsTunnel,
     required this.recovery,
     required this.isAndroid,
+    this.pingMs,
+    this.renew,
     this.selected,
     this.subscriptions,
     this.connectionError,
     this.selectionCurrent = false,
   });
 
+  final int? pingMs;
+  final VoidCallback? renew;
   final TunnelDiagnostics diagnostics;
   final bool diagnosticsCurrent;
   final bool confirmedConnected;
@@ -112,7 +116,7 @@ class FlowConnectionVitals extends StatelessWidget {
     return PushokPanel(child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Align(alignment: Alignment.centerLeft, child: FittedBox(
+        Row(children: [Flexible(child: Align(alignment: Alignment.centerLeft, child: FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
           child: PushokStatusChip(
@@ -124,16 +128,21 @@ class FlowConnectionVitals extends StatelessWidget {
           color: connecting || nativeBusy || recovering ? PushokPalette.glowCyan :
               !diagnosticsCurrent ? PushokPalette.muted :
               ownsTunnel ? PushokPalette.mint : PushokPalette.orange,
-        ))),
+        )))), if (renew != null) ...[
+          const Spacer(),
+          Semantics(button: true, child: InkWell(key: const Key('home_renew_subscription'),
+            onTap: renew, child: const PushokStatusChip(label: 'Продлить',
+              icon: Icons.event_repeat_outlined, color: PushokPalette.glowCyan))),
+        ]]),
         const SizedBox(height: 11),
         Row(children: [
           _metric('Срок подписки', _expires, Icons.event_available_outlined),
           const SizedBox(width: 10),
-          _metric('Пинг', 'Нет замера', Icons.speed_outlined),
+          _metric('Пинг', pingMs == null ? '—' : '$pingMs мс', Icons.speed_outlined),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          _metric('WireGuard handshake', handshake, Icons.sync_alt_outlined),
+          _metric('Последний отклик', handshake, Icons.sync_alt_outlined),
           const SizedBox(width: 10),
           _metric('Трафик', traffic, Icons.swap_vert_outlined),
         ]),
