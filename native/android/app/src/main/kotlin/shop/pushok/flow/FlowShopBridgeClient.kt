@@ -2,41 +2,16 @@ package shop.pushok.flow
 
 import android.content.Context
 import android.os.SystemClock
-import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.net.SocketTimeoutException
 import java.net.URL
-import java.security.SecureRandom
 import javax.net.ssl.HttpsURLConnection
 
 /** No external account token or personal subscription URL is exposed to Flutter. */
 internal class FlowShopBridgeClient(
-    context: Context,
+    @Suppress("UNUSED_PARAMETER") context: Context,
     private val open: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection },
 ) {
-    private val prefs = context.applicationContext.getSharedPreferences("flow_shop_bridge", Context.MODE_PRIVATE)
-    private val lock = Any()
-
-    /** Random client binding, not a user identifier. Restored app backups are disabled. */
-    fun clientId(): String = synchronized(lock) {
-        val known = try { prefs.getString("client_id", null) }
-            catch (_: Exception) { throw FlowShopFailure("SHOP_STORAGE_ERROR") }
-        if (known != null) {
-            if (!FlowShopBridgePolicy.validClientId(known)) throw FlowShopFailure("SHOP_STORAGE_ERROR")
-            return@synchronized known
-        }
-        val bytes = ByteArray(32)
-        SecureRandom().nextBytes(bytes)
-        val value = try { "pfc_" + Base64.encodeToString(bytes,
-            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP) }
-            finally { bytes.fill(0) }
-        if (!FlowShopBridgePolicy.validClientId(value)) throw FlowShopFailure("SHOP_STORAGE_ERROR")
-        val saved = try { prefs.edit().putString("client_id", value).commit() }
-            catch (_: Exception) { false }
-        if (!saved) throw FlowShopFailure("SHOP_STORAGE_ERROR")
-        value
-    }
-
     /** Each request has its own TLS connection, fixed first-party host and bounded response. */
     fun exchange(accessToken: String, isCurrent: () -> Unit): FlowShopBridgePolicy.Reply {
         FlowAccountPolicy.requireAccessToken(accessToken)
@@ -46,9 +21,10 @@ internal class FlowShopBridgeClient(
             mapOf("consent" to true), accessToken, start, isCurrent)
         val ticket = FlowShopBridgePolicy.requireTicket(ticketResponse)
         isCurrent()
-        val device = clientId()
+        // Access is bound to the server-verified Pushok account, not a phone.
+        // The one-time ticket is the only identity proof; no client_id is sent.
         val reply = post(FlowShopBridgePolicy.EXCHANGE_URL,
-            mapOf("ticket" to ticket, "client_id" to device), null, start, isCurrent)
+            mapOf("ticket" to ticket), null, start, isCurrent)
         isCurrent()
         return FlowShopBridgePolicy.parseExchange(reply)
     }
