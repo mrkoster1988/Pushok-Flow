@@ -181,7 +181,7 @@ void main() {
     key.currentState!.requestConnection();
     for (var i = 0; i < 4; i++) await tester.pump();
     expect(begins, 1);
-    expect(opened, 1, reason: 'One power tap must open Telegram automatically.');
+    expect(opened, 0, reason: 'Native beginLogin opens Telegram; Flutter must not launch it again.');
     expect(syncCalls, 0);
     expect(find.byKey(const Key('home_account_code')), findsOneWidget);
     expect(find.byKey(const Key('home_authorize_button')), findsNothing);
