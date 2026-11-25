@@ -7,6 +7,17 @@ if ! command -v kotlinc >/dev/null || ! command -v java >/dev/null; then
 fi
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
+# Both Maven Central endpoints serve the same artifacts. Each caller verifies SHA-256.
+download_maven() {
+  local path="$1" destination="$2" base
+  for base in https://repo.maven.apache.org/maven2 https://maven-central.storage-download.googleapis.com/maven2; do
+    if curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
+      "$base/$path" -o "$destination"; then
+      return 0
+    fi
+  done
+  return 1
+}
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/WireGuardRouting.kt \
   native/android/tests/WireGuardRoutingCheck.kt -include-runtime -d "$out/routing-tests.jar"
 java -jar "$out/routing-tests.jar"
@@ -72,8 +83,7 @@ core="$out/zxing-core.jar"
 if [[ -n "${FLOW_ZXING_CORE_JAR:-}" ]]; then
   cp "$FLOW_ZXING_CORE_JAR" "$core"
 else
-  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
-    https://repo.maven.apache.org/maven2/com/google/zxing/core/3.5.4/core-3.5.4.jar -o "$core"
+  download_maven com/google/zxing/core/3.5.4/core-3.5.4.jar "$core"
 fi
 python3 - "$core" <<'PY'
 import hashlib
@@ -90,9 +100,7 @@ wireguard_core="$out/wireguard-tunnel.jar"
 if [[ -n "${FLOW_WIREGUARD_TUNNEL_AAR:-}" ]]; then
   cp "$FLOW_WIREGUARD_TUNNEL_AAR" "$wireguard_aar"
 else
-  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
-    https://repo.maven.apache.org/maven2/com/wireguard/android/tunnel/1.0.20260102/tunnel-1.0.20260102.aar \
-    -o "$wireguard_aar"
+  download_maven com/wireguard/android/tunnel/1.0.20260102/tunnel-1.0.20260102.aar "$wireguard_aar"
 fi
 python3 - "$wireguard_aar" "$wireguard_core" <<'WIREGUARD_CHECK'
 import hashlib
@@ -143,9 +151,7 @@ embedded_core="$out/zxing-android-embedded.jar"
 if [[ -n "${FLOW_ZXING_EMBEDDED_AAR:-}" ]]; then
   cp "$FLOW_ZXING_EMBEDDED_AAR" "$embedded_aar"
 else
-  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
-    https://repo.maven.apache.org/maven2/com/journeyapps/zxing-android-embedded/4.3.0/zxing-android-embedded-4.3.0.aar \
-    -o "$embedded_aar"
+  download_maven com/journeyapps/zxing-android-embedded/4.3.0/zxing-android-embedded-4.3.0.aar "$embedded_aar"
 fi
 python3 - "$embedded_aar" "$embedded_core" <<'EMBEDDED_CHECK'
 import hashlib
@@ -249,8 +255,7 @@ json_core="$out/json-core.jar"
 if [[ -n "${FLOW_JSON_CORE_JAR:-}" ]]; then
   cp "$FLOW_JSON_CORE_JAR" "$json_core"
 else
-  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
-    https://repo.maven.apache.org/maven2/org/json/json/20250517/json-20250517.jar -o "$json_core"
+  download_maven org/json/json/20250517/json-20250517.jar "$json_core"
 fi
 python3 - "$json_core" <<'JSON_CHECK'
 import hashlib
@@ -265,9 +270,7 @@ android_json="$out/android-json.jar"
 if [[ -n "${FLOW_ANDROID_JSON_JAR:-}" ]]; then
   cp "$FLOW_ANDROID_JSON_JAR" "$android_json"
 else
-  curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 90 \
-    https://repo.maven.apache.org/maven2/com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar \
-    -o "$android_json"
+  download_maven com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar "$android_json"
 fi
 python3 - "$android_json" <<'ANDROID_JSON_CHECK'
 import hashlib
