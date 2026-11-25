@@ -44,6 +44,9 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
   DateTime? _shopLastAttempt;
   DateTime? _shopRateLimitUntil;
   bool _connectRequested = false;
+  bool _allowGuest = false;
+  bool _guest = false;
+  bool _choosingLogin = false;
   FlowAccountStatus? _status;
   String? _error;
   bool _busy = false;
@@ -105,8 +108,9 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
   /// Called by the large power button when the selected profile belongs to
   /// Shop or no profile is installed. The login request is user-initiated;
   /// returning from Telegram continues the same short-lived connection intent.
-  void requestConnection() {
+  void requestConnection({bool allowGuest = false}) {
     if (!mounted || !_foreground || !widget.isAndroid || _clearingAccount != null) return;
+    _allowGuest = allowGuest;
     _connectRequested = true;
     if (_status == null) {
       unawaited(_read().then((_) => _continueConnectionRequest()));
@@ -118,9 +122,37 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
   void _continueConnectionRequest() {
     if (!mounted || !_foreground || _busy || _clearingAccount != null) return;
     if (hasActiveAccount) {
+      _guest = false;
       if (!_shopBusy) unawaited(_syncShop());
       return;
     }
+    if (_allowGuest && !(_status?.recoveryAvailable ?? false)) {
+      unawaited(_chooseHomeLogin());
+      return;
+    }
+    _openAccountLogin();
+  }
+
+  Future<void> _chooseHomeLogin() async {
+    if (_choosingLogin || _shopBusy) return;
+    _choosingLogin = true;
+    final epoch = _epoch;
+    try {
+      final telegram = await _shop.hasTelegram();
+      if (!mounted || !_foreground || epoch != _epoch || !_connectRequested) return;
+      if (telegram || hasActiveAccount) {
+        _guest = false;
+        if (hasActiveAccount) { await _syncShop(); } else { _openAccountLogin(); }
+      } else {
+        setState(() => _guest = true);
+        await _syncShop();
+      }
+    } catch (e) {
+      if (mounted && _foreground && epoch == _epoch) setState(() => _shopError = subscriptionErrorMessage(e));
+    } finally { _choosingLogin = false; }
+  }
+
+  void _openAccountLogin() {
     if (_status?.recoveryAvailable ?? false) {
       unawaited(_confirmRecovery());
     } else if (_status?.pending != null && !_expired) {
@@ -191,6 +223,10 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
   Future<void> _read() async {
     if (!await _run(_account.status)) return;
     final status = _status;
+    if (_guest && _connectRequested && !hasActiveAccount && mounted && _foreground) {
+      await _syncShop();
+      return;
+    }
     if (!mounted || !_foreground || _busy || _clearingAccount != null ||
         _expired || status?.state != FlowAccountState.connected) return;
     final age = _nowMs - (status!.refreshedAt ?? 0);
@@ -221,6 +257,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
             ? status.profile?.id : null;
         if (_shopAccountId != accountId) {
           _shopAccountId = accountId;
+          if (accountId != null) _guest = false;
           _shopEpoch++;
           _shopBusy = false;
           _shopSyncState = 'idle';
@@ -301,11 +338,10 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
   void _schedulePendingShopPoll() {
     _shopPendingPoll?.cancel();
     if (!mounted || !_foreground || (!_shopAutoSync && !_connectRequested) ||
-        _shopSyncState != 'pending' || _shopBusy || _busy || _expired ||
-        _clearingAccount != null || _status?.state != FlowAccountState.connected ||
-        _status?.profile?.id == null) return;
-    final accountId = _status!.profile!.id;
-    _shopPendingPoll = Timer(const Duration(seconds: 45), () {
+        _shopSyncState != 'pending' || _shopBusy || _busy ||
+        _clearingAccount != null || (!_guest && !hasActiveAccount)) return;
+    final accountId = _status?.profile?.id;
+    _shopPendingPoll = Timer(Duration(seconds: _guest ? 8 : 45), () {
       if (!mounted || !_foreground || accountId != _status?.profile?.id) return;
       unawaited(_syncShop(automatic: true));
     });
@@ -341,9 +377,8 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
   Future<void> _syncShop({bool automatic = false}) async {
     if (!mounted || !_foreground || !widget.isAndroid ||
         _busy || _shopBusy || _clearingAccount != null ||
-        _status?.state != FlowAccountState.connected ||
-        _status?.profile == null || _expired) return;
-    final accountId = _status!.profile!.id;
+        (!_guest && !hasActiveAccount)) return;
+    final accountId = _status?.profile?.id;
     final now = widget.now?.call() ?? DateTime.now();
     if (_shopRateLimitUntil != null && now.isBefore(_shopRateLimitUntil!)) {
       if (!automatic) {
@@ -366,7 +401,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
       _shopError = null;
     });
     try {
-      final status = await _shop.syncShop();
+      final status = _guest ? await _shop.syncGuest() : await _shop.syncShop();
       if (!mounted || !_foreground || epoch != _shopEpoch ||
           _status?.profile?.id != accountId) return;
       setState(() {
@@ -407,7 +442,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
     _shopPendingPoll?.cancel();
     final due = _shopRateLimitUntil;
     if (due == null || (!_shopAutoSync && !_connectRequested) ||
-        !hasActiveAccount || !_foreground || _shopBusy) return;
+        (!hasActiveAccount && !_guest) || !_foreground || _shopBusy) return;
     final delay = due.difference(widget.now?.call() ?? DateTime.now());
     _shopPendingPoll = Timer(delay.isNegative ? Duration.zero : delay,
       () => unawaited(_syncShop(automatic: true)));
@@ -646,7 +681,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       // The power button starts login and provisioning. No separate large
       // authorization panel or second required "Get config" tap.
-      if (pending != null) PushokPanel(child: Column(
+      if (pending != null && !_guest) PushokPanel(child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const Text('Подтвердите вход в кабинете MTProxy. Сверьте код:', textAlign: TextAlign.center,
             style: TextStyle(color: PushokPalette.muted, fontSize: 12)),
@@ -678,6 +713,14 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
           textAlign: TextAlign.center,
           style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
       ],
+      if (_guest && !connected && !_shopBusy && _shopSyncState != 'idle')
+        Text(switch (_shopSyncState) {
+          'active' => 'Гостевой доступ на 7 суток',
+          'pending' => 'Готовим гостевое подключение на 7 суток…',
+          'expired' => 'Семь суток гостевого доступа закончились.',
+          'revoked' => 'Гостевой доступ отозван.',
+          _ => 'Гостевой доступ сейчас недоступен.',
+        }, textAlign: TextAlign.center),
       if (connected && !_shopBusy && _shopSyncState != 'idle') ...[
         const SizedBox(height: 6),
         Text(switch (_shopSyncState) {

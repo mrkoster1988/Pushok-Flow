@@ -263,6 +263,12 @@ def patch_manifest(path: Path) -> None:
         ET.SubElement(intent, "action", {ANDROID + "name": "android.intent.action.MAIN"})
         ET.SubElement(intent, "category", {ANDROID + "name": "android.intent.category.LAUNCHER"})
 
+    query = manifest.find("queries")
+    if not any(data.get(ANDROID + "scheme") == "tg" for data in query.findall("intent/data")):
+        telegram = ET.SubElement(query, "intent")
+        ET.SubElement(telegram, "action", {ANDROID + "name": "android.intent.action.VIEW"})
+        ET.SubElement(telegram, "data", {ANDROID + "scheme": "tg"})
+
     # Keystore keys cannot be restored: enforce this even for older scaffolds
     # which explicitly enabled Android Auto Backup.
     app.set(ANDROID + "name", "shop.pushok.flow.FlowPushApplication")

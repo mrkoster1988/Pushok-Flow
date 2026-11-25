@@ -350,7 +350,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     if (_ownsTunnel || _profiles?.activeProfile != null) {
       unawaited(_toggleTunnel());
     } else {
-      _homeAccountKey.currentState?.requestConnection();
+      _homeAccountKey.currentState?.requestConnection(allowGuest: true);
     }
   }
 

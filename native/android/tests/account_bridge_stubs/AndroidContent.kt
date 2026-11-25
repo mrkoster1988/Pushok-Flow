@@ -1,5 +1,7 @@
 package android.content
 
+class ActivityNotFoundException : RuntimeException()
+
 open class Context {
     open val applicationContext: Context get() = this
 }

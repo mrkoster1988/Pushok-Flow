@@ -233,6 +233,12 @@ class FlowSubscriptions {
   }
 
   Future<SubscriptionStatus> status() => _status('status');
+  Future<bool> hasTelegram() async {
+    try { return await _channel.invokeMethod<bool>('hasTelegram') ?? true; }
+    on MissingPluginException { return true; }
+  }
+
+  Future<SubscriptionStatus> syncGuest() => _status('syncGuest');
   Future<SubscriptionStatus> syncShop() => _status('syncShop');
   Future<SubscriptionStatus> unlinkShop() => _status('unlinkShop');
   Future<SubscriptionStatus> setShopAutoSync(bool enabled) =>

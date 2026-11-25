@@ -9,7 +9,7 @@ import javax.net.ssl.HttpsURLConnection
 
 /** No external account token or personal subscription URL is exposed to Flutter. */
 internal class FlowShopBridgeClient(
-    @Suppress("UNUSED_PARAMETER") context: Context,
+    private val context: Context,
     private val open: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection },
 ) {
     private companion object {
@@ -34,6 +34,43 @@ internal class FlowShopBridgeClient(
         val reply = post(FlowShopBridgePolicy.EXCHANGE_URL,
             mapOf("ticket" to ticket), null, start, isCurrent)
         isCurrent()
+        return FlowShopBridgePolicy.parseExchange(reply)
+    }
+
+    fun telegramAvailable(): Boolean {
+        val uri = android.net.Uri.parse("tg://resolve?domain=mtproxy_pushok_bot")
+        return android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+            .resolveActivity(context.packageManager) != null
+    }
+
+    fun guest(isCurrent: () -> Unit): FlowShopBridgePolicy.Reply {
+        val started = SystemClock.elapsedRealtime()
+        if (started < retryNotBeforeMs) throw FlowShopFailure("SHOP_RATE_LIMITED")
+        val device = android.provider.Settings.Secure.getString(context.contentResolver,
+            android.provider.Settings.Secure.ANDROID_ID)?.takeIf { it.isNotBlank() }
+            ?: throw FlowShopFailure("SHOP_STORAGE_ERROR")
+        val deviceHash = FlowShopBindingStore.fingerprint("pushok-flow-guest-v1:" + device)
+        // Derive a distinct high-entropy proof inside this installation. The
+        // scoped device identifier by itself never grants access to a feed.
+        val proof = try {
+            val alias = "pushok-flow-guest-v1"
+            val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val key = store.getKey(alias, null) ?: javax.crypto.KeyGenerator
+                .getInstance("HmacSHA256", "AndroidKeyStore").run {
+                    init(android.security.keystore.KeyGenParameterSpec.Builder(alias,
+                        android.security.keystore.KeyProperties.PURPOSE_SIGN)
+                        .setDigests(android.security.keystore.KeyProperties.DIGEST_SHA256).build())
+                    generateKey()
+                }
+            javax.crypto.Mac.getInstance("HmacSHA256").run {
+                init(key)
+                doFinal(deviceHash.toByteArray(Charsets.US_ASCII)).joinToString("") {
+                    "%02x".format(java.util.Locale.ROOT, it.toInt() and 255)
+                }
+            }
+        } catch (_: Exception) { throw FlowShopFailure("SHOP_STORAGE_ERROR") }
+        val reply = post("https://pushok.shop/shop/api/flow/guest", mapOf("device" to deviceHash),
+            proof, started, isCurrent)
         return FlowShopBridgePolicy.parseExchange(reply)
     }
 

@@ -21,6 +21,11 @@ internal class FlowShopBridgeClient(context: Context) {
         var response = FlowShopBridgePolicy.Reply("disabled", null)
         var requests = 0
     }
+    fun telegramAvailable() = true
+    fun guest(isCurrent: () -> Unit): FlowShopBridgePolicy.Reply {
+        isCurrent()
+        return response
+    }
     fun exchange(token: String, isCurrent: () -> Unit): FlowShopBridgePolicy.Reply {
         requests++
         isCurrent()

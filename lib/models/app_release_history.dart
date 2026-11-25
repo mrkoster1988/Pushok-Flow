@@ -65,6 +65,9 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'Вход открывает Telegram на телефоне. Без Telegram кнопка подключения получает гостевой доступ на семь суток.',
+  ]),
+  AppReleaseNotes(versionName: '2.0.2', versionCode: 67, changes: [
     'Виджет показывает цветного Пушка при подключении и серого при отключении.',
     'На главной увеличена кнопка, усилено свечение волн и изменено расположение показателей и сообщений.',
   ]),

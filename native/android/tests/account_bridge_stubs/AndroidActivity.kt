@@ -13,7 +13,7 @@ open class Activity : Context() {
     open fun startActivity(intent: Intent) {
         attempts += intent
         if ((rejectTelegram && intent.uri.value.startsWith("tg:")) ||
-            (rejectBrowser && intent.uri.value.startsWith("https:"))) throw IllegalStateException("No handler")
+            (rejectBrowser && intent.uri.value.startsWith("https:"))) throw android.content.ActivityNotFoundException()
         opened += intent
     }
 }

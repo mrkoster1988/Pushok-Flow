@@ -135,7 +135,7 @@ class FlowConnectionVitals extends StatelessWidget {
         Row(children: [
           _metric('Пинг', pingMs == null ? '—' : '$pingMs мс', Icons.speed_outlined),
           const SizedBox(width: 10),
-          _metric('Срок подписки', _expires, Icons.event_available_outlined),
+          _metric(_selectedSubscription?.name == 'Гостевой доступ Pushok' ? 'Гостевой доступ' : 'Срок подписки', _expires, Icons.event_available_outlined),
         ]),
         const SizedBox(height: 10),
         Row(children: [

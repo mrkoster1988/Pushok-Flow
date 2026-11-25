@@ -65,6 +65,10 @@ class ProfileSubscriptions(
             registered.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "status" -> status(result)
+                    "hasTelegram" -> result.success(shopBridge.telegramAvailable())
+                    "syncGuest" -> request(result) { operationEpoch ->
+                        syncGuest(operationEpoch)
+                    }
                     "syncShop" -> request(result) { operationEpoch ->
                         syncShop(operationEpoch)
                     }
@@ -303,6 +307,43 @@ class ProfileSubscriptions(
                 store.refreshSubscription(linked.id, linked.url, feed, System.currentTimeMillis())
             }
             shopSyncState = "active"
+        }
+    }
+
+    private fun syncGuest(operationEpoch: Long) {
+        fun checkGuest() {
+            ensureActive(operationEpoch)
+            if (shopBinding.binding() != null || FlowAccountCoordinator.get(context).shopLease() != null) {
+                throw FlowShopFailure("SHOP_LOGIN_REQUIRED")
+            }
+        }
+        checkGuest()
+        val reply = shopBridge.guest(::checkGuest)
+        checkGuest()
+        if (reply.state != "active") {
+            shopSyncState = reply.state
+            return
+        }
+        val url = reply.url ?: throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
+        if (!Regex("https://pushok[.]shop/shop/flow/wireguard/[A-Za-z0-9_-]{43}").matches(url)) {
+            throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
+        }
+        val response = downloader.fetch(url, ::checkGuest)
+        val feed = try { SubscriptionFeed.parse(response.body, response.userInfo, response.title) }
+            finally { response.body.fill(0) }
+        if (feed.format != SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
+        guardedWrite(operationEpoch) {
+            checkGuest()
+            val linked = store.subscriptionRecords().firstOrNull { it.url == url }
+            val active = store.metadata()["activeProfileId"]
+            if (active != null && (linked == null ||
+                (store.metadata()["profiles"] as? List<*>)?.none {
+                    it is Map<*, *> && it["id"] == active && it["subscriptionId"] == linked.id
+                } != false)) throw FlowShopFailure("SHOP_ACCOUNT_CHANGED")
+            val now = System.currentTimeMillis()
+            if (linked != null) store.refreshSubscription(linked.id, url, feed, now)
+            else if (feed.state == "active") store.importSubscription("Гостевой доступ Pushok", url, feed, now)
+            shopSyncState = feed.state
         }
     }
 
