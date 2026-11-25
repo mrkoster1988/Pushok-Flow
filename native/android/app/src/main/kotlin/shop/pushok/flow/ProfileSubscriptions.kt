@@ -230,6 +230,35 @@ class ProfileSubscriptions(
         val coordinator = FlowAccountCoordinator.get(context)
         val lease = coordinator.shopLease() ?: throw FlowShopFailure("SHOP_LOGIN_REQUIRED")
         shopBinding.requireOwner(lease.accountId)
+        // After signing out and back into the SAME account, first validate the
+        // encrypted, previously issued personal feed. A fresh MTProxy ticket
+        // is not needed: the Shop bearer link is independently revocable.
+        // Never use a cached URL for another identity or bypass Shop expiry.
+        val bound = shopBinding.binding()
+        if (bound != null) {
+            val prior = store.subscriptionRecords().firstOrNull {
+                FlowShopBindingStore.fingerprint(it.url) == bound.urlHash
+            }
+            if (prior != null) {
+                val response = downloader.fetch(prior.url) {
+                    ensureActive(operationEpoch)
+                    coordinator.requireShopLease(lease)
+                }
+                val feed = try {
+                    SubscriptionFeed.parse(response.body, response.userInfo, response.title)
+                } finally { response.body.fill(0) }
+                if (feed.format != SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) {
+                    throw FlowShopFailure("SHOP_PROTOCOL_INVALID")
+                }
+                guardedWrite(operationEpoch) {
+                    coordinator.requireShopLease(lease)
+                    shopBinding.requireOwner(lease.accountId)
+                    store.refreshSubscription(prior.id, prior.url, feed, System.currentTimeMillis())
+                    shopSyncState = feed.state
+                }
+                return
+            }
+        }
         val reply = shopBridge.exchange(lease.token) {
             ensureActive(operationEpoch)
             coordinator.requireShopLease(lease)
