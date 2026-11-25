@@ -151,8 +151,13 @@ dependencies {
         self.write_manifest(queries=f"<queries>{LAUNCHER}</queries>",
                             permissions='<uses-permission android:name="android.permission.INTERNET" />')
         manifest = self.patch()
-        self.assertEqual(len(manifest.findall("queries/intent")), 1)
+        intents = manifest.findall("queries/intent")
+        self.assertEqual(len(intents), 2)
         self.assertEqual(len(self.launcher_queries(manifest)), 1)
+        telegram = [intent for intent in intents if any(
+            data.get(ANDROID + "scheme") == "tg" for data in intent.findall("data"))]
+        self.assertEqual(len(telegram), 1)
+        self.assertEqual(telegram[0].find("action").get(ANDROID + "name"), "android.intent.action.VIEW")
         self.assertEqual(sorted(p.get(ANDROID + "name") for p in manifest.findall("uses-permission")),
                          ["android.permission.ACCESS_NETWORK_STATE", "android.permission.CAMERA",
                           "android.permission.CHANGE_NETWORK_STATE",
