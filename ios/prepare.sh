@@ -11,6 +11,9 @@ fi
 [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$revision" ]]
 # The pinned manifest uses platform constants introduced in PackageDescription 5.5.
 git -C "$source_dir" show HEAD:Package.swift | sed '1s/swift-tools-version:5.3/swift-tools-version:5.5/' > "$source_dir/Package.swift"
+# Explicit Clang modules require the Darwin BSD integer types in the C header itself.
+header=Sources/WireGuardKitC/WireGuardKitC.h
+{ echo '#include <sys/types.h>'; git -C "$source_dir" show "HEAD:$header"; } > "$source_dir/$header"
 # WireGuardKit's wg-quick parser ships with the upstream app, outside the Swift package.
 model="$source_dir/Sources/Shared/Model"
 { echo 'import WireGuardKit'; cat "$model/TunnelConfiguration+WgQuickConfig.swift"; } > "$root/parser/WgQuick.swift"
