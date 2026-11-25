@@ -74,6 +74,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   WireGuardProfiles? _profiles;
   String? _profilesError;
   late final FlowSubscriptions _subscriptionBridge;
+  final _homeAccountKey = GlobalKey<PushokAccountCardState>();
+  bool _homeAccountAuthorized = false;
   SubscriptionStatus? _subscriptions;
   String? _subscriptionsError;
   SubscriptionDiagnostic? _subscriptionsDiagnostic;
@@ -327,6 +329,41 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     }
     if (needsProfile && mounted && _foreground && requestEpoch == _profileRequestEpoch) {
       await _editProfile(connectAfterSave: true, tunnelIntent: tunnelIntent);
+    }
+  }
+
+  /// One-tap connection: preserve explicit offline/manual profiles; an
+  /// account-managed profile or empty catalog needs an authenticated Shop feed.
+  void _handlePowerTap() {
+    if (!_canToggleTunnel) return;
+    if (_ownsTunnel) {
+      unawaited(_toggleTunnel());
+      return;
+    }
+    final selected = _profiles?.activeProfile;
+    if (selected != null && !selected.isManaged) {
+      unawaited(_toggleTunnel());
+    } else {
+      _homeAccountKey.currentState?.requestConnection();
+    }
+  }
+
+  Future<void> _connectAfterShopReady() async {
+    if (!mounted || !_foreground || _ownsTunnel) return;
+    await _readSubscriptions();
+    // A subscription import is committed natively before this callback. Read
+    // the resulting catalog and tunnel status before asking for Android consent.
+    for (var attempt = 0; attempt < 3 && mounted && _foreground; attempt++) {
+      await _refreshProfileStatus();
+      if (_canToggleTunnel && _profiles?.activeProfile != null) break;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    if (!mounted || !_foreground || _ownsTunnel) return;
+    if (_canToggleTunnel && _profiles?.activeProfile != null) {
+      await _toggleTunnel();
+    } else {
+      _showNotice('Профиль получен. Нажмите «Подключить» ещё раз, '
+          'когда обновится состояние соединения.');
     }
   }
 
@@ -1580,7 +1617,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         child: Material(color: PushokPalette.midnight, shape: const CircleBorder(), child: InkWell(
           key: const Key('pushok_connect_button'),
           customBorder: const CircleBorder(),
-          onTap: _canToggleTunnel ? () => _toggleTunnel() : null,
+          onTap: _canToggleTunnel ? _handlePowerTap : null,
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(_tunnelConfirmed ? Icons.check_circle_outline
                 : _ownsTunnel ? Icons.info_outline : Icons.power_settings_new,
@@ -1595,12 +1632,18 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         )),
       )),
       const SizedBox(height: 13),
-      // Explicit login -> personal config. Separate native flows retain
-      // MTProxy consent, per-device binding and Android VPN permission.
+      // The power button controls login, provisioning and eventual connect.
+      // The compact status below is informational, not another login step.
       PushokAccountCard(
-        key: const Key('flow_home_account_actions'),
+        key: _homeAccountKey,
         isAndroid: _isAndroid,
         compactHome: true,
+        onAccountChanged: (value) {
+          if (mounted && _homeAccountAuthorized != value) {
+            setState(() => _homeAccountAuthorized = value);
+          }
+        },
+        onReadyToConnect: () => unawaited(_connectAfterShopReady()),
         onShopSynced: () {
           unawaited(_readSubscriptions());
           unawaited(_refreshProfileStatus());
@@ -1627,56 +1670,20 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
         recovery: _recovery,
         isAndroid: _isAndroid,
       ),
-      if (_isAndroid) ...[
-        const SizedBox(height: 4),
-        _homeSelectedServer(),
+      if (_isAndroid && _homeAccountAuthorized) ...[
+        const SizedBox(height: 7),
+        OutlinedButton.icon(
+          key: const Key('home_renew_subscription'),
+          onPressed: _foreground
+              ? () => _homeAccountKey.currentState?.openRenewal() : null,
+          icon: const Icon(Icons.event_repeat_outlined),
+          label: const Text('Продлить подписку через Shop'),
+        ),
       ],
     ]),
   ));
 
 
-  Widget _homeSelectedServer() {
-    // This is the saved selection, not proof of the tunnel's remote endpoint.
-    // A cached catalog must not look current while a read/change is pending,
-    // after leaving the app, or when the authoritative status could not be read.
-    final selectionCurrent = _foreground && !_statusRefreshing && !_profileBusy &&
-        !_profileEditorOpen && !_diagnosticsStale && _profilesError == null && _profiles != null;
-    final selected = selectionCurrent ? _profiles!.activeProfile : null;
-    final unavailable = _profilesError != null && !_statusRefreshing;
-    final stateLabel = selectionCurrent ? 'Добавить сервер'
-        : unavailable ? 'Проверить выбор сервера' : 'Выбор сервера уточняется';
-    return TextButton(
-      key: const Key('home_selected_server'),
-      onPressed: _foreground && !_informationOpen && !_profileEditorOpen &&
-          !_routeConfirmationOpen ? () => _selectTab(2) : null,
-      style: TextButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        foregroundColor: PushokPalette.teal,
-      ),
-      child: Row(children: [
-        Icon(selectionCurrent && selected == null ? Icons.add_circle_outline : Icons.dns_outlined,
-          size: 20),
-        const SizedBox(width: 10),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (selected != null) ...[
-            const Text('Выбранный сервер', style: TextStyle(
-              color: PushokPalette.muted, fontSize: 12)),
-            Text(selected.name, key: const Key('home_selected_server_name'),
-              maxLines: 2, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            if (selected.isManaged)
-              Text('Подписка: ${selected.subscriptionName}',
-                key: const Key('home_selected_subscription'), maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
-          ] else Text(stateLabel, key: const Key('home_server_selection_state'),
-            style: const TextStyle(fontSize: 14)),
-        ])),
-        const SizedBox(width: 8),
-        const Icon(Icons.chevron_right, size: 20),
-      ]),
-    );
-  }
 
   Widget routes() => AppRoutesView(
     apps: installed,
