@@ -70,6 +70,11 @@ class ProfileSubscriptions(
                     }
                     "unlinkShop" -> request(result) { operationEpoch ->
                         guardedWrite(operationEpoch) {
+                            // Deleting the local managed profile must NOT reimport it
+                            // on the next account refresh. Disable auto-sync durably first.
+                            if (!settings.edit().putBoolean("shop_auto_sync", false).commit()) {
+                                throw SubscriptionFailure("SUBSCRIPTION_STORE_FAILED")
+                            }
                             shopBinding.unlink(store)
                             shopSyncState = "idle"
                         }
