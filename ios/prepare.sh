@@ -9,6 +9,8 @@ if [[ ! -d "$source_dir/.git" ]]; then
   git clone --depth 1 --branch 1.0.16-27 https://github.com/WireGuard/wireguard-apple.git "$source_dir"
 fi
 [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$revision" ]]
+# The pinned manifest uses platform constants introduced in PackageDescription 5.5.
+git -C "$source_dir" show HEAD:Package.swift | sed '1s/swift-tools-version:5.3/swift-tools-version:5.5/' > "$source_dir/Package.swift"
 # WireGuardKit's wg-quick parser ships with the upstream app, outside the Swift package.
 model="$source_dir/Sources/Shared/Model"
 { echo 'import WireGuardKit'; cat "$model/TunnelConfiguration+WgQuickConfig.swift"; } > "$root/parser/WgQuick.swift"
