@@ -907,11 +907,11 @@ void main() {
 
   testWidgets('Installed changes and the recent history are available without a network check', (tester) async {
     bridge.state = _status(phase: 'current', automatic: false, permission: true,
-      installedVersion: '0.62.0', installedBuild: 62);
+      installedVersion: '0.63.0', installedBuild: 63);
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.62.0'), findsOneWidget);
-      expect(find.text('Личная подписка Shop привязана к подтверждённому аккаунту Pushok, а не телефону: передаётся только одноразовый билет входа.'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.63.0'), findsOneWidget);
+      expect(find.text('Добавлен виджет домашнего экрана для подключения и отключения выбранного профиля.'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
       expect(find.byKey(const ValueKey('history_release_55')), findsNothing);
       final history = find.byKey(const Key('app_release_history'));
