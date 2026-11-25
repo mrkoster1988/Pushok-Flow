@@ -1,0 +1,14 @@
+Pushok Flow v0.62.0 — one-time verified PUBLICATION request.
+Requested by project owner to remove phone binding; access is account-scoped.
+
+Source main SHA: a9428e1b7531c0d3c64a58c7ce851244a3c78b4f
+Source checks CI: 45553986754 (success)
+Android universal candidate CI: 45553986827 (success)
+Staging: release-staging/v0.62.0.json
+Signed APK SHA-256: 0d3f9c03f66c12f43de91173d066be2910e323e4a5832c50be6f6c26c8c92388
+Permanent Android certificate SHA-256: 8b4114881116a920c3351b503052ac27078fdbbfcae1ace27f1af8245ebb7047
+
+Use existing strict publisher preflight, reconstruct only the exact verified
+APK from successful GitHub candidate, compare certificate/version and validate
+previous public update channel. No debug or temporary-signed APK and no
+private signing material may enter the GitHub Release.
