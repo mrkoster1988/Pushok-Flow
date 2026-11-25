@@ -12,11 +12,19 @@ internal class FlowShopBridgeClient(
     @Suppress("UNUSED_PARAMETER") context: Context,
     private val open: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection },
 ) {
+    private companion object {
+        // Applies across Activity re-creations in this process. A manual tap and
+        // an automatic refresh must not repeatedly hit the same rate limiter.
+        @Volatile private var retryNotBeforeMs = 0L
+        private const val RATE_LIMIT_PAUSE_MS = 65_000L
+    }
+
     /** Each request has its own TLS connection, fixed first-party host and bounded response. */
     fun exchange(accessToken: String, isCurrent: () -> Unit): FlowShopBridgePolicy.Reply {
         FlowAccountPolicy.requireAccessToken(accessToken)
         val start = SystemClock.elapsedRealtime()
         isCurrent()
+        if (start < retryNotBeforeMs) throw FlowShopFailure("SHOP_RATE_LIMITED")
         val ticketResponse = post(FlowShopBridgePolicy.TICKET_URL,
             mapOf("consent" to true), accessToken, start, isCurrent)
         val ticket = FlowShopBridgePolicy.requireTicket(ticketResponse)
@@ -66,7 +74,10 @@ internal class FlowShopBridgeClient(
             if (status != 200) throw FlowShopFailure(when (status) {
                 401, 403 -> "SHOP_LOGIN_REQUIRED"
                 409 -> readConflict(remote, started, isCurrent)
-                429 -> "SHOP_RATE_LIMITED"
+                429 -> {
+                    retryNotBeforeMs = SystemClock.elapsedRealtime() + RATE_LIMIT_PAUSE_MS
+                    "SHOP_RATE_LIMITED"
+                }
                 404, 405, 501, 503 -> "SHOP_SERVICE_UNAVAILABLE"
                 in 500..599 -> "SHOP_NETWORK_ERROR"
                 else -> "SHOP_PROTOCOL_INVALID"
