@@ -907,10 +907,10 @@ void main() {
 
   testWidgets('Installed changes and the recent history are available without a network check', (tester) async {
     bridge.state = _status(phase: 'current', automatic: false, permission: true,
-      installedVersion: '0.63.0', installedBuild: 63);
+      installedVersion: '0.64.0', installedBuild: 64);
     await _withCard(tester, () async {
       expect(find.byKey(const Key('current_release_notes')), findsOneWidget);
-      expect(find.text('Что нового в установленной версии 0.63.0'), findsOneWidget);
+      expect(find.text('Что нового в установленной версии 0.64.0'), findsOneWidget);
       expect(find.text('Добавлен виджет домашнего экрана для подключения и отключения выбранного профиля.'), findsOneWidget);
       expect(find.byKey(const Key('available_release_notes')), findsNothing);
       expect(find.byKey(const ValueKey('history_release_55')), findsNothing);
@@ -918,7 +918,7 @@ void main() {
       await tester.ensureVisible(history);
       await tester.tap(find.text('История обновлений'));
       await tester.pumpAndSettle();
-      for (final build in [63, 62, 61, 60, 59]) {
+      for (final build in [64, 63, 62, 61, 60]) {
         expect(find.byKey(ValueKey('history_release_$build')), findsOneWidget);
       }
       expect(bridge.count('checkForUpdates'), 0);
