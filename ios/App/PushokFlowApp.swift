@@ -4,6 +4,12 @@ import PhotosUI
 import SwiftUI
 import VisionKit
 
+private func moscowTime(_ date: Date, seconds: Bool = false) -> String {
+    var style = Date.FormatStyle(date: .abbreviated, time: seconds ? .standard : .shortened)
+    style.timeZone = TimeZone(identifier: "Europe/Moscow")!
+    return date.formatted(style) + " МСК"
+}
+
 @main
 struct PushokFlowApp: App {
     var body: some Scene { WindowGroup { Home() } }
@@ -75,13 +81,13 @@ private struct Home: View {
                             if connection.hasProfile { row("Сервер", connection.server) }
                             if let expires = connection.expires {
                                 row(connection.kind == "guest" ? "Гостевой доступ до" : "Подписка до",
-                                    expires.formatted(date: .abbreviated, time: .shortened))
+                                    moscowTime(expires))
                             }
                             if connection.status == .connected {
                                 row("Пинг до Pushok", connection.latency.map { "\($0) мс" } ?? "—")
                                 if let sample = connection.metrics {
                                     row("Получено", bytes(sample.received)); row("Отправлено", bytes(sample.sent))
-                                    row("Последний отклик", sample.handshake.map { Date(timeIntervalSince1970: Double($0)).formatted(date: .abbreviated, time: .standard) } ?? "Ожидаем")
+                                    row("Последний отклик", sample.handshake.map { moscowTime(Date(timeIntervalSince1970: Double($0)), seconds: true) } ?? "Ожидаем")
                                 }
                             }
                         }.font(.subheadline)
@@ -183,7 +189,7 @@ private struct FlowSettings: View {
                 if connection.hasProfile {
                     LabeledContent("Сервер", value: connection.server)
                     if connection.kind != "manual" {
-                        if let expiry = connection.expires { LabeledContent("Действует до", value: expiry.formatted()) }
+                        if let expiry = connection.expires { LabeledContent("Действует до", value: moscowTime(expiry)) }
                         Button("Обновить подписку") { Task { await connection.refresh() } }.disabled(!canEdit)
                         if connection.servers.count > 1 {
                             ForEach(connection.servers, id: \.id) { server in
