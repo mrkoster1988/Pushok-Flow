@@ -4,16 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../models/moscow_time.dart';
 import '../platform/subscription_diagnostics.dart';
 import '../platform/subscriptions.dart';
 import 'subscription_diagnostic_copy.dart';
 
-String _subscriptionDate(DateTime date, {bool includeTime = false}) {
-  final value = date.toLocal();
-  String two(int number) => number.toString().padLeft(2, '0');
-  final day = '${two(value.day)}.${two(value.month)}.${value.year}';
-  return includeTime ? '$day, ${two(value.hour)}:${two(value.minute)}' : day;
-}
 
 class SubscriptionsCard extends StatelessWidget {
   const SubscriptionsCard({
@@ -133,7 +128,7 @@ class SubscriptionsCard extends StatelessWidget {
         ],
         const SizedBox(height: 6),
         Text('${entry.isWireGuard ? 'Подписка проверена' : 'Серверы обновлены'}: '
-            '${_subscriptionDate(entry.updatedAt)}',
+            '${formatMoscowDate(entry.updatedAt)}',
           style: const TextStyle(color: PushokPalette.muted, fontSize: 12)),
         if (refreshError != null) ...[
           const SizedBox(height: 10),
@@ -336,10 +331,10 @@ class _SubscriptionAccessDetailsState extends State<_SubscriptionAccessDetails>
         const SizedBox(height: 6),
       ],
       Text(entry.isWireGuard && expiry != null
-          ? 'Срок доступа: до ${_subscriptionDate(expiry, includeTime: true)}.'
+          ? 'Срок доступа: до ${formatMoscowDate(expiry, includeTime: true)}.'
           : expiry == null ? 'Сервис не передал срок подписки.'
-              : expired ? 'По данным сервиса срок истёк ${_subscriptionDate(expiry)}.'
-                  : 'Срок по данным сервиса: до ${_subscriptionDate(expiry)}.',
+              : expired ? 'По данным сервиса срок истёк ${formatMoscowDate(expiry)}.'
+                  : 'Срок по данным сервиса: до ${formatMoscowDate(expiry)}.',
         key: ValueKey('subscription_expiry_${entry.id}'),
         style: TextStyle(color: entry.isWireGuard
             ? state == SubscriptionAccessState.active ? PushokPalette.muted : PushokPalette.orange

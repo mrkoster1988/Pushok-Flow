@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../models/moscow_time.dart';
 import '../platform/route_recommendations.dart';
 
 class RouteRecommendationsCard extends StatelessWidget {
@@ -64,12 +65,8 @@ class RouteRecommendationsCard extends StatelessWidget {
     }
   }
 
-  String _lastChecked(int milliseconds) {
-    final time = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
-    String two(int value) => value.toString().padLeft(2, '0');
-    return 'Проверено: ${two(time.day)}.${two(time.month)}.${time.year} '
-        '${two(time.hour)}:${two(time.minute)}';
-  }
+  String _lastChecked(int milliseconds) =>
+      'Проверено: ' + formatMoscowDate(DateTime.fromMillisecondsSinceEpoch(milliseconds, isUtc: true), includeTime: true);
 
   @override
   Widget build(BuildContext context) {

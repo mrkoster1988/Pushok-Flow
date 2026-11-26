@@ -246,7 +246,7 @@ void main() {
 
   test('Successful check time is optional and survives pending or failed phases', () {
     expect(UpdateStatus.fromMap(_status()).checkedAtMillis, isNull);
-    final timestamp = DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch;
+    final timestamp = DateTime.utc(2026, 11, 21, 21, 35).millisecondsSinceEpoch;
     final checked = UpdateStatus.fromMap(_status(
         phase: 'current', checkedAt: timestamp));
     final pending = checked.withPhase(UpdatePhase.checking);
@@ -755,11 +755,11 @@ void main() {
   });
 
   testWidgets('The last successful check time remains historical during a failed recheck', (tester) async {
-    final timestamp = DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch;
+    final timestamp = DateTime.utc(2026, 11, 21, 21, 35).millisecondsSinceEpoch;
     bridge.state = _status(phase: 'current', checkedAt: timestamp);
     bridge.checkGate = Completer<Map<String, Object?>>();
     await _withCard(tester, () async {
-      const label = 'Последняя успешная проверка: 22.11.2026, 00:35';
+      const label = 'Последняя успешная проверка: 22.11.2026, 00:35 МСК';
       expect(find.text(label), findsOneWidget);
       expect(find.text('Новых версий не найдено.'), findsOneWidget);
       expect(find.textContaining('последняя опубликованная'), findsNothing);
@@ -780,7 +780,7 @@ void main() {
 
   for (final phase in ['available', 'ready']) {
     testWidgets('A failed recheck retains the $phase action and previous check time', (tester) async {
-      final timestamp = DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch;
+      final timestamp = DateTime.utc(2026, 11, 21, 21, 35).millisecondsSinceEpoch;
       bridge.state = _status(phase: phase, permission: true, checkedAt: timestamp);
       bridge.checkGate = Completer<Map<String, Object?>>();
       final primary = Key(phase == 'ready' ? 'install_app_update' : 'download_app_update');
@@ -820,7 +820,7 @@ void main() {
   for (final phase in ['checking', 'available', 'ready', 'installing']) {
     testWidgets('The $phase card fits 320 pixels with enlarged text', (tester) async {
       bridge.state = _status(phase: phase, permission: true,
-          checkedAt: DateTime(2026, 11, 22, 0, 35).millisecondsSinceEpoch,
+          checkedAt: DateTime.utc(2026, 11, 21, 21, 35).millisecondsSinceEpoch,
           checkStage: phase == 'checking' ? 'manifest' : null,
           error: phase == 'ready' ? 'UPDATE_METADATA_STALE' : null);
       await _withCard(tester, () async {

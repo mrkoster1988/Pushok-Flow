@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../models/moscow_time.dart';
 import '../platform/subscriptions.dart';
 import '../platform/tunnel_diagnostics.dart';
 import '../platform/wireguard_profiles.dart';
@@ -64,8 +65,7 @@ class FlowConnectionVitals extends StatelessWidget {
     final sub = _selectedSubscription;
     if (sub == null || sub.expiresAt == null) return 'Не указан';
     final expiry = sub.expiresAt!;
-    final formatted = expiry.day.toString().padLeft(2, '0') + '.' +
-        expiry.month.toString().padLeft(2, '0') + '.' + expiry.year.toString();
+    final formatted = formatMoscowDate(expiry);
     final now = DateTime.now();
     final remaining = expiry.difference(now).inSeconds;
     final access = sub.effectiveState(now);

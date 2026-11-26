@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../design/pushok_theme.dart';
+import '../models/moscow_time.dart';
 import '../models/app_release_history.dart';
 import '../platform/app_updates.dart';
 
@@ -240,12 +241,8 @@ class _AppUpdatesCardState extends State<AppUpdatesCard>
       ? '${(count / 1024).ceil()} КБ'
       : '${(count / (1024 * 1024)).toStringAsFixed(1).replaceAll('.', ',')} МБ';
 
-  String _checkTime(int milliseconds) {
-    final time = DateTime.fromMillisecondsSinceEpoch(milliseconds);
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${two(time.day)}.${two(time.month)}.${time.year}, '
-        '${two(time.hour)}:${two(time.minute)}';
-  }
+  String _checkTime(int milliseconds) =>
+      formatMoscowDate(DateTime.fromMillisecondsSinceEpoch(milliseconds, isUtc: true), includeTime: true);
 
   Widget _button({required Key key, required String label,
       required IconData icon, required Future<UpdateStatus> Function() action,
