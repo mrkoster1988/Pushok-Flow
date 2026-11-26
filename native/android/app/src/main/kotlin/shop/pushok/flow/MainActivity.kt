@@ -491,6 +491,23 @@ open class MainActivity : FlutterActivity() {
                         profileImport.cancel()
                         result.success(true)
                     }
+                    "checkTunnelInternet" -> kotlin.concurrent.thread(name = "flow-connection-check") {
+                        val status = try {
+                            TunnelInternet.check(applicationContext) { !Session.operationInProgress.get() && readTunnelOccupied() }
+                        } catch (_: Exception) { "unknown" }
+                        runOnUiThread { result.success(status) }
+                    }
+                    "openInternetCheckSupport" -> {
+                        val code = call.argument<String>("code")
+                        val epoch = (call.argument<Number>("epoch"))?.toLong()
+                        if (code !in setOf("ok", "dns", "https", "unknown") || epoch == null || epoch <= 0) {
+                            result.error("INVALID_CHECK", null, null)
+                        } else try {
+                            val link = android.net.Uri.parse("https://pushok.shop/ai-support?start=flowcheck_${code}_${epoch}")
+                            startActivity(Intent(Intent.ACTION_VIEW, link))
+                            result.success(null)
+                        } catch (_: Exception) { result.error("SUPPORT_UNAVAILABLE", null, null) }
+                    }
                     "vpnStatus" -> io.execute {
                         val currentBackend = backend
                         val initial = Session.connection.observe(::readTunnelOccupied)

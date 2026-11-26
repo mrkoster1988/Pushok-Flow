@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../design/pushok_theme.dart';
 import '../platform/tunnel_diagnostics.dart';
 import 'tunnel_diagnostics_card.dart';
+import 'tunnel_internet_check.dart';
 
 /// Information opened explicitly from the app bar. The parent supplies current
 /// snapshots and already-sanitized messages; this view never reads private data.
@@ -104,6 +105,7 @@ class AppInformationSheet extends StatelessWidget {
               child: Text('Диагностика связи доступна в приложении для Android.'),
             ),
             const SizedBox(height: 12),
+            if (isAndroid) const TunnelInternetCheck(),
             Align(alignment: Alignment.centerLeft, child: TextButton(
               key: const Key('app_information_licenses'),
               onPressed: () => showLicensePage(

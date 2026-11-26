@@ -65,6 +65,9 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'Проверка DNS и HTTPS через туннель с телефона и передача результата в личную поддержку.',
+  ]),
+  AppReleaseNotes(versionName: '2.0.7', versionCode: 72, changes: [
     'Время обновлений и сроки подписки отображаются по Москве (МСК).',
   ]),
   AppReleaseNotes(versionName: '2.0.6', versionCode: 71, changes: [
