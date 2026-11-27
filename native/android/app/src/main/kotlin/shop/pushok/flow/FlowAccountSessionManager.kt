@@ -48,7 +48,7 @@ internal class FlowAccountSessionManager(private val store: FlowAccountPersisten
             throw FlowAccountFailure("FLOW_LOGIN_EXPIRED")
         }
         if (record.session?.let { it.expiresAt <= now() } == true) {
-            save(FlowAccountRecord(), commit)
+            save(FlowAccountRecord(localOwner = record.session?.profile?.id), commit)
             throw FlowAccountFailure("FLOW_SESSION_EXPIRED")
         }
     }

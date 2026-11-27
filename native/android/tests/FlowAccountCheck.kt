@@ -106,6 +106,14 @@ fun main() {
     check(connected.record.session!!.profile!!.wallet["RUB"] == -101L)
     check(connected.record.session!!.profile!!.wallet["XTR"] == 42L)
     check(connected.record.session!!.profile!!.role == "admin") // Display role never grants admin credentials/scopes.
+    val offlineStore = AccountMemoryStore().also { it.value = connected.record }
+    val offline = FlowAccountSessionManager(offlineStore) { connected.record.session!!.expiresAt }
+    failure("FLOW_SESSION_EXPIRED") { offline.execute("status", remote, commit) }
+    val restarted = FlowAccountSessionManager(offlineStore) { now }
+    restarted.execute("status", remote, commit)
+    check(restarted.record.localOwner == profile["id"] && restarted.record.session == null)
+    restarted.execute("logout", remote, commit)
+    check(offlineStore.load() == FlowAccountRecord())
     val cached = connected.record
     networkMe = true
     failure("FLOW_NETWORK_ERROR") { connected.execute("refresh", remote, commit) }

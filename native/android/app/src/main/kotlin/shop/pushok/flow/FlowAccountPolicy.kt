@@ -25,7 +25,7 @@ internal data class FlowAccountSession(val accessToken: String, val expiresAt: L
 }
 
 internal data class FlowAccountRecord(val pending: FlowAccountPending? = null,
-    val session: FlowAccountSession? = null) {
+    val session: FlowAccountSession? = null, val localOwner: String? = null) {
     init { require(pending == null || session == null) }
     fun metadata(now: Long, busy: Boolean = false, error: String? = null): Map<String, Any?> = mapOf(
         "state" to when { session != null -> "connected"; pending != null -> "pending"; else -> "signed_out" },
@@ -33,7 +33,8 @@ internal data class FlowAccountRecord(val pending: FlowAccountPending? = null,
         "profile" to session?.profile?.metadata(), "refreshedAt" to session?.refreshedAt,
         "sessionExpiresAt" to session?.expiresAt,
         "stale" to (session != null && (session.profile == null || error != null ||
-            now - (session.refreshedAt ?: 0) >= 5 * 60_000L)))
+            now - (session.refreshedAt ?: 0) >= 5 * 60_000L))) +
+        if (localOwner != null) mapOf("localConnectionAvailable" to true) else emptyMap()
     override fun toString() = "FlowAccountRecord(redacted)"
 }
 
@@ -111,7 +112,9 @@ internal object FlowAccountPolicy {
     fun telegram(code: String) = "tg://resolve?domain=mtproxy_pushok_bot&start=flow_${requireUserCode(code)}"
     fun browser(code: String) = "$ORIGIN/?flow=${requireUserCode(code)}"
 
-    fun record(value: FlowAccountRecord): Map<String, Any?> = mapOf("version" to 2,
+    fun record(value: FlowAccountRecord): Map<String, Any?> = if (value.localOwner != null) {
+        mapOf("version" to 3, "local_owner" to value.localOwner)
+    } else mapOf("version" to 2,
         "pending" to value.pending?.let { mapOf("device_code" to it.deviceCode, "user_code" to it.userCode,
             "expires_at" to it.expiresAt, "next_poll_at" to it.nextPollAt, "interval" to it.interval) },
         "session" to value.session?.let { mapOf("access_token" to it.accessToken, "expires_at" to it.expiresAt,
@@ -119,6 +122,11 @@ internal object FlowAccountPolicy {
             "login_user_code" to it.loginUserCode) })
 
     fun restore(value: Map<String, Any?>): FlowAccountRecord {
+        if (number(value["version"]) == 3L) {
+            keys(value, setOf("version", "local_owner"))
+            val owner = text(value["local_owner"], 36).takeIf(uuid::matches) ?: invalid()
+            return FlowAccountRecord(localOwner = owner)
+        }
         keys(value, setOf("version", "pending", "session"))
         val version = number(value["version"])
         if (version !in 1L..2L || (value["pending"] != null && value["session"] != null)) invalid()
