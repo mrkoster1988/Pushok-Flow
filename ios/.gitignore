@@ -1,0 +1,4 @@
+.build/
+PushokFlow.xcodeproj/
+*.xcarchive
+App/AppAssets.xcassets/AppIcon.appiconset/icon.png
