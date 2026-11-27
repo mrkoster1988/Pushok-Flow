@@ -11,6 +11,7 @@ internal class FlowAccountCoordinator {
         fun get(context: Context) = fixture
     }
     var current: FlowShopSessionLease? = null
+    fun connectionOwner() = current?.accountId
     fun shopLease() = current
     fun requireShopLease(lease: FlowShopSessionLease) {
         if (current !== lease) throw FlowShopFailure("SHOP_ACCOUNT_CHANGED")

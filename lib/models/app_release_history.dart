@@ -65,6 +65,9 @@ bool _isPlainReleaseText(String text) {
 /// Android versions; do not turn test results or publication plans into claims.
 const bundledAppReleaseHistory = <AppReleaseNotes>[
   AppReleaseNotes(versionName: appVersionName, versionCode: appVersionCode, changes: [
+    'Сохранённая подписка подключается после перерыва без повторного подтверждения в Telegram. Выход из профиля отключает повторное подключение.',
+  ]),
+  AppReleaseNotes(versionName: '2.0.9', versionCode: 74, changes: [
     'Газпромбанк добавлен в рекомендации для прямого подключения. В разделе «Маршруты» можно включить прямой доступ для Газпромбанка и 2ГИС.',
   ]),
   AppReleaseNotes(versionName: '2.0.8', versionCode: 73, changes: [

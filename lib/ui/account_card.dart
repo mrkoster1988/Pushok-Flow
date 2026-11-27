@@ -681,7 +681,7 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       // The power button starts login and provisioning. No separate large
       // authorization panel or second required "Get config" tap.
-      if (!connected && status != null && !status.recoveryAvailable &&
+      if (!connected && status != null && !status.localConnectionAvailable && !status.recoveryAvailable &&
           !(_guest && _shopSyncState == 'active'))
         TextButton.icon(
           key: const Key('home_guest_without_telegram'),
@@ -871,7 +871,12 @@ class PushokAccountCardState extends State<PushokAccountCard> with WidgetsBindin
             _LocalAccountClear.cancelLogin, userCode: pending.userCode)) : null,
           child: const Text('Отменить вход')),
       ] else ...[
-        const Text('Войдите в свой кабинет MTProxy. Если кабинет уже открыт в браузере, достаточно подтвердить вход.',
+        if (status?.localConnectionAvailable == true) ...[
+          const Text('Подписка сохранена на устройстве. Для подключения достаточно нажать «Подключить».'),
+          TextButton.icon(key: const Key('logout_flow_account'),
+            onPressed: canClear ? () => unawaited(_clearAccount(_LocalAccountClear.logout)) : null,
+            icon: const Icon(Icons.logout), label: const Text('Выйти')),
+        ] else const Text('Войдите в свой кабинет MTProxy. Если кабинет уже открыт в браузере, достаточно подтвердить вход.',
           style: TextStyle(color: PushokPalette.muted)),
         const SizedBox(height: 12),
         FilledButton.icon(key: const Key('begin_flow_login'),

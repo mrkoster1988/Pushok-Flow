@@ -110,7 +110,7 @@ class FlowAccountPending {
 class FlowAccountStatus {
   const FlowAccountStatus({required this.state, this.busy = false, this.errorCode,
     this.pending, this.profile, this.refreshedAt, this.sessionExpiresAt, this.stale = false,
-    this.recoveryAvailable = false});
+    this.localConnectionAvailable = false, this.recoveryAvailable = false});
   final FlowAccountState state;
   final bool busy;
   final String? errorCode;
@@ -120,10 +120,11 @@ class FlowAccountStatus {
   final int? sessionExpiresAt;
   final bool stale;
   final bool recoveryAvailable;
+  final bool localConnectionAvailable;
 
   factory FlowAccountStatus.fromPlatform(Object? value) {
     final map = _accountMap(value, {'state', 'busy', 'errorCode', 'pending', 'profile',
-      'refreshedAt', 'sessionExpiresAt', 'stale', 'recoveryAvailable'});
+      'refreshedAt', 'sessionExpiresAt', 'stale', 'recoveryAvailable', 'localConnectionAvailable'});
     final state = switch (map['state']) {
       'signed_out' => FlowAccountState.signedOut,
       'pending' => FlowAccountState.pending,
@@ -154,7 +155,7 @@ class FlowAccountStatus {
     return FlowAccountStatus(state: state, busy: map['busy']! as bool,
       errorCode: errorCode as String?, pending: pending, profile: profile,
       refreshedAt: refreshedAt, sessionExpiresAt: sessionExpiresAt, stale: map['stale']! as bool,
-      recoveryAvailable: recoveryAvailable);
+      recoveryAvailable: recoveryAvailable, localConnectionAvailable: map['localConnectionAvailable'] == true);
   }
 
   @override

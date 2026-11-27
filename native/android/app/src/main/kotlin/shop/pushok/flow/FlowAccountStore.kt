@@ -78,7 +78,7 @@ internal class FlowAccountStore(context: Context) : FlowAccountPersistence {
     override fun save(value: FlowAccountRecord) {
         if (poisoned) unavailable()
         try {
-            if (value.pending == null && value.session == null) {
+            if (value.pending == null && value.session == null && value.localOwner == null) {
                 if (!preferences.edit().remove("record").commit()) { poisoned = true; unavailable() }
                 return
             }

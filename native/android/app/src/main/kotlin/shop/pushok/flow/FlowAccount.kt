@@ -44,6 +44,12 @@ internal class FlowAccountCoordinator private constructor(context: Context) {
             ("recoveryAvailable" to manager.recoveryAvailable)
     }
     /** Snapshot never crosses Flutter channel; session owners are checked again before each write. */
+    internal fun connectionOwner(): String? = synchronized(lock) {
+        if (manager.recoveryAvailable || busy) throw FlowShopFailure("SHOP_BUSY")
+        manager.load { change -> change() }
+        manager.record.session?.profile?.id ?: manager.record.localOwner
+    }
+
     internal fun shopLease(): FlowShopSessionLease? = synchronized(lock) {
         val session = manager.record.session ?: return@synchronized null
         val account = session.profile ?: return@synchronized null

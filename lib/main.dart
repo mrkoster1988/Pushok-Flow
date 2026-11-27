@@ -243,7 +243,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     onTimeout: () => throw PlatformException(code: 'PROFILE_READ_TIMEOUT'),
   );
 
-  Future<void> _toggleTunnel({String? profile}) async {
+  Future<void> _toggleTunnel({String? profile, bool provisionIfEmpty = false}) async {
     if (!_canToggleTunnel) return;
     final tunnelIntent = ++_tunnelIntentEpoch;
     final disconnecting = _ownsTunnel;
@@ -338,7 +338,11 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
       }
     }
     if (needsProfile && mounted && _foreground && requestEpoch == _profileRequestEpoch) {
-      await _editProfile(connectAfterSave: true, tunnelIntent: tunnelIntent);
+      if (provisionIfEmpty) {
+        _homeAccountKey.currentState?.requestConnection(allowGuest: true);
+      } else {
+        await _editProfile(connectAfterSave: true, tunnelIntent: tunnelIntent);
+      }
     }
   }
 
@@ -350,11 +354,7 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     _lastPing = null;
     _pingMs = null;
     if (!_canToggleTunnel) return;
-    if (_ownsTunnel || _profiles?.activeProfile != null) {
-      unawaited(_toggleTunnel());
-    } else {
-      _homeAccountKey.currentState?.requestConnection(allowGuest: true);
-    }
+    unawaited(_toggleTunnel(provisionIfEmpty: true));
   }
 
   Future<void> _connectAfterShopReady() async {

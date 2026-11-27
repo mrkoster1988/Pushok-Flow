@@ -84,7 +84,7 @@ internal class FlowShopBindingStore(context: Context) {
         }
     }
 
-    /** Only Shop-bound profiles require the matching live MTProxy account.
+    /** Only Shop-bound profiles require the previously verified device owner.
      * Manual profiles and all unrelated subscriptions are not affected.
      */
     fun requireConnectionAllowed(config: String, profileId: String?,
@@ -93,7 +93,6 @@ internal class FlowShopBindingStore(context: Context) {
         val linked = store.subscriptionRecords().firstOrNull {
             fingerprint(it.url) == bound.urlHash
         } ?: return
-        val current = account.shopLease()
         val metadata = store.metadata()["profiles"] as? List<*>
             ?: throw FlowShopFailure("SHOP_STORAGE_ERROR")
         for (raw in metadata) {
@@ -101,7 +100,7 @@ internal class FlowShopBindingStore(context: Context) {
             val id = profile["id"] as? String ?: throw FlowShopFailure("SHOP_STORAGE_ERROR")
             if (profile["subscriptionId"] == linked.id && (profileId == null || profileId == id) &&
                 store.load(id) == config) {
-                if (current == null || !current.accountId.equals(bound.accountId, ignoreCase = true)) {
+                if (!bound.accountId.equals(account.connectionOwner(), ignoreCase = true)) {
                     throw FlowShopFailure("SHOP_LOGIN_REQUIRED")
                 }
             }
