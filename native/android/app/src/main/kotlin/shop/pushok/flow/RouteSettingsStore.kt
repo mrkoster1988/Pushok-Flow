@@ -121,6 +121,7 @@ object RouteInitialRecommendations {
         "com.wildberries.ru",
         "ru.alfabank.mobile.android",
         "ru.dublgis.dgismobile",
+        "ru.gazprombank.android.mobilebank.app",
         "ru.oneme.app",
         "ru.ozon.app.android",
         "ru.rostel",

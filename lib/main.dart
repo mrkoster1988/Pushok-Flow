@@ -1769,7 +1769,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
     selectedPackages: bypassPackages,
     unavailablePackages: unavailableBypassPackages,
     recommendedPackages: _recommendations.rulesVersion == 0
-        ? RecommendationStatus.bundledPackages : _recommendations.packages,
+        ? RecommendationStatus.bundledPackages
+        : {..._recommendations.packages, ...RecommendationStatus.compatibilityPackages},
     availabilityCurrent: !_routesStale && !loadingApps && routeError == null,
     isAndroid: _isAndroid,
     loading: loadingApps,

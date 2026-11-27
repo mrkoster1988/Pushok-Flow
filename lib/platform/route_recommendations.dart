@@ -20,6 +20,13 @@ class RecommendationFailure implements Exception {
 
 /// A verified native catalogue. It is advisory and never a saved route list.
 class RecommendationStatus {
+  // Local app compatibility fixes also apply to the recommendations filter
+  // when an older signed catalogue is cached.
+  static const Set<String> compatibilityPackages = {
+    'ru.dublgis.dgismobile',
+    'ru.gazprombank.android.mobilebank.app',
+  };
+
   /// Offline starter recommendations. These are a display fallback, not
   /// automatically applied when an online catalogue is refreshed.
   static const Set<String> bundledPackages = {
@@ -29,7 +36,7 @@ class RecommendationStatus {
     'com.vkontakte.android',
     'com.wildberries.ru',
     'ru.alfabank.mobile.android',
-    'ru.dublgis.dgismobile',
+    ...compatibilityPackages,
     'ru.oneme.app',
     'ru.ozon.app.android',
     'ru.rostel',
