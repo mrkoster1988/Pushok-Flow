@@ -666,11 +666,20 @@ open class MainActivity : FlutterActivity() {
                         profileImport.cancel()
                         result.success(true)
                     }
-                    "checkTunnelInternet" -> kotlin.concurrent.thread(name = "flow-connection-check") {
-                        val status = try {
-                            TunnelInternet.check(applicationContext) { !Session.operationInProgress.get() && readTunnelOccupied() }
-                        } catch (_: Exception) { "unknown" }
-                        runOnUiThread { result.success(status) }
+                    "checkTunnelInternet" -> {
+                        val observation = Session.operationInProgress.captureObservation()
+                        kotlin.concurrent.thread(name = "flow-connection-check") {
+                            val status = try {
+                                if (observation == null) "unknown"
+                                else TunnelInternet.check(applicationContext) {
+                                    Session.operationInProgress.isObservationCurrent(observation) && readTunnelOccupied()
+                                }
+                            } catch (_: Exception) { "unknown" }
+                            runOnUiThread {
+                                result.success(if (observation != null &&
+                                    Session.operationInProgress.isObservationCurrent(observation)) status else "unknown")
+                            }
+                        }
                     }
                     "openInternetCheckSupport" -> {
                         val code = call.argument<String>("code")
