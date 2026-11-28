@@ -79,13 +79,18 @@ class FlowConnectionVitals extends StatelessWidget {
     return 'До ' + formatted + ' · ' + ((remaining + 86399) ~/ 86400).toString() + ' дн.';
   }
 
+  bool get _noHandshake => confirmedConnected && diagnosticsCurrent &&
+      diagnostics.protocol == TunnelProtocol.wireguard &&
+      diagnostics.statistics.status == TunnelStatisticsStatus.available &&
+      diagnostics.statistics.handshakeStatus == HandshakeStatus.never;
+
   String get _state => connecting
       ? (ownsTunnel ? 'Отключение туннеля' : 'Соединение устанавливается')
       : nativeBusy ? 'Состояние изменяется'
       : recovery == TunnelRecovery.waitingNetwork ? 'Ожидание сети'
       : recovery == TunnelRecovery.reconnecting ? 'Восстанавливается'
       : isAndroid && !diagnosticsCurrent ? 'Статус уточняется'
-      : confirmedConnected ? 'Туннель включён' : 'Статус: отключено';
+      : _noHandshake ? 'Ожидание отклика' : confirmedConnected ? 'Туннель включён' : 'Статус: отключено';
 
   Widget _metric(String title, String value, IconData icon) => Expanded(
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -124,7 +129,7 @@ class FlowConnectionVitals extends StatelessWidget {
               ownsTunnel ? Icons.shield_outlined : Icons.circle,
           color: connecting || nativeBusy || recovering ? PushokPalette.glowCyan :
               !diagnosticsCurrent ? PushokPalette.muted :
-              ownsTunnel ? PushokPalette.mint : PushokPalette.orange,
+              _noHandshake ? PushokPalette.orange : ownsTunnel ? PushokPalette.mint : PushokPalette.orange,
         )), if (renew != null) ...[
           const SizedBox(width: 10),
           Expanded(child: Semantics(button: true, child: InkWell(key: const Key('home_renew_subscription'),
@@ -143,6 +148,10 @@ class FlowConnectionVitals extends StatelessWidget {
           const SizedBox(width: 10),
           _metric('Последний отклик', handshake, Icons.sync_alt_outlined),
         ]),
+        if (_noHandshake) ...[
+          const SizedBox(height: 8),
+          const Text('Туннель включён, но успешный обмен с сервером ещё не зафиксирован.', style: TextStyle(color: PushokPalette.orange, fontSize: 12)),
+        ],
         if (connectionError != null) ...[
           const SizedBox(height: 9),
           Text(connectionError!, key: const Key('connection_error'),
