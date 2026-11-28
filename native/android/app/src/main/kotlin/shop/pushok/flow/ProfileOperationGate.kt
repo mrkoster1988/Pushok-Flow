@@ -3,6 +3,11 @@ package shop.pushok.flow
 /** One process-wide owner across permission UI, tunnel work and profile changes. */
 class ProfileOperationGate {
     class StopLease internal constructor(val token: Long, val displacedOwner: Long?)
+    class Observation internal constructor(
+        internal val gate: ProfileOperationGate,
+        internal val generation: Long,
+        internal val stopGeneration: Long,
+    )
     private var generation = 0L
     private var owner: Long? = null
     private var ownerStop: Long? = null
@@ -55,4 +60,13 @@ class ProfileOperationGate {
     @Synchronized fun stopPending(): Boolean = pendingStops.isNotEmpty()
 
     @Synchronized fun get(): Boolean = owner != null || pendingStops.isNotEmpty()
+
+    /** A read-only probe belongs to this exact idle state, even after an intervening operation ends. */
+    @Synchronized fun captureObservation(): Observation? =
+        if (owner != null || pendingStops.isNotEmpty()) null
+        else Observation(this, generation, stopGeneration)
+
+    @Synchronized fun isObservationCurrent(observation: Observation): Boolean =
+        observation.gate === this && observation.generation == generation &&
+            observation.stopGeneration == stopGeneration && owner == null && pendingStops.isEmpty()
 }

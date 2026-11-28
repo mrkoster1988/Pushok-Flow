@@ -27,6 +27,18 @@ java -jar "$out/browser-proxy-policy-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/TunnelHealth.kt \
   native/android/tests/TunnelHealthCheck.kt -include-runtime -d "$out/health-tests.jar"
 java -jar "$out/health-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/TunnelInternetPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/TunnelInternetProbe.kt \
+  native/android/tests/TunnelInternetCheck.kt -include-runtime -d "$out/tunnel-internet-tests.jar"
+java -jar "$out/tunnel-internet-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/TunnelInternetPolicy.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/TunnelInternetProbe.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/TunnelInternet.kt \
+  native/android/tests/tunnel_internet_stubs/*.kt native/android/tests/TunnelInternetAndroidCheck.kt \
+  -include-runtime -d "$out/tunnel-internet-android-tests.jar"
+java -jar "$out/tunnel-internet-android-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/TunnelConnectionSession.kt \
   native/android/tests/TunnelConnectionSessionCheck.kt -include-runtime -d "$out/connection-session-tests.jar"
 java -jar "$out/connection-session-tests.jar"

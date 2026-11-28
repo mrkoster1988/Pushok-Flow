@@ -225,6 +225,24 @@ fun main() {
     gate.release(mutation)
     check(!gate.get())
 
+    // A completed connection/profile operation must not revive a result captured
+    // before it. Stop is invalidating even when it finishes before the next poll.
+    val probeGate = ProfileOperationGate()
+    val probe = probeGate.captureObservation()!!
+    check(probeGate.isObservationCurrent(probe))
+    check(!ProfileOperationGate().isObservationCurrent(probe))
+    val change = probeGate.acquire()!!
+    check(probeGate.captureObservation() == null && !probeGate.isObservationCurrent(probe))
+    probeGate.release(change)
+    check(!probeGate.isObservationCurrent(probe))
+    val afterChange = probeGate.captureObservation()!!
+    check(probeGate.isObservationCurrent(afterChange))
+    val probeStop = probeGate.requestStop()
+    check(probeGate.captureObservation() == null && !probeGate.isObservationCurrent(afterChange))
+    probeGate.finishStop(probeStop)
+    check(!probeGate.isObservationCurrent(afterChange))
+    check(probeGate.isObservationCurrent(probeGate.captureObservation()!!))
+
     // Stop reserves the whole process before its IO task runs. A permission
     // request owned by another Activity cannot prevent Stop or resume afterwards.
     val stopGate = ProfileOperationGate()
