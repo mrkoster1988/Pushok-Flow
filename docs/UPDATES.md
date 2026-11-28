@@ -475,7 +475,7 @@ Workflow [publish-verified-update.yml](../.github/workflows/publish-verified-upd
 
 ### Проверенная публикация с локальной подписью
 
-Штатный ручной workflow [publish-public-release.yml](../.github/workflows/publish-public-release.yml) принимает только номер версии, например `0.40.0`. Он читает соответствующий отслеживаемый `release-staging/v<VERSION>.json`; произвольные пути, адреса или ID выпуска в input не принимаются. Старый `publish-verified-update.yml` остаётся историческим инструментом первого v0.24.0.
+Штатный workflow [publish-public-release.yml](../.github/workflows/publish-public-release.yml) запускается вручную через `workflow_dispatch` либо при `push` в `main`, изменяющем `release-requests/flow-v*-publish`. При ручном запуске input принимает только номер версии, например `0.40.0`; при `push` версия берётся из текущего `pubspec.yaml` и должна иметь соответствующий файл запроса публикации. Workflow читает отслеживаемый `release-staging/v<VERSION>.json`; произвольные пути, адреса или ID выпуска в input не принимаются. Старый `publish-verified-update.yml` остаётся историческим инструментом первого v0.24.0.
 
 После локальной подписи [create_public_release_delta.py](../tools/create_public_release_delta.py) формирует ограниченное публичное описание различий между точным CI-кандидатом и окончательным подписанным APK. Текущий путь — schema 1 с одним универсальным файлом. Генератор сверяет состав и сжатые данные приложения; изменение кода или ресурсов при подписи запрещено. Локальное восстановление проверяется побайтово. Закрытый ключ и пароли в этот файл не включаются; содержатся только публичные байты APK, реквизиты CI и примечания выпуска. Schema 2 с universal и тремя ABI-вариантами сохраняется для чтения исторических выпусков v0.40–v0.41 и не задаёт текущий объём публикации.
 
@@ -513,9 +513,13 @@ python3 tools/create_update_manifest.py --apk app-signed.apk \
 
 Исторический путь schema 2 повторяет подпись для каждого ABI-кандидата и использует `--variants-dir <DIR>` с тремя вариантами и их отчётами. Этот путь сейчас не применяется: до отдельного указания пользователя публикуется только универсальный APK, как в примере выше.
 
-### Будущий вариант с GitHub secrets
+### Подпись через GitHub Actions secrets
 
-`android-release.yml` содержит отдельный workflow для подписи и публикации после настройки четырёх GitHub Actions secrets: `PUSHOK_ANDROID_KEYSTORE_BASE64`, `PUSHOK_ANDROID_KEYSTORE_PASSWORD`, `PUSHOK_ANDROID_KEY_ALIAS`, `PUSHOK_ANDROID_KEY_PASSWORD`. Он запускается только вручную; без этих secrets намеренно завершится ошибкой. Этот вариант не активирован. В v0.24.0 постоянная подпись выполнена локально, а `publish-verified-update.yml` передал тот же проверенный APK в GitHub Release без закрытого ключа в CI.
+`android-release.yml` содержит отдельный workflow для подписи и публикации после настройки четырёх GitHub Actions secrets: `PUSHOK_ANDROID_KEYSTORE_BASE64`, `PUSHOK_ANDROID_KEYSTORE_PASSWORD`, `PUSHOK_ANDROID_KEY_ALIAS`, `PUSHOK_ANDROID_KEY_PASSWORD`. Он запускается автоматически при `push` в `main`, изменяющем `pubspec.yaml`, и вручную через `workflow_dispatch`. Отсутствующая или некорректная конфигурация подписи останавливает этот workflow до публикации.
+
+При такой ошибке действующим путём остаётся локальная подпись успешного CI-кандидата сохранённым постоянным ключом и штатная публикация через `publish-public-release.yml`, как в [v2.0.11](release-checks/v2.0.11.md). Этот путь требует тех же проверок исходного коммита, APK, сертификата и публичного канала; временный ключ кандидата не заменяет постоянную подпись.
+
+В v0.24.0 постоянная подпись выполнена локально, а `publish-verified-update.yml` передал тот же проверенный APK в GitHub Release без закрытого ключа в CI.
 
 ## Что подтверждается отдельно
 
