@@ -13,6 +13,7 @@ class _BrowserSitesPageState extends State<BrowserSitesPage> {
   Set<String> selected = {};
   String? error;
   bool available = true;
+  bool enabled = false;
   bool busy = true;
 
   @override
@@ -25,7 +26,8 @@ class _BrowserSitesPageState extends State<BrowserSitesPage> {
       if (mounted) setState(() {
         names = Map<String,String>.from(data['names'] as Map);
         selected = Set<String>.from(data['selected'] as List);
-        available = data['available'] == true; busy = false;
+        available = data['available'] == true;
+        enabled = data['enabled'] == true; busy = false;
       });
     } catch (_) { if (mounted) setState(() {error='Не удалось загрузить настройки сайтов.';busy=false;}); }
   }
@@ -42,14 +44,25 @@ class _BrowserSitesPageState extends State<BrowserSitesPage> {
     finally { if (mounted) setState(() => busy=false); }
   }
 
+  Future<void> _setEnabled(bool value) async {
+    setState(() { busy=true;error=null; });
+    try {
+      final saved = await channel.invokeMethod<bool>('setEnabled',value);
+      if (saved != true) throw const FormatException();
+      if (mounted) setState(() => enabled=value);
+    } catch (_) { if (mounted) setState(() => error='Не удалось сохранить настройку.'); }
+    finally { if (mounted) setState(() => busy=false); }
+  }
+
   @override
   Widget build(BuildContext context) => ListView(children: [
     const Text('Сайты напрямую',style:TextStyle(fontSize:20,fontWeight:FontWeight.w700)),
     const SizedBox(height:8),
-    Text(available ? 'В браузерах с поддержкой системного прокси выбранные сайты и их поддомены открываются напрямую. Остальные сайты идут через WireGuard. После изменений переподключите Flow.'
+    Text(available ? 'Дополнительный режим использует системный HTTP-прокси Android. Если сайты перестали открываться, выключите его. Настройки отдельных приложений не меняются. После изменений переподключите Flow.'
         : 'Для маршрутов сайтов нужен Android 10 или новее.'),
     if(error!=null) Text(error!),
     if(busy && names.isEmpty) const LinearProgressIndicator(),
+    if(available) SwitchListTile(key: const Key('browser_proxy_enabled'),title:const Text('Включить маршруты сайтов'),subtitle:const Text('По умолчанию выключено · обычный WireGuard'),value:enabled,onChanged:busy?null:_setEnabled),
     if(available) for(final site in names.entries)
       SwitchListTile(title:Text(site.value),subtitle:Text(site.key),
         value:selected.contains(site.key),onChanged:busy?null:(v)=>_change(site.key,v)),

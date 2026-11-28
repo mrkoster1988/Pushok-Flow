@@ -23,10 +23,18 @@ internal object BrowserSites {
         "vk.com" to "ВКонтакте","max.ru" to "MAX")
     private fun settings(c:Context)=c.getSharedPreferences("flow_browser_routes",Context.MODE_PRIVATE)
     fun selected(c:Context):Set<String> = settings(c).getStringSet("domains",catalogue.keys).orEmpty().intersect(catalogue.keys)
+    // The previous default implicitly installed a system-wide HTTP proxy.
+    // Existing selections are preserved, but activation now requires explicit opt-in.
+    fun enabled(c:Context):Boolean = settings(c).getBoolean("proxy_enabled", false)
     fun register(c:Context,messenger:BinaryMessenger) {
         MethodChannel(messenger,"shop.pushok.flow/browser_routes").setMethodCallHandler { call,result ->
             when(call.method){
-                "read" -> result.success(mapOf("available" to (Build.VERSION.SDK_INT>=29),"names" to catalogue,"selected" to selected(c).toList()))
+                "read" -> result.success(mapOf("available" to (Build.VERSION.SDK_INT>=29),"names" to catalogue,"selected" to selected(c).toList(),"enabled" to enabled(c)))
+                "setEnabled" -> {
+                    val value=call.arguments as? Boolean
+                    if(value==null)result.error("INVALID","Некорректная настройка",null)
+                    else result.success(settings(c).edit().putBoolean("proxy_enabled",value).commit())
+                }
                 "set" -> {
                     val names=call.arguments as? List<*>
                     if(names==null||names.any { it !is String || it !in catalogue })result.error("INVALID","Недопустимый сайт",null)
@@ -53,7 +61,7 @@ class FlowBrowserVpnService:GoBackend.VpnService() {
         val builder=super.getBuilder()
         proxy?.close();proxy=null
         val domains=BrowserSites.selected(this)
-        if(Build.VERSION.SDK_INT>=29 && domains.isNotEmpty()){
+        if(BrowserProxyPolicy.shouldInstall(BrowserSites.enabled(this),Build.VERSION.SDK_INT,domains)){
             proxy=DirectBrowserProxy(domains,::openSocket)
             builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1",proxy!!.port))
         }
