@@ -41,6 +41,18 @@ private fun config(number: Int) =
     "vless://00000000-0000-4000-8000-${number.toString().padStart(12, '0')}@endpoint.example:443?security=tls&type=tcp#Server$number"
 private fun feed(vararg numbers: Int) = SubscriptionFeed.parse(numbers.joinToString("\n", transform = ::config).toByteArray())
 
+private fun managedBody(number: Int, revision: Long = 1, state: String = "active",
+    expirySeconds: Long = 4_102_444_800L): String {
+    val raw = "[Interface]\nPrivateKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n" +
+        "Address = 10.77.0.2/32\nDNS = 1.1.1.1\n[Peer]\n" +
+        "PublicKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\n" +
+        "Endpoint = 203.0.113.10:${51820 + number}\nAllowedIPs = 0.0.0.0/0, ::/0\n"
+    val encoded = raw.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    val entries = if (state == "active") "[{\"id\":\"primary\",\"name\":\"Основной\",\"protocol\":\"wireguard\",\"config\":\"$encoded\"}]" else "[]"
+    return "{\"schema\":\"pushok-flow-subscription\",\"version\":1,\"revision\":$revision," +
+        "\"state\":\"$state\",\"expires_at\":$expirySeconds,\"profiles\":$entries}"
+}
+
 private class ResponseSpec(
     val status: Int = 200,
     val body: String = config(100),
@@ -50,11 +62,12 @@ private class ResponseSpec(
     val onDisconnect: () -> Unit = {},
 )
 
-private class Fixture(count: Int = 2, var gateCode: String? = null) : AutoCloseable {
+private class Fixture(count: Int = 2, var gateCode: String? = null, managed: Boolean = false) : AutoCloseable {
     val activity = Activity()
     val store = SecureWireGuardStore()
     val messenger = object : BinaryMessenger {}
-    val responses = (1..count).associateWith { ResponseSpec(body = config(100 + it)) }.toMutableMap()
+    val responses = (1..count).associateWith { ResponseSpec(body =
+        if (managed) managedBody(100 + it, revision = 2) else config(100 + it)) }.toMutableMap()
     val opened = Collections.synchronizedList(mutableListOf<Int>())
     val ids: List<String>
     val originalWrites: Int
@@ -66,7 +79,7 @@ private class Fixture(count: Int = 2, var gateCode: String? = null) : AutoClosea
     init {
         ids = (1..count).map { number ->
             store.importSubscription("Подписка $number", "https://provider$number.example/sub/private-token-$number",
-                feed(number), 0)
+                if (managed) SubscriptionFeed.parse(managedBody(number).toByteArray()) else feed(number), 0)
         }
         originalWrites = store.writes
         val downloader = SubscriptionDownloader(
@@ -118,6 +131,75 @@ private class Fixture(count: Int = 2, var gateCode: String? = null) : AutoClosea
         executor("network").submit {}.get(3, TimeUnit.SECONDS)
         executor("reads").submit {}.get(3, TimeUnit.SECONDS)
         Handler.clearForTest()
+    }
+}
+
+private fun connectPreflightUpdatesOrUsesOnlyAnUnexpiredNetworkCache() {
+    Fixture(managed = true).use { f ->
+        val id = f.store.metadata()["activeProfileId"] as String
+        FlowShopBridgeClient.requests = 0
+        f.invoke("prepareConnection", mapOf("profileId" to id)).status()
+        check(f.opened == listOf(1))
+        check(f.store.metadata()["activeProfileId"] == id)
+        check(f.store.load(id)!!.contains("Endpoint = 203.0.113.10:51921"))
+        check(f.store.subscriptionRecords().first().revision == 2L)
+        check(f.store.subscriptionRecords().first().expiresAt == 4_102_444_800_000L)
+        check(FlowShopBridgeClient.requests == 0) // No repeated Telegram ticket/authentication.
+    }
+    Fixture(managed = true).use { f ->
+        val id = f.store.metadata()["activeProfileId"] as String
+        val previous = f.store.load(id)
+        f.responses[1] = ResponseSpec(status = 503)
+        f.invoke("prepareConnection", mapOf("profileId" to id)).status()
+        check(f.store.load(id) == previous && f.store.writes == f.originalWrites)
+        check(f.errors()[f.ids[0]] == "SUBSCRIPTION_NETWORK_ERROR")
+    }
+    Fixture(managed = true).use { f ->
+        val id = f.store.metadata()["activeProfileId"] as String
+        f.store.refreshFailure = SubscriptionFailure("SUBSCRIPTION_NETWORK_ERROR")
+        check(f.invoke("prepareConnection", mapOf("profileId" to id)).code == "SUBSCRIPTION_NETWORK_ERROR")
+        check(f.store.writes == f.originalWrites) // A storage failure cannot masquerade as an offline cache hit.
+    }
+    for ((expected, response) in listOf(
+        "SUBSCRIPTION_AUTH_REQUIRED" to ResponseSpec(status = 403),
+        "SUBSCRIPTION_AUTH_REQUIRED" to ResponseSpec(status = 410),
+        "SUBSCRIPTION_INVALID" to ResponseSpec(body = managedBody(200, revision = 1)),
+        "SUBSCRIPTION_INVALID" to ResponseSpec(body = "not a managed feed"),
+    )) Fixture(managed = true).use { f ->
+        val id = f.store.metadata()["activeProfileId"] as String
+        val previous = f.store.load(id)
+        f.responses[1] = response
+        check(f.invoke("prepareConnection", mapOf("profileId" to id)).code == expected)
+        check(f.store.load(id) == previous && f.store.writes == f.originalWrites)
+    }
+    Fixture(managed = true).use { f ->
+        val id = f.store.metadata()["activeProfileId"] as String
+        f.store.refreshSubscription(f.ids[0], f.store.subscriptionRecords().first().url,
+            SubscriptionFeed.parse(managedBody(1, revision = 2, expirySeconds = 1).toByteArray()), 0)
+        f.responses[1] = ResponseSpec(status = 503)
+        check(f.invoke("prepareConnection", mapOf("profileId" to id)).code == "SUBSCRIPTION_NETWORK_ERROR")
+        // A later actual renewal is fetched before the encrypted-store expiry gate.
+        f.responses[1] = ResponseSpec(body = managedBody(1, revision = 3))
+        f.invoke("prepareConnection", mapOf("profileId" to id)).status()
+        check(f.store.load(id) != null)
+    }
+    for (state in listOf("expired", "revoked")) Fixture(managed = true).use { f ->
+        val id = f.store.metadata()["activeProfileId"] as String
+        f.responses[1] = ResponseSpec(body = managedBody(1, revision = 2, state = state))
+        check(f.invoke("prepareConnection", mapOf("profileId" to id)).code == "SUBSCRIPTION_${state.uppercase()}")
+        check(f.store.subscriptionRecords().first().state == state)
+        check(f.opened == listOf(1)) // No pivot into the other subscription when the original was revoked.
+    }
+    Fixture(managed = true).use { f ->
+        val id = f.store.metadata()["activeProfileId"] as String
+        val other = (f.store.metadata()["profiles"] as List<*>).map { it as Map<*, *> }
+            .first { it["subscriptionId"] == f.ids[1] }["id"] as String
+        f.responses[1] = ResponseSpec(body = managedBody(101, revision = 2), onStatus = {
+            f.store.catalogStore.select(other)
+        })
+        check(f.invoke("prepareConnection", mapOf("profileId" to id)).code == "PROFILE_CHANGED")
+        check(f.store.metadata()["activeProfileId"] == other)
+        check(f.store.subscriptionRecords().first().revision == 1L)
     }
 }
 
@@ -430,6 +512,7 @@ private fun shopRequiresAnAccountAndCannotLeakOrDuplicateExistingSubscriptions()
 
 fun main() {
     try {
+        connectPreflightUpdatesOrUsesOnlyAnUnexpiredNetworkCache()
         shopRequiresAnAccountAndCannotLeakOrDuplicateExistingSubscriptions()
         partialRefreshContinues()
         providerFailuresAreBoundedAndPreserveProfiles()
@@ -438,7 +521,7 @@ fun main() {
         interruptionBetweenProvidersStopsFurtherTraffic()
         cancellationDominatesABlockedProviderFailure()
         mixedImportsAndRefreshesReportSkippedProfilesWithoutPartialFailures()
-        println("Actual subscription coordinator checks passed: 8 regression groups")
+        println("Actual subscription coordinator checks passed: 9 regression groups")
     } finally {
         for (name in listOf("network", "reads")) {
             executor(name).shutdownNow()

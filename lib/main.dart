@@ -142,9 +142,10 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
   // the last screen state cannot authorize reconfiguring an existing tunnel.
   // Keep Disconnect available for a last-known UP even when status reads fail.
   bool get _canToggleTunnel => _isAndroid && _foreground && !_informationOpen &&
-      !connecting && !_nativeBusy && !_profileBusy && !_profileEditorOpen &&
+      !connecting && (!_nativeBusy || (_ownsTunnel && _diagnostics.managedRecovery == 'switching')) &&
+      !_profileBusy && !_profileEditorOpen &&
       !_savingRoute && !_routeConfirmationOpen &&
-      (_ownsTunnel || (!_statusRefreshing && _diagnostics.isKnown &&
+      (_ownsTunnel || (!_nativeBusy && !_statusRefreshing && _diagnostics.isKnown &&
           !_diagnosticsStale && !_diagnostics.ownsTunnel));
   // An isolated service can survive a restart of this UI process. Unknown
   // startup state must forbid Connect but still allow an explicit recovery Stop.
@@ -219,6 +220,12 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           return 'Не удалось записать профили. Перезапустите приложение перед повторной попыткой.';
         case 'SUBSCRIPTION_EXPIRED':
         case 'SUBSCRIPTION_REVOKED':
+        case 'SUBSCRIPTION_AUTH_REQUIRED':
+        case 'SUBSCRIPTION_NETWORK_ERROR':
+        case 'SUBSCRIPTION_TLS_ERROR':
+        case 'SUBSCRIPTION_INVALID':
+        case 'SUBSCRIPTION_BUSY':
+        case 'SUBSCRIPTION_STORE_FAILED':
           return subscriptionErrorMessage(error);
         case 'ROUTES_STORE_UNAVAILABLE':
           return 'Не удалось записать исключения. Перезапустите приложение перед подключением.';
@@ -267,9 +274,8 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
               statistics: TunnelStatistics.inactive());
         });
       } else {
-        // Only this explicit action transfers a saved configuration into Dart.
-        // Native code verifies this ID and content again under its operation
-        // lease, so a different Activity cannot switch profiles in between.
+        // Managed keys stay native; an explicit manual-profile Connect loads its raw config.
+        // Native code verifies the selected ID and content again under its operation lease.
         final catalog = await _withProfileReadDeadline(WireGuardTunnel.listProfiles());
         if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
         final active = catalog.activeProfile;
@@ -277,16 +283,17 @@ class _FlowHomeState extends State<FlowHome> with WidgetsBindingObserver {
           needsProfile = true;
           setState(() { _profiles = catalog; _profilesError = null; });
         } else {
-          final config = profile ?? await _withProfileReadDeadline(
+          final config = active.isManaged ? null : profile ?? await _withProfileReadDeadline(
             WireGuardTunnel.loadProfile(profileId: active.id));
           if (!mounted || !_foreground || requestEpoch != _profileRequestEpoch) return;
-          if (config == null || config.trim().isEmpty) {
+          if (!active.isManaged && (config == null || config.trim().isEmpty)) {
             throw PlatformException(code: 'PROFILE_NOT_FOUND');
           }
           // Native connection and Android consent own their completion. Only the
           // preceding read-only preparation has a Dart deadline.
           nativeOperationStarted = true;
-          final ok = await WireGuardTunnel.connect(config, expectedProfileId: active.id);
+          final ok = active.isManaged ? await WireGuardTunnel.connectManaged(active.id)
+              : await WireGuardTunnel.connect(config!, expectedProfileId: active.id);
           if (!mounted) return;
           setState(() {
             _ownsTunnel = ok;

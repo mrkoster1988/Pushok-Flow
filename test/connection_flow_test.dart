@@ -45,6 +45,7 @@ const _firstProfileId = '11111111-1111-4111-8111-111111111111';
 const _secondProfileId = '22222222-2222-4222-8222-222222222222';
 
 class _AndroidBridge {
+  String? managedRecovery;
   final profiles = <String, Map<String, String>>{};
   String? activeProfileId;
   int _nextProfileId = 0;
@@ -185,6 +186,7 @@ class _AndroidBridge {
           if (statusProtocol != null) 'protocol': statusProtocol,
           'uptimeSeconds': connected ? 12 : 0,
           'lastErrorCode': null,
+          if (managedRecovery != null) 'managedRecovery': managedRecovery,
           'statistics': connected ? statistics : {'status': 'inactive'},
         };
     }
@@ -335,6 +337,33 @@ void main() {
       expect(bridge.named('connectWireGuard'), hasLength(1));
       expect(bridge.named('loadWireGuardProfile'), hasLength(1));
       expect(bridge.named('selectWireGuardProfile'), isEmpty);
+    });
+  });
+
+  testWidgets('Managed Connect asks native preflight without loading old private config into Dart', (tester) async {
+    bridge.savedProfile = _profile;
+    bridge.profiles[_firstProfileId]!['subscriptionId'] = '33333333-3333-4333-8333-333333333333';
+    bridge.profiles[_firstProfileId]!['subscriptionName'] = 'Моё подключение';
+    await _withApp(tester, () async {
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      expect(bridge.named('connectWireGuard'), hasLength(1));
+      expect(bridge.named('connectWireGuard').single.arguments, {'expectedProfileId': _firstProfileId});
+      expect(bridge.named('loadWireGuardProfile'), isEmpty);
+      expect(bridge.named('setBypass'), isEmpty);
+    });
+  });
+
+  testWidgets('Stop remains available during a native managed server handover', (tester) async {
+    bridge.connected = true;
+    bridge.statusState = 'transitioning';
+    bridge.managedRecovery = 'switching';
+    await _withApp(tester, () async {
+      expect(tester.widget<InkWell>(find.byKey(const Key('pushok_connect_button'))).onTap, isNotNull);
+      await tester.tap(find.byKey(const Key('pushok_connect_button')));
+      await tester.pumpAndSettle();
+      expect(bridge.named('disconnectWireGuard'), hasLength(1));
+      expect(bridge.named('connectWireGuard'), isEmpty);
     });
   });
 

@@ -174,6 +174,30 @@ private fun checkSubscriptionCancelIsolation() {
     check(String(client.fetch("https://subscription.example.org/third-synthetic").body) == "safe-body")
 }
 
+private fun checkConnectRefreshDeadlineIncludesBlockedDns() {
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val finished = CountDownLatch(1)
+    val clock = AtomicLong()
+    val opens = AtomicInteger()
+    val client = SubscriptionDownloader(resolve = {
+        blockedPlatformCall(entered, release)
+        arrayOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)))
+    }, open = { opens.incrementAndGet(); TestConnection(it) }, elapsedMs = clock::get,
+        network = BoundedNetworkPool("connect-deadline-test", afterCompletion = { finished.countDown() }))
+    val task = AsyncResult { client.fetchWithin("https://subscription.example.org/private-token", 5_000L) }
+    try {
+        await(entered, "Connect preflight did not reach DNS")
+        clock.set(5_001L)
+        val error = task.outcome().exceptionOrNull()
+        check(error is SubscriptionFailure && error.code == "SUBSCRIPTION_NETWORK_ERROR")
+        check(release.count == 1L && opens.get() == 0)
+    } finally {
+        release.countDown()
+        await(finished, "Timed out resolver did not release its bounded worker")
+    }
+}
+
 private fun checkBoundedPoolCapacityAndDiscard() {
     val entered = CountDownLatch(2)
     val release = CountDownLatch(1)
@@ -477,7 +501,7 @@ fun main() {
     expectCode("SUBSCRIPTION_TOO_LARGE") { hugeStream.fetch(source) }
     val compressed = SubscriptionDownloader(resolve = publicDns, open = { TestConnection(it, encoding = "gzip") })
     expectCode("SUBSCRIPTION_INVALID") { compressed.fetch(source) }
-    for (code in listOf(401, 403)) {
+    for (code in listOf(401, 403, 410)) {
         val denied = SubscriptionDownloader(resolve = publicDns, open = { TestConnection(it, status = code) })
         expectCode("SUBSCRIPTION_AUTH_REQUIRED") { denied.fetch(source) }
     }
@@ -506,6 +530,7 @@ fun main() {
     checkPushokExternalLinks()
     checkUncooperativeSubscriptionTransport()
     checkSubscriptionCancelIsolation()
+    checkConnectRefreshDeadlineIncludesBlockedDns()
     checkBoundedPoolCapacityAndDiscard()
     checkPoolCompletionHandoff()
     checkInterruptedWaiterAndLateAbort()

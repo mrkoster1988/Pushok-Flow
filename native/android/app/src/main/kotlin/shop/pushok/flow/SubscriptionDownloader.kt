@@ -40,8 +40,13 @@ class SubscriptionDownloader internal constructor(
         activeCall.get()?.cancel()
     }
 
-    fun fetch(rawUrl: String, ensureActive: () -> Unit = {}): Response {
-        val call = network.newCall<Response>(elapsedMs() + 40_000L, elapsedMs) { it.body.fill(0) }
+    fun fetch(rawUrl: String, ensureActive: () -> Unit = {}): Response =
+        fetchWithin(rawUrl, 40_000L, ensureActive)
+
+    /** Bound the entire DNS/connect/body operation, including non-cooperative transports. */
+    fun fetchWithin(rawUrl: String, timeoutMs: Long, ensureActive: () -> Unit = {}): Response {
+        require(timeoutMs in 1..40_000L)
+        val call = network.newCall<Response>(elapsedMs() + timeoutMs, elapsedMs) { it.body.fill(0) }
         if (!activeCall.compareAndSet(null, call)) throw SubscriptionFailure("SUBSCRIPTION_BUSY")
         try {
             // Includes the resolver and URLConnection's own DNS/connect/header/body
@@ -115,7 +120,8 @@ class SubscriptionDownloader internal constructor(
                     url = SubscriptionPolicy.normalizeUrl(parsed.resolve(location).toASCIIString())
                     continue
                 }
-                if (status == 401 || status == 403) throw SubscriptionFailure("SUBSCRIPTION_AUTH_REQUIRED")
+                // A removed bearer link must not authorize Connect from a still-dated cache.
+                if (status == 401 || status == 403 || status == 410) throw SubscriptionFailure("SUBSCRIPTION_AUTH_REQUIRED")
                 if (status != 200) throw SubscriptionFailure("SUBSCRIPTION_NETWORK_ERROR")
                 if (current.contentLengthLong > SubscriptionPolicy.MAX_BYTES) {
                     throw SubscriptionFailure("SUBSCRIPTION_TOO_LARGE")

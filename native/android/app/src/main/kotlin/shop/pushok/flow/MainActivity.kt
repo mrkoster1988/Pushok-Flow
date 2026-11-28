@@ -25,8 +25,10 @@ open class MainActivity : FlutterActivity() {
     }
 
     private val io get() = Session.connection.io
-    private class PendingTunnelRequest(val call: MethodCall, val result: MethodChannel.Result, val token: Long)
+    private class PendingTunnelRequest(val call: MethodCall, val result: MethodChannel.Result,
+        val token: Long, val intent: Long, val lease: FlowShopSessionLease?)
     private var pending: PendingTunnelRequest? = null
+    private var preparingConnection: MethodChannel.Result? = null
     // The tunnel must outlive Activity recreation (rotation / process UI rebuild).
     // GoBackend.getState compares the Tunnel object by identity.
     private object Session {
@@ -42,6 +44,8 @@ open class MainActivity : FlutterActivity() {
         var protocol = TunnelConnectionSession.Protocol.WIREGUARD
         val operationInProgress = ProfileOperationGate()
         val routeSettingsState = RouteSettingsState()
+        val stopPending: Boolean get() = operationInProgress.stopPending()
+        @Volatile var recovery: ManagedWireGuardRecovery? = null
     }
     private val tunnel get() = Session.tunnel
     private var backend: GoBackend?
@@ -73,9 +77,76 @@ open class MainActivity : FlutterActivity() {
         return readTunnelOccupied()
     }
 
-    private fun connect(call: MethodCall, result: MethodChannel.Result) {
+    private fun connect(call: MethodCall, result: MethodChannel.Result, capturedIntent: Long? = null) {
+        if (preparingConnection != null || Session.stopPending) {
+            result.error("VPN_BUSY", "Подключение уже изменяется", null)
+            return
+        }
+        val intent = capturedIntent ?: Session.operationInProgress.captureIntent()
+        if (intent == null || !Session.operationInProgress.isCurrentIntent(intent)) {
+            result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+            return
+        }
+        val profileId = call.argument<String>("expectedProfileId")
+        val metadata = try { secureStore.metadata() } catch (_: Exception) {
+            result.error("PROFILE_LOAD_FAILED", "Не удалось прочитать профиль", null)
+            return
+        }
+        val source = (metadata["profiles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
+            ?.firstOrNull { it["id"] == profileId }
+        val subscriptionId = source?.get("subscriptionId") as? String
+        val active = try { readTunnelOccupied() } catch (_: Exception) { true }
+        if (profileId == null || subscriptionId == null) {
+            connectPrepared(call, result, intent)
+            return
+        }
+        if (active) {
+            // A stale UI can send managed Connect while the existing TUN is UP.
+            // Resolve the native profile without refreshing or rebuilding that TUN.
+            try {
+                val raw = call.argument<String>("config") ?: secureStore.load(profileId)
+                    ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+                connectPrepared(MethodCall("connectWireGuard", mapOf("config" to raw,
+                    "expectedProfileId" to profileId)), result, intent)
+            } catch (error: Exception) {
+                result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"), "Не удалось подготовить подключение", null)
+            }
+            return
+        }
+        preparingConnection = result
+        profileSubscriptions.prepareForConnection(profileId) { failure ->
+            if (preparingConnection !== result) return@prepareForConnection
+            preparingConnection = null
+            if (!Session.operationInProgress.isCurrentIntent(intent)) {
+                result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+                return@prepareForConnection
+            }
+            if (failure != null) {
+                result.error(failure, "Не удалось обновить подключение", null)
+                return@prepareForConnection
+            }
+            try {
+                val current = secureStore.metadata()
+                val currentId = current["activeProfileId"] as? String
+                    ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+                val currentProfile = (current["profiles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
+                    ?.firstOrNull { it["id"] == currentId && it["subscriptionId"] == subscriptionId }
+                    ?: throw ProfileCatalogFailure("PROFILE_CHANGED")
+                val raw = secureStore.load(currentProfile["id"] as String)
+                    ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+                connectPrepared(MethodCall("connectWireGuard", mapOf("config" to raw,
+                    "expectedProfileId" to currentId)), result, intent)
+            } catch (error: Exception) {
+                result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"), "Не удалось подготовить подключение", null)
+            }
+        }
+    }
+
+    private fun connectPrepared(call: MethodCall, result: MethodChannel.Result, intent: Long) {
         val config = call.argument<String>("config")
-        if (pending != null || Session.operationInProgress.get()) {
+        if (!Session.operationInProgress.isCurrentIntent(intent)) {
+            result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+        } else if (pending != null || Session.operationInProgress.get() || Session.stopPending) {
             result.error("VPN_BUSY", "Подключение уже выполняется", null)
         } else if (config.isNullOrBlank() || config.length > 65536) {
             // Do not show Android's VPN approval for an unusable profile.
@@ -93,11 +164,12 @@ open class MainActivity : FlutterActivity() {
                 shopBinding.requireConnectionAllowed(config,
                     call.argument<String>("expectedProfileId"),
                     secureStore, FlowAccountCoordinator.get(applicationContext))
+                val lease = boundConnectionLease(config, call.argument<String>("expectedProfileId"))
                 val approval = VpnService.prepare(this)
                 if (approval != null) {
-                    pending = PendingTunnelRequest(call, result, token)
+                    pending = PendingTunnelRequest(call, result, token, intent, lease)
                     startActivityForResult(approval, vpnRequestCode)
-                } else startTunnel(call, result, token)
+                } else startTunnel(call, result, token, intent, lease)
             } catch (error: Exception) {
                 pending = null
                 releaseOperation(token)
@@ -107,10 +179,27 @@ open class MainActivity : FlutterActivity() {
         }
     }
     private fun disconnect(result: MethodChannel.Result) {
-        val token = Session.operationInProgress.acquire()
-        if (token == null) {
-            result.error("VPN_BUSY", "Подключение уже изменяется", null)
-        } else io.execute {
+        // Stop wins immediately, even while the watchdog has queued a switch.
+        val stop = Session.operationInProgress.requestStop()
+        Session.recovery?.stop()
+        val preparing = preparingConnection
+        preparingConnection = null
+        if (preparing != null) {
+            profileSubscriptions.cancelConnectionPreparation()
+            preparing.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+        }
+        interruptPendingVpnRequest()
+        io.execute {
+            val lease = Session.operationInProgress.acquireStop(stop)
+            if (lease == null) {
+                Session.operationInProgress.finishStop(stop)
+                runOnUiThread { result.error("VPN_BUSY", "Подключение уже изменяется", null) }
+                return@execute
+            }
+            val token = lease.token
+            // A permission dialog in another Activity can still own a cancelled
+            // updater lease. It must not block idle work after this Stop completes.
+            lease.displacedOwner?.let(appUpdates::endConnection)
             try {
                 Session.connection.disconnect(
                     protocol = Session.protocol,
@@ -122,29 +211,41 @@ open class MainActivity : FlutterActivity() {
                 runOnUiThread { result.error(Session.protocol.disconnectError, "Не удалось отключить туннель", null) }
             } finally {
                 releaseOperation(token)
+                Session.operationInProgress.finishStop(stop)
+                try { FlowWidget.render(applicationContext, widgetState(applicationContext)) } catch (_: Exception) { }
             }
         }
     }
 
     protected fun widgetAction(connecting: Boolean, result: MethodChannel.Result) {
+        if (!connecting) { disconnect(result); return }
         val current = try { widgetState(applicationContext) } catch (_: Exception) { "unknown" }
         if (current == "starting" || current == "unknown") {
             result.error("VPN_BUSY", "Состояние подключения уточняется", null)
             return
         }
         if (connecting == (current == "wireguard")) { result.success(null); return }
-        if (!connecting) { disconnect(result); return }
+        val intent = Session.operationInProgress.captureIntent()
+        if (intent == null) {
+            result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+            return
+        }
         io.execute {
             try {
-                val id = secureStore.metadata()["activeProfileId"] as? String
+                requireConnectionIntent(intent)
+                val metadata = secureStore.metadata()
+                val id = metadata["activeProfileId"] as? String
                     ?: throw IllegalStateException()
-                val config = secureStore.load(id) ?: throw IllegalStateException()
+                val managed = (metadata["profiles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
+                    ?.any { it["id"] == id && it["subscriptionId"] != null } == true
+                val config = if (managed) null else secureStore.load(id) ?: throw IllegalStateException()
                 runOnUiThread {
                     connect(MethodCall("connectWireGuard", mapOf("config" to config,
-                        "expectedProfileId" to id)), result)
+                        "expectedProfileId" to id)), result, intent)
                 }
-            } catch (_: Exception) {
-                runOnUiThread { result.error("PROFILE_LOAD_FAILED", "Выберите профиль в Pushok Flow", null) }
+            } catch (error: Exception) {
+                runOnUiThread { result.error(profileErrorCode(error, "PROFILE_LOAD_FAILED"),
+                    "Выберите профиль в Pushok Flow", null) }
             }
         }
     }
@@ -158,6 +259,34 @@ open class MainActivity : FlutterActivity() {
             } catch (_: Exception) { throw ProfileCatalogFailure("INVALID_CONFIG") }
         }
         return kind
+    }
+
+    /** Only a Shop-bound configuration pins the originating MTProxy session. */
+    private fun boundConnectionLease(raw: String, profileId: String?): FlowShopSessionLease? {
+        val bound = shopBinding.binding() ?: return null
+        val source = secureStore.subscriptionRecords().firstOrNull {
+            FlowShopBindingStore.fingerprint(it.url) == bound.urlHash
+        } ?: return null
+        val profiles = secureStore.metadata()["profiles"] as? List<*>
+            ?: throw FlowShopFailure("SHOP_STORAGE_ERROR")
+        val owned = profiles.mapNotNull { it as? Map<*, *> }.any {
+            val id = it["id"] as? String ?: return@any false
+            it["subscriptionId"] == source.id && (profileId == null || id == profileId) &&
+                secureStore.load(id) == raw
+        }
+        if (!owned) return null
+        val lease = FlowAccountCoordinator.get(applicationContext).shopLease()
+            ?: throw FlowShopFailure("SHOP_LOGIN_REQUIRED")
+        if (!lease.accountId.equals(bound.accountId, ignoreCase = true)) {
+            throw FlowShopFailure("SHOP_ACCOUNT_CHANGED")
+        }
+        return lease
+    }
+
+    private fun requireConnectionIntent(intent: Long) {
+        if (!Session.operationInProgress.isCurrentIntent(intent)) {
+            throw SubscriptionFailure("VPN_REQUEST_INTERRUPTED")
+        }
     }
     private val secureStore by lazy { SecureWireGuardStore(applicationContext) }
     private val decisionMemory by lazy { LocalDecisionMemory(applicationContext) }
@@ -202,15 +331,24 @@ open class MainActivity : FlutterActivity() {
         if (requestCode != vpnRequestCode) return
         val item = pending ?: return
         pending = null
-        if (resultCode != Activity.RESULT_OK) {
+        if (!Session.operationInProgress.isCurrentIntent(item.intent)) {
+            releaseOperation(item.token)
+            item.result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+        } else if (resultCode != Activity.RESULT_OK) {
             releaseOperation(item.token)
             item.result.error("VPN_DENIED", "Разрешение VPN не предоставлено", null)
         } else {
-            startTunnel(item.call, item.result, item.token)
+            startTunnel(item.call, item.result, item.token, item.intent, item.lease)
         }
     }
 
-    private fun startTunnel(call: MethodCall, result: MethodChannel.Result, token: Long) {
+    private fun startTunnel(call: MethodCall, result: MethodChannel.Result, token: Long,
+        intent: Long, lease: FlowShopSessionLease?) {
+        if (!Session.operationInProgress.isCurrentIntent(intent)) {
+            releaseOperation(token)
+            result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+            return
+        }
         val raw = call.argument<String>("config")
         val expectedProfileId = (call.arguments as? Map<*, *>)?.get("expectedProfileId")
         if (raw.isNullOrBlank() || raw.length > 65536) {
@@ -226,6 +364,11 @@ open class MainActivity : FlutterActivity() {
         // The same process-wide token has been held since before VPN approval.
         // No other Activity may change the selected profile while approval is open.
         io.execute {
+            if (!Session.operationInProgress.isCurrentIntent(intent)) {
+                releaseOperation(token)
+                runOnUiThread { result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null) }
+                return@execute
+            }
             if (expectedProfileId != null) {
                 try {
                     // A different Activity may have selected/edited a profile
@@ -251,8 +394,14 @@ open class MainActivity : FlutterActivity() {
             try {
                 // Recheck after Android VPN permission: logout/account switch
                 // while that dialog is open must not start another user's tunnel.
-                shopBinding.requireConnectionAllowed(raw, expectedProfileId as? String,
-                    secureStore, FlowAccountCoordinator.get(applicationContext))
+                val account = FlowAccountCoordinator.get(applicationContext)
+                fun validateActivation() {
+                    requireConnectionIntent(intent)
+                    if (expectedProfileId != null) secureStore.validateActive(expectedProfileId as String, raw)
+                    lease?.let(account::requireShopLease)
+                    shopBinding.requireConnectionAllowed(raw, expectedProfileId as? String, secureStore, account)
+                }
+                validateActivation()
                 validateConnectionProfile(raw)
                 val cleaned = WireGuardRouting.prepare(raw, exclusions)
                 val config = Config.parse(ByteArrayInputStream(cleaned.toByteArray(StandardCharsets.UTF_8)))
@@ -265,8 +414,13 @@ open class MainActivity : FlutterActivity() {
                         RouteAppAvailability.requireForConnection(exclusions, ::isRouteAppAvailable)
                         Session.protocol = requestedProtocol
                         try {
-                            if (backend == null) backend = GoBackend(BrowserRoutingContext(applicationContext))
-                            backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
+                            ManagedActivation.connect(validate = ::validateActivation, activate = {
+                                if (backend == null) backend = GoBackend(BrowserRoutingContext(applicationContext))
+                                FlowBrowserVpnService.beginTunnelBuild()
+                                backend!!.setState(tunnel, Tunnel.State.UP, config) == Tunnel.State.UP
+                            }, deactivate = {
+                                Session.connection.disconnect(requestedProtocol, ::readTunnelOccupied, ::stopTunnels)
+                            })
                         } catch (_: PackageManager.NameNotFoundException) {
                             // The app may disappear between preflight and the
                             // backend's addDisallowedApplication call.
@@ -274,11 +428,32 @@ open class MainActivity : FlutterActivity() {
                         }
                     },
                 )
+                // Also fence an already-UP observation; Stop may have arrived while
+                // the backend answered. The queued Stop is still allowed to repeat DOWN.
+                if (!Session.operationInProgress.isCurrentIntent(intent)) {
+                    Session.connection.disconnect(requestedProtocol, ::readTunnelOccupied, ::stopTunnels)
+                    throw SubscriptionFailure("VPN_REQUEST_INTERRUPTED")
+                }
                 // Transfer the CONNECTING lease to the known-UP latch before releasing the operation token.
                 appUpdates.observeTunnel(active)
-                runOnUiThread { if (active) appUpdates.requestDownloadNotifications(); result.success(mapOf("connected" to active)) }
+                if (active && !Session.stopPending) {
+                    if (Session.recovery == null) Session.recovery = ManagedWireGuardRecovery(
+                        applicationContext, Session.connection, tunnel, { Session.backend }, Session.operationInProgress)
+                    try { Session.recovery?.start(expectedProfileId as? String, exclusions) }
+                    catch (_: Exception) { Session.recovery?.stop() }
+                }
+                runOnUiThread {
+                    if (!Session.operationInProgress.isCurrentIntent(intent)) {
+                        result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null)
+                    } else {
+                        if (active) appUpdates.requestDownloadNotifications()
+                        result.success(mapOf("connected" to active))
+                    }
+                }
             } catch (error: TunnelConnectionFailure) {
-                when (error.code) {
+                if (!Session.operationInProgress.isCurrentIntent(intent)) {
+                    runOnUiThread { result.error("VPN_REQUEST_INTERRUPTED", "Подключение отменено", null) }
+                } else when (error.code) {
                     "VPN_STATE_UNAVAILABLE" -> runOnUiThread { result.error("VPN_STATE_UNAVAILABLE",
                         "Не удалось уточнить состояние туннеля. Повторите проверку.", null) }
                     "ROUTES_APPS_UNAVAILABLE" -> runOnUiThread { result.error("ROUTES_APPS_UNAVAILABLE",
@@ -548,7 +723,7 @@ open class MainActivity : FlutterActivity() {
                             currentSessionStartMs, SystemClock.elapsedRealtime(), lastErrorCode,
                             stateKnown = stateKnown, peerSamples = samples,
                             nowEpochMs = System.currentTimeMillis(),
-                            ownsTunnel = occupied)
+                            ownsTunnel = occupied) + mapOf("managedRecovery" to (Session.recovery?.status ?: "idle"))
                         runOnUiThread { result.success(status) }
                     }
                     "listWireGuardProfiles" -> io.execute {

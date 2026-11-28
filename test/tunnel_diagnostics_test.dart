@@ -33,6 +33,19 @@ void _expectNoMeasurements(TunnelDiagnostics value) {
 }
 
 void main() {
+  test('Managed recovery is an explicit observation with bounded public values', () {
+    final blocked = TunnelDiagnostics.fromPlatform({..._status(), 'managedRecovery': 'guard_required'});
+    expect(blocked.managedRecovery, 'guard_required');
+    expect(blocked.ownsTunnel, isTrue);
+    expect(blocked.connected, isTrue); // Local UP is kept distinct from failed traffic checks.
+    final moving = TunnelDiagnostics.fromPlatform({..._status(), 'state': 'transitioning',
+      'managedRecovery': 'switching'});
+    expect(moving.managedRecovery, 'switching');
+    expect(moving.transitioning, isTrue);
+    for (final invalid in [null, 4, 'PRIVATE_ENDPOINT']) {
+      expect(TunnelDiagnostics.fromPlatform({..._status(), 'managedRecovery': invalid}).managedRecovery, 'idle');
+    }
+  });
   test('VLESS recovery preserves ownership without a local-UP or old measurement claim', () {
     for (final phase in ['waiting_network', 'reconnecting']) {
       final value = TunnelDiagnostics.fromPlatform({
