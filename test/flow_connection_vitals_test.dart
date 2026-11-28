@@ -73,7 +73,7 @@ void main() {
   });
 
   testWidgets('A fresh zero handshake reports waiting without inventing server failure', (tester) async {
-    await tester.pumpWidget(_screen(_lease('active', 0),
+    await tester.pumpWidget(_screen(_lease('active', 4102444800000),
       diagnostics: const TunnelDiagnostics(
         isKnown: true, connected: true,
         statistics: TunnelStatistics(status: TunnelStatisticsStatus.available,
@@ -90,7 +90,7 @@ void main() {
 
   for (final status in [HandshakeStatus.unknown, HandshakeStatus.observed]) {
     testWidgets('A $status handshake does not report that the server has not answered', (tester) async {
-      await tester.pumpWidget(_screen(_lease('active', 0),
+      await tester.pumpWidget(_screen(_lease('active', 4102444800000),
         diagnostics: TunnelDiagnostics(
           isKnown: true, connected: true,
           statistics: TunnelStatistics(status: TunnelStatisticsStatus.available,
@@ -107,7 +107,7 @@ void main() {
   }
 
   testWidgets('A stale zero handshake cannot describe the current connection', (tester) async {
-    await tester.pumpWidget(_screen(_lease('active', 0),
+    await tester.pumpWidget(_screen(_lease('active', 4102444800000),
       diagnostics: const TunnelDiagnostics(
         isKnown: true, connected: true,
         statistics: TunnelStatistics(status: TunnelStatisticsStatus.available,
