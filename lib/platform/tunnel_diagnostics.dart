@@ -103,6 +103,7 @@ class TunnelDiagnostics {
     this.recovery = TunnelRecovery.none,
     this.uptimeSeconds = 0,
     this.lastErrorCode,
+    this.managedRecovery = 'idle',
     this.statistics = const TunnelStatistics.unavailable(),
   }) : ownsTunnel = ownsTunnel ?? connected;
 
@@ -114,6 +115,7 @@ class TunnelDiagnostics {
         recovery = TunnelRecovery.none,
         uptimeSeconds = 0,
         lastErrorCode = null,
+        managedRecovery = 'idle',
         statistics = const TunnelStatistics.unavailable();
 
   /// Whether native state was read successfully; `connected` alone can be a
@@ -129,6 +131,8 @@ class TunnelDiagnostics {
   bool get recovering => recovery != TunnelRecovery.none;
   final int uptimeSeconds;
   final String? lastErrorCode;
+  /// Optional native recovery observation; never inferred from the local UP bit.
+  final String managedRecovery;
   final TunnelStatistics statistics;
 
   factory TunnelDiagnostics.fromPlatform(Object? value) {
@@ -137,6 +141,10 @@ class TunnelDiagnostics {
     final owned = value.containsKey('ownsTunnel') ? value['ownsTunnel'] : active;
     final state = value['state'];
     final error = _safeErrorCode(value['lastErrorCode']);
+    const managedStates = {'idle', 'checking', 'ready', 'waiting_network', 'switching',
+      'guard_required', 'exhausted', 'unavailable', 'authorization_required', 'subscription_expired'};
+    final managed = value['managedRecovery'] is String && managedStates.contains(value['managedRecovery'])
+        ? value['managedRecovery'] as String : 'idle';
     // Payloads from the original bridge do not include a protocol. An explicit
     // invalid value must never be presented as a WireGuard observation.
     final protocol = !value.containsKey('protocol')
@@ -181,6 +189,7 @@ class TunnelDiagnostics {
         ownsTunnel: owned,
         protocol: protocol,
         transitioning: true,
+        managedRecovery: managed,
         lastErrorCode: error,
       );
     }
@@ -206,6 +215,7 @@ class TunnelDiagnostics {
       protocol: protocol,
       uptimeSeconds: uptime,
       lastErrorCode: error,
+      managedRecovery: managed,
       statistics: TunnelStatistics.fromPlatform(value['statistics'],
           wireGuardHandshake: protocol == TunnelProtocol.wireguard),
     );

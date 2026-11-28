@@ -56,6 +56,14 @@ internal class BrowserRoutingContext(base:Context):ContextWrapper(base) {
 }
 
 class FlowBrowserVpnService:GoBackend.VpnService() {
+    companion object {
+        private val recoveryIdentity = ManagedServiceIdentity<FlowBrowserVpnService>()
+        internal fun beginTunnelBuild() = recoveryIdentity.beginBuild()
+        internal fun recoveryService(): FlowBrowserVpnService? = recoveryIdentity.current()
+        internal fun isRecoveryService(service: FlowBrowserVpnService): Boolean =
+            recoveryIdentity.matches(service) && !service.destroyed
+    }
+    @Volatile private var destroyed = false
     private var proxy:DirectBrowserProxy?=null
     override fun getBuilder():android.net.VpnService.Builder {
         val builder=super.getBuilder()
@@ -65,6 +73,7 @@ class FlowBrowserVpnService:GoBackend.VpnService() {
             proxy=DirectBrowserProxy(domains,::openSocket)
             builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1",proxy!!.port))
         }
+        if (!destroyed) recoveryIdentity.builtBy(this)
         return builder
     }
 
@@ -91,5 +100,9 @@ class FlowBrowserVpnService:GoBackend.VpnService() {
         }
         throw IOException("Site unavailable")
     }
-    override fun onDestroy(){proxy?.close();proxy=null;super.onDestroy()}
+    override fun onDestroy(){
+        destroyed = true
+        recoveryIdentity.destroyed(this)
+        proxy?.close();proxy=null;super.onDestroy()
+    }
 }

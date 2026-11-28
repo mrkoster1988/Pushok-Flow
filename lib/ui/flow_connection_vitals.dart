@@ -84,12 +84,28 @@ class FlowConnectionVitals extends StatelessWidget {
       diagnostics.statistics.status == TunnelStatisticsStatus.available &&
       diagnostics.statistics.handshakeStatus == HandshakeStatus.never;
 
+  String? get _managedNotice => !diagnosticsCurrent ? null : switch (diagnostics.managedRecovery) {
+    'waiting_network' => 'Ожидаем доступ к сети телефона.',
+    'switching' => 'Переключаем подключение на резервный сервер.',
+    'guard_required' => 'Проверка связи не прошла. Системная защита перехода не подтверждена, '
+      'поэтому автопереключение недоступно. Можно отключить подключение и выбрать резерв в «Серверы и подписки».',
+    'exhausted' => 'Проверка связи на доступных серверах не прошла. Туннель включён; повторите попытку позже.',
+    'unavailable' => 'Не удалось переключить сервер. Проверьте соединение и повторите попытку.',
+    'authorization_required' => 'Для переключения сервера нужно восстановить доступ к аккаунту.',
+    'subscription_expired' => 'Срок доступа истёк. Продлите подписку и обновите подключение.',
+    _ => null,
+  };
+
   String get _state => connecting
       ? (ownsTunnel ? 'Отключение туннеля' : 'Соединение устанавливается')
       : nativeBusy ? 'Состояние изменяется'
       : recovery == TunnelRecovery.waitingNetwork ? 'Ожидание сети'
       : recovery == TunnelRecovery.reconnecting ? 'Восстанавливается'
       : isAndroid && !diagnosticsCurrent ? 'Статус уточняется'
+      : diagnostics.managedRecovery == 'waiting_network' ? 'Ожидание сети'
+      : diagnostics.managedRecovery == 'switching' ? 'Переключаем сервер'
+      : const {'guard_required', 'exhausted', 'unavailable'}.contains(diagnostics.managedRecovery)
+          ? 'Связь не подтверждена'
       : _noHandshake ? 'Ожидание отклика' : confirmedConnected ? 'Туннель включён' : 'Статус: отключено';
 
   Widget _metric(String title, String value, IconData icon) => Expanded(
@@ -129,7 +145,8 @@ class FlowConnectionVitals extends StatelessWidget {
               ownsTunnel ? Icons.shield_outlined : Icons.circle,
           color: connecting || nativeBusy || recovering ? PushokPalette.glowCyan :
               !diagnosticsCurrent ? PushokPalette.muted :
-              _noHandshake ? PushokPalette.orange : ownsTunnel ? PushokPalette.mint : PushokPalette.orange,
+              _noHandshake || _managedNotice != null ? PushokPalette.orange :
+                  ownsTunnel ? PushokPalette.mint : PushokPalette.orange,
         )), if (renew != null) ...[
           const SizedBox(width: 10),
           Expanded(child: Semantics(button: true, child: InkWell(key: const Key('home_renew_subscription'),
@@ -151,6 +168,11 @@ class FlowConnectionVitals extends StatelessWidget {
         if (_noHandshake) ...[
           const SizedBox(height: 8),
           const Text('Туннель включён, но успешный обмен с сервером ещё не зафиксирован.', style: TextStyle(color: PushokPalette.orange, fontSize: 12)),
+        ],
+        if (_managedNotice != null) ...[
+          const SizedBox(height: 8),
+          Text(_managedNotice!, key: const Key('managed_recovery_notice'),
+            style: const TextStyle(color: PushokPalette.orange, fontSize: 12)),
         ],
         if (connectionError != null) ...[
           const SizedBox(height: 9),

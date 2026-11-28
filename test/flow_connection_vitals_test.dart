@@ -56,6 +56,16 @@ Widget _screen(SubscriptionStatus lease, {
     );
 
 void main() {
+  testWidgets('An unguarded failed tunnel is retained and automatic handover is explained', (tester) async {
+    await tester.pumpWidget(_screen(_lease('active', 4102444800000),
+      diagnostics: const TunnelDiagnostics(isKnown: true, connected: true,
+        managedRecovery: 'guard_required'), diagnosticsCurrent: true, confirmedConnected: true));
+    expect(find.text('Связь не подтверждена'), findsOneWidget);
+    expect(find.byKey(const Key('managed_recovery_notice')), findsOneWidget);
+    expect(find.textContaining('Системная защита'), findsOneWidget);
+    expect(find.text('Статус: отключено'), findsNothing);
+    expect(find.text('Подключено'), findsNothing);
+  });
   testWidgets('Revoked WireGuard access is not mislabelled expired', (tester) async {
     final expiry = (DateTime.now().millisecondsSinceEpoch ~/ 1000 + 86400) * 1000;
     await tester.pumpWidget(_screen(_lease('revoked', expiry)));

@@ -19,6 +19,13 @@ class WireGuardTunnel {
     return state?['connected'] == true;
   }
 
+  /// Native preflight refreshes the lease before loading keys or opening Android consent.
+  static Future<bool> connectManaged(String profileId) async {
+    final state = await _channel.invokeMapMethod<String, dynamic>(
+      'connectWireGuard', {'expectedProfileId': profileId});
+    return state?['connected'] == true;
+  }
+
   static Future<void> saveProfile(String config, {
     String? profileId,
     String? name,

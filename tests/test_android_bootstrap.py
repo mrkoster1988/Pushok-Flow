@@ -486,7 +486,7 @@ class BootstrapScriptTests(unittest.TestCase):
         self.native_names = (
             "MainActivity.kt", "TunnelInternet.kt", "DeviceTraffic.kt", "FlowTile.kt", "FlowWidget.kt", "FlowPush.kt", "WireGuardRouting.kt", "ConnectionProfile.kt", "VlessProfile.kt",
             "XrayConfig.kt", "XrayNetworkPolicy.kt", "XrayNetworkMonitor.kt", "XrayDnsWire.kt", "XrayDnsBridge.kt", "XrayTunnelStatus.kt", "XrayLifecycle.kt", "XrayTunnelClient.kt", "XrayVpnService.kt", "SecureWireGuardStore.kt",
-            "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "AppUpdates.kt", "UpdatePolicy.kt",
+            "LocalDecisionMemory.kt", "TunnelHealth.kt", "TunnelConnectionSession.kt", "ManagedConnectionPolicy.kt", "ManagedWireGuardRecovery.kt", "AppUpdates.kt", "UpdatePolicy.kt",
             "UpdateCoordinator.kt", "UpdateWorker.kt", "UpdateInstallReceiver.kt", "UpdateReplacedReceiver.kt",
             "UpdateAutomationPolicy.kt",
             "FlowAccount.kt", "FlowAccountPolicy.kt", "FlowAccountSessionManager.kt", "FlowAccountStore.kt", "FlowAccountClient.kt", "FlowShopBridgePolicy.kt", "FlowShopBridgeClient.kt", "TelegramProxyLink.kt", "DirectBrowserProxy.kt", "BrowserProxyPolicy.kt", "FlowBrowserVpnService.kt", "FlowShopBindingStore.kt",

@@ -127,6 +127,11 @@ class ProfileSubscriptions(
                             }
                         }
                     }
+                    "prepareConnection" -> {
+                        val id = (call.arguments as? Map<*, *>)?.get("profileId") as? String
+                        if (id == null || !ProfileCatalogStore.validId(id)) failure(result, "SUBSCRIPTION_NOT_FOUND")
+                        else request(result) { operationEpoch -> prepareConnection(id, operationEpoch) }
+                    }
                     "refreshSubscription" -> {
                         val id = (call.arguments as? Map<*, *>)?.get("id") as? String
                         if (id == null || !ProfileCatalogStore.validId(id)) failure(result, "SUBSCRIPTION_NOT_FOUND")
@@ -425,6 +430,21 @@ class ProfileSubscriptions(
     private fun readEnabled(): Boolean = try { settings.getBoolean("enabled", true) }
         catch (_: Exception) { false }
 
+    /** The normal Connect path and Android widget use the same native preflight. */
+    fun prepareForConnection(profileId: String, completed: (String?) -> Unit) {
+        request(object : MethodChannel.Result {
+            override fun success(result: Any?) = completed(null)
+            override fun error(code: String, message: String?, details: Any?) = completed(code)
+            override fun notImplemented() = completed("SUBSCRIPTION_UNAVAILABLE")
+        }) { operationEpoch -> prepareConnection(profileId, operationEpoch) }
+    }
+
+    /** A deliberate Stop invalidates late network results before another connection may start. */
+    fun cancelConnectionPreparation() {
+        synchronized(lifecycleLock) { epoch.incrementAndGet() }
+        downloader.cancel()
+    }
+
     private fun snapshot(): Map<String, Any?> {
         val metadata = store.subscriptions()
         val records = store.subscriptionRecords()
@@ -477,8 +497,50 @@ class ProfileSubscriptions(
         }
     }
 
+    private fun prepareConnection(profileId: String, operationEpoch: Long) {
+        fun selected(): Map<*, *> {
+            val metadata = store.metadata()
+            if (metadata["activeProfileId"] != profileId) throw ProfileCatalogFailure("PROFILE_CHANGED")
+            return (metadata["profiles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
+                ?.firstOrNull { it["id"] == profileId }
+                ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+        }
+        guardedWrite(operationEpoch) { selected() }
+        val subscriptionId = selected()["subscriptionId"] as? String ?: return
+        val record = store.subscriptionRecords().firstOrNull { it.id == subscriptionId }
+            ?: throw SubscriptionFailure("SUBSCRIPTION_NOT_FOUND")
+        if (record.format != SubscriptionFeed.MANAGED_WIREGUARD_FORMAT) return
+        val bound = shopBinding.binding()
+        if (bound != null && FlowShopBindingStore.fingerprint(record.url) == bound.urlHash) {
+            val lease = FlowAccountCoordinator.get(context).shopLease()
+                ?: throw FlowShopFailure("SHOP_LOGIN_REQUIRED")
+            if (!lease.accountId.equals(bound.accountId, ignoreCase = true)) {
+                throw FlowShopFailure("SHOP_ACCOUNT_CHANGED")
+            }
+        }
+        refresh(record, operationEpoch,
+            timeoutMs = ManagedConnectionPolicy.CONNECT_REFRESH_TIMEOUT_MS,
+            allowCachedNetworkFailure = true, beforeCommit = { selected() })
+        guardedWrite(operationEpoch) {
+            val current = store.subscriptionRecords().firstOrNull { it.id == subscriptionId }
+                ?: throw SubscriptionFailure("SUBSCRIPTION_NOT_FOUND")
+            if (current.state == "revoked") throw SubscriptionFailure("SUBSCRIPTION_REVOKED")
+            if (current.state != "active" || current.expiresAt == null ||
+                current.expiresAt <= System.currentTimeMillis()) throw SubscriptionFailure("SUBSCRIPTION_EXPIRED")
+            val metadata = store.metadata()
+            val selectedId = metadata["activeProfileId"] as? String
+                ?: throw SubscriptionFailure("SUBSCRIPTION_EMPTY")
+            val active = (metadata["profiles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
+                ?.firstOrNull { it["id"] == selectedId }
+                ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+            if (active["subscriptionId"] != subscriptionId) throw ProfileCatalogFailure("PROFILE_CHANGED")
+            store.load(selectedId) ?: throw ProfileCatalogFailure("PROFILE_NOT_FOUND")
+        }
+    }
+
     private fun refresh(record: StoredSubscription, operationEpoch: Long,
-        isolateProviderFailure: Boolean = false) {
+        isolateProviderFailure: Boolean = false, timeoutMs: Long = 40_000L,
+        allowCachedNetworkFailure: Boolean = false, beforeCommit: () -> Unit = {}) {
         // Reserve only after the authoritative tunnel-state check succeeds. An active Flow
         // connection does not consume the retry window or lose its selected configuration.
         guardedWrite(operationEpoch) { }
@@ -486,11 +548,12 @@ class ProfileSubscriptions(
             throw SubscriptionFailure("SUBSCRIPTION_STORE_FAILED")
         }
         val feed = try {
-            val response = downloader.fetch(record.url) { ensureActive(operationEpoch) }
+            val response = downloader.fetchWithin(record.url, timeoutMs) { ensureActive(operationEpoch) }
             try { SubscriptionFeed.parse(response.body, response.userInfo, response.title) }
                 finally { response.body.fill(0) }
         } catch (failure: SubscriptionFailure) {
             if (failure.code !in PROVIDER_ERRORS) throw failure
+            var cachedAllowed = false
             synchronized(lifecycleLock) {
                 // OFF, pause and disposal dominate a concurrent provider error. Never
                 // publish it as a completed attempt or proceed to another provider.
@@ -501,13 +564,20 @@ class ProfileSubscriptions(
                 if (current.url != record.url) throw SubscriptionFailure("SUBSCRIPTION_CHANGED")
                 pruneRefreshErrors(records)
                 refreshErrors[record.id] = RefreshError(record.url, failure.code)
+                cachedAllowed = allowCachedNetworkFailure &&
+                    ManagedConnectionPolicy.canUseCached(failure.code, current.state,
+                        current.expiresAt, System.currentTimeMillis())
             }
+            // Only the network/parse boundary may choose the old, unexpired lease.
+            // A similarly named storage exception below must still abort Connect.
+            if (cachedAllowed) return
             if (isolateProviderFailure) return
             throw failure
         }
         // Only the download/parse boundary above may be isolated. Catalog, capacity,
         // tunnel and settings errors remain fatal even if their public code overlaps.
         guardedWrite(operationEpoch) {
+            beforeCommit()
             store.refreshSubscription(record.id, record.url, feed, System.currentTimeMillis())
             refreshErrors.remove(record.id)
         }
@@ -569,7 +639,8 @@ class ProfileSubscriptions(
         is FlowShopFailure -> error.code
         is SubscriptionFailure -> error.code
         is ProfileCatalogFailure -> error.code.takeIf { it in setOf("PROFILE_NAME_INVALID",
-            "PROFILE_LIMIT_REACHED", "PROFILE_STORE_UNAVAILABLE", "PROFILE_MANAGED",
+            "PROFILE_LIMIT_REACHED", "PROFILE_STORE_UNAVAILABLE", "PROFILE_MANAGED", "PROFILE_CHANGED",
+            "PROFILE_NOT_FOUND", "SUBSCRIPTION_EXPIRED", "SUBSCRIPTION_REVOKED",
             "VPN_ACTIVE", "VPN_BUSY", "VPN_STATE_UNAVAILABLE") } ?: "SUBSCRIPTION_STORE_FAILED"
         else -> "SUBSCRIPTION_UNAVAILABLE"
     }

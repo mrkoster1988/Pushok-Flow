@@ -30,6 +30,9 @@ java -jar "$out/health-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/TunnelConnectionSession.kt \
   native/android/tests/TunnelConnectionSessionCheck.kt -include-runtime -d "$out/connection-session-tests.jar"
 java -jar "$out/connection-session-tests.jar"
+kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/ManagedConnectionPolicy.kt \
+  native/android/tests/ManagedConnectionPolicyCheck.kt -include-runtime -d "$out/managed-connection-tests.jar"
+java -jar "$out/managed-connection-tests.jar"
 kotlinc native/android/app/src/main/kotlin/shop/pushok/flow/UpdatePolicy.kt \
   native/android/tests/UpdatePolicyCheck.kt native/android/tests/UpdateReleaseNotesCheck.kt \
   -include-runtime -d "$out/update-tests.jar"
@@ -219,6 +222,7 @@ kotlinc "${subscription_core[@]}" \
   native/android/app/src/main/kotlin/shop/pushok/flow/BoundedNetworkCall.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/SubscriptionDownloader.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/ProfileSubscriptions.kt \
+  native/android/app/src/main/kotlin/shop/pushok/flow/ManagedConnectionPolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowShopBridgePolicy.kt \
   native/android/app/src/main/kotlin/shop/pushok/flow/FlowShopBindingStore.kt \
   native/android/tests/subscription_coordinator_stubs/*.kt \

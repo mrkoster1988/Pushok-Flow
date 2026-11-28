@@ -2,6 +2,7 @@ package shop.pushok.flow
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 private fun id(number: Int) = "00000000-0000-0000-0000-" + number.toString().padStart(12, '0')
@@ -223,6 +224,67 @@ fun main() {
     check(gate.get() && gate.acquire() == null)
     gate.release(mutation)
     check(!gate.get())
+
+    // Stop reserves the whole process before its IO task runs. A permission
+    // request owned by another Activity cannot prevent Stop or resume afterwards.
+    val stopGate = ProfileOperationGate()
+    val oldIntent = stopGate.captureIntent()!!
+    val oldPermission = stopGate.acquire()!!
+    val firstStop = stopGate.requestStop()
+    check(stopGate.get() && stopGate.stopPending())
+    check(stopGate.acquire() == null && stopGate.captureIntent() == null)
+    check(!stopGate.isCurrentIntent(oldIntent))
+    val stopLease = stopGate.acquireStop(firstStop)!!
+    check(stopLease.displacedOwner == oldPermission)
+    stopGate.release(oldPermission) // Late Activity cleanup cannot release the Stop owner.
+    check(stopGate.get() && stopGate.acquireStop(firstStop) == null)
+
+    // A second Stop must keep the reservation after the first one's cleanup.
+    val secondStop = stopGate.requestStop()
+    check(stopGate.acquireStop(secondStop) == null)
+    stopGate.release(stopLease.token)
+    stopGate.finishStop(firstStop)
+    check(stopGate.stopPending() && stopGate.acquire() == null)
+    val secondLease = stopGate.acquireStop(secondStop)!!
+    check(secondLease.displacedOwner == null)
+    stopGate.release(stopLease.token)
+    stopGate.finishStop(firstStop)
+    check(stopGate.get() && stopGate.captureIntent() == null)
+    stopGate.release(secondLease.token)
+    stopGate.finishStop(secondStop)
+    check(!stopGate.get() && !stopGate.stopPending())
+    check(stopGate.acquireStop(firstStop) == null && stopGate.acquireStop(secondStop) == null)
+    check(!stopGate.isCurrentIntent(oldIntent)) // Finishing Stop never revives a delayed preflight.
+    val newIntent = stopGate.captureIntent()!!
+    check(stopGate.isCurrentIntent(newIntent) && newIntent != oldIntent)
+
+    // Reproduce the original queue race: later main-thread profile work tried
+    // to own the gate while disconnect waited behind a native status operation.
+    val queuedGate = ProfileOperationGate()
+    val queue = Executors.newSingleThreadExecutor()
+    val entered = CountDownLatch(1)
+    val releaseQueue = CountDownLatch(1)
+    val queuedIntent = queuedGate.captureIntent()!!
+    val stopped = AtomicInteger()
+    try {
+        queue.execute { entered.countDown(); releaseQueue.await() }
+        check(entered.await(5, TimeUnit.SECONDS))
+        val queuedStop = queuedGate.requestStop()
+        val stoppedTask = queue.submit {
+            val lease = queuedGate.acquireStop(queuedStop)!!
+            try { stopped.incrementAndGet() }
+            finally { queuedGate.release(lease.token); queuedGate.finishStop(queuedStop) }
+        }
+        check(queuedGate.acquire() == null) // A later mutation cannot reserve ahead of queued Stop.
+        releaseQueue.countDown()
+        stoppedTask.get(5, TimeUnit.SECONDS)
+    } finally {
+        releaseQueue.countDown()
+        queue.shutdownNow()
+    }
+    check(stopped.get() == 1 && !queuedGate.get())
+    check(!queuedGate.isCurrentIntent(queuedIntent)) // Even after the Stop callback has completed.
+
     val pool = Executors.newFixedThreadPool(8)
     val start = CountDownLatch(1)
     val done = CountDownLatch(24)
