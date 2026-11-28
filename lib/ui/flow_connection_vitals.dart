@@ -90,7 +90,7 @@ class FlowConnectionVitals extends StatelessWidget {
       : recovery == TunnelRecovery.waitingNetwork ? 'Ожидание сети'
       : recovery == TunnelRecovery.reconnecting ? 'Восстанавливается'
       : isAndroid && !diagnosticsCurrent ? 'Статус уточняется'
-      : _noHandshake ? 'Нет отклика сервера' : confirmedConnected ? 'Туннель включён' : 'Статус: отключено';
+      : _noHandshake ? 'Ожидание отклика' : confirmedConnected ? 'Туннель включён' : 'Статус: отключено';
 
   Widget _metric(String title, String value, IconData icon) => Expanded(
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -150,7 +150,7 @@ class FlowConnectionVitals extends StatelessWidget {
         ]),
         if (_noHandshake) ...[
           const SizedBox(height: 8),
-          const Text('Туннель включён, но WireGuard ещё не получил ответ от сервера.', style: TextStyle(color: PushokPalette.orange, fontSize: 12)),
+          const Text('Туннель включён, но успешный обмен с сервером ещё не зафиксирован.', style: TextStyle(color: PushokPalette.orange, fontSize: 12)),
         ],
         if (connectionError != null) ...[
           const SizedBox(height: 9),

@@ -29,7 +29,11 @@ SubscriptionStatus _lease(String state, int expiresAt) =>
       'refreshErrors': <String, String>{},
     });
 
-Widget _screen(SubscriptionStatus lease) => MaterialApp(
+Widget _screen(SubscriptionStatus lease, {
+  TunnelDiagnostics diagnostics = const TunnelDiagnostics.unavailable(),
+  bool diagnosticsCurrent = false,
+  bool confirmedConnected = false,
+}) => MaterialApp(
       home: Scaffold(
         body: FlowConnectionVitals(
           selected: const WireGuardProfileSummary(
@@ -39,12 +43,12 @@ Widget _screen(SubscriptionStatus lease) => MaterialApp(
               subscriptionName: 'Моё подключение'),
           selectionCurrent: true,
           subscriptions: lease,
-          diagnostics: const TunnelDiagnostics.unavailable(),
-          diagnosticsCurrent: false,
-          confirmedConnected: false,
+          diagnostics: diagnostics,
+          diagnosticsCurrent: diagnosticsCurrent,
+          confirmedConnected: confirmedConnected,
           connecting: false,
           nativeBusy: false,
-          ownsTunnel: false,
+          ownsTunnel: diagnostics.ownsTunnel,
           recovery: TunnelRecovery.none,
           isAndroid: true,
         ),
@@ -66,5 +70,54 @@ void main() {
     await tester.pump();
     expect(find.textContaining('Истёк'), findsOneWidget);
     expect(find.text('Отозвана'), findsNothing);
+  });
+
+  testWidgets('A fresh zero handshake reports waiting without inventing server failure', (tester) async {
+    await tester.pumpWidget(_screen(_lease('active', 0),
+      diagnostics: const TunnelDiagnostics(
+        isKnown: true, connected: true,
+        statistics: TunnelStatistics(status: TunnelStatisticsStatus.available,
+          rxBytes: 0, txBytes: 1024, handshakeStatus: HandshakeStatus.never),
+      ),
+      diagnosticsCurrent: true,
+      confirmedConnected: true,
+    ));
+    expect(find.text('Ожидание отклика'), findsOneWidget);
+    expect(find.textContaining('успешный обмен с сервером ещё не зафиксирован'), findsOneWidget);
+    expect(find.text('Нет отклика сервера'), findsNothing);
+    expect(find.text('↓ 0 Б ↑ 1.0 КБ'), findsOneWidget);
+  });
+
+  for (final status in [HandshakeStatus.unknown, HandshakeStatus.observed]) {
+    testWidgets('A $status handshake does not report that the server has not answered', (tester) async {
+      await tester.pumpWidget(_screen(_lease('active', 0),
+        diagnostics: TunnelDiagnostics(
+          isKnown: true, connected: true,
+          statistics: TunnelStatistics(status: TunnelStatisticsStatus.available,
+            rxBytes: 1024, txBytes: 2048, handshakeStatus: status,
+            latestHandshakeAgeSeconds: status == HandshakeStatus.observed ? 86400 : null),
+        ),
+        diagnosticsCurrent: true,
+        confirmedConnected: true,
+      ));
+      expect(find.text('Туннель включён'), findsOneWidget);
+      expect(find.text('Ожидание отклика'), findsNothing);
+      expect(find.textContaining('успешный обмен с сервером ещё не зафиксирован'), findsNothing);
+    });
+  }
+
+  testWidgets('A stale zero handshake cannot describe the current connection', (tester) async {
+    await tester.pumpWidget(_screen(_lease('active', 0),
+      diagnostics: const TunnelDiagnostics(
+        isKnown: true, connected: true,
+        statistics: TunnelStatistics(status: TunnelStatisticsStatus.available,
+          rxBytes: 0, txBytes: 1024, handshakeStatus: HandshakeStatus.never),
+      ),
+      confirmedConnected: true,
+    ));
+    expect(find.text('Статус уточняется'), findsOneWidget);
+    expect(find.text('Ожидание отклика'), findsNothing);
+    expect(find.textContaining('успешный обмен с сервером ещё не зафиксирован'), findsNothing);
+    expect(find.text('↓ 0 Б ↑ 1.0 КБ'), findsNothing);
   });
 }
